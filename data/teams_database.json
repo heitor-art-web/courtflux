@@ -1,0 +1,225 @@
+{
+  "rosters": {
+    "Benfica": {
+      "kits": {
+        "home": ["Red", "White"],
+        "away": ["White", "Black"]
+      },
+      "roster": {
+        "0": { "name": "Geno Crandall", "position": "Guard" },
+        "2": { "name": "Koby McEwen", "position": "Guard" },
+        "3": { "name": "Justice Sueing", "position": "Forward" },
+        "6": { "name": "Diogo Gameiro", "position": "Guard" },
+        "8": { "name": "Jose Silva", "position": "Forward" },
+        "10": { "name": "Aaron Broussard", "position": "Guard" },
+        "11": { "name": "Aleksander Dziewa", "position": "Center" },
+        "12": { "name": "Eduardo Francisco", "position": "Forward" },
+        "13": { "name": "Makram Ben Romdhane", "position": "Forward" },
+        "23": { "name": "Toney Douglas", "position": "Guard" },
+        "28": { "name": "Daniel Relvao", "position": "Center" },
+        "88": { "name": "Betinho Gomes", "position": "Forward" }
+      }
+    },
+    "FC Porto": {
+      "kits": {
+        "home": ["Blue", "White", "Red"],
+        "away": ["Black", "Red"]
+      },
+      "roster": {
+        "2": { "name": "Tanner Omlid", "position": "Forward" },
+        "3": { "name": "Miguel Cardoso", "position": "Guard" },
+        "4": { "name": "Miguel Queiroz", "position": "Forward" },
+        "7": { "name": "Charlon Kloof", "position": "Guard" },
+        "10": { "name": "Vladyslav Voytso", "position": "Forward" },
+        "14": { "name": "Goncalo Delgado", "position": "Center" },
+        "15": { "name": "Joao Guerreiro", "position": "Forward" },
+        "?_1": { "name": "Wes Washpun", "position": "Guard" },
+        "?_2": { "name": "Jhonathan Dunn", "position": "Guard" },
+        "?_3": { "name": "Corey Allen-Williams", "position": "Guard" },
+        "?_4": { "name": "Cornelius Hudson", "position": "Forward" },
+        "?_5": { "name": "Robert Beran", "position": "Forward" }
+      }
+    },
+    "Sporting": {
+      "kits": {
+        "home": ["Green", "White"],
+        "away": ["Black", "Green"]
+      },
+      "roster": {
+        "3": { "name": "Diogo Ventura", "position": "Guard" },
+        "6": { "name": "Andre Cruz", "position": "Forward" },
+        "7": { "name": "Malik Morgan", "position": "Guard" },
+        "10": { "name": "Francisco Amarante", "position": "Guard" },
+        "15": { "name": "Eddie Ekiyor", "position": "Center" },
+        "17": { "name": "Diogo Araujo", "position": "Forward" },
+        "?_1": { "name": "Dinis Cherepenko", "position": "Guard" },
+        "?_2": { "name": "Uwais Razaque", "position": "Forward" },
+        "?_3": { "name": "Stephan Swenson", "position": "Guard" },
+        "?_4": { "name": "Brandon Johns Jr.", "position": "Forward" },
+        "?_5": { "name": "Maleeck Harden-Hayes", "position": "Forward" }
+      }
+    },
+    "Oliveirense": {
+      "kits": {
+        "home": ["Red", "Navy"],
+        "away": ["White", "Navy"]
+      },
+      "roster": {
+        "1": { "name": "Jose Barbosa", "position": "Guard" },
+        "5": { "name": "Arnaldo Toro", "position": "Center" },
+        "7": { "name": "Travis Munnings", "position": "Forward" },
+        "?_1": { "name": "Earl Timberlake", "position": "Guard" },
+        "?_2": { "name": "Jimmy Boeheim", "position": "Forward" },
+        "?_3": { "name": "Joao Torriao", "position": "Guard" },
+        "?_4": { "name": "Lucas Rondina", "position": "Guard" },
+        "?_5": { "name": "Trevor Jasinsky", "position": "Forward" },
+        "?_6": { "name": "Joao Gallina", "position": "Guard" },
+        "?_7": { "name": "Franchisco Lara", "position": "Guard" }
+      }
+    },
+    "Ovarense": {
+      "kits": {
+        "home": ["White", "Red"],
+        "away": ["Black", "White"]
+      },
+      "roster": {
+        "4": { "name": "Rodrigo Soeiro", "position": "Guard" },
+        "7": { "name": "Gustavo Teixeira", "position": "Guard" },
+        "10": { "name": "Jalen Jenkins", "position": "Forward" },
+        "?_1": { "name": "Nuno Morais", "position": "Guard" },
+        "?_2": { "name": "Antonio Woods", "position": "Guard" },
+        "?_3": { "name": "Xavier Bishop", "position": "Guard" },
+        "?_4": { "name": "Nuno Delany", "position": "Forward" },
+        "?_5": { "name": "Jose Cardoso", "position": "Guard" },
+        "?_6": { "name": "Ruben Sa", "position": "Center" },
+        "?_7": { "name": "Marcuslon Jackson", "position": "Guard" }
+      }
+    },
+    "Imortal": {
+      "kits": {
+        "home": ["Red", "Black"],
+        "away": ["White", "Black"]
+      },
+      "roster": {
+        "?_1": { "name": "Catario Flatts", "position": "Guard" },
+        "?_2": { "name": "Tavrion Dawson", "position": "Forward" },
+        "?_3": { "name": "Bernardo Paaso", "position": "Guard" },
+        "?_4": { "name": "Tyron Criswell", "position": "Guard" },
+        "?_5": { "name": "Salvador Victo", "position": "Guard" },
+        "?_6": { "name": "Miguel Bastos", "position": "Guard" },
+        "?_7": { "name": "Tomas Cavaleiro", "position": "Guard" },
+        "?_8": { "name": "Vladyslav Solovey", "position": "Forward" },
+        "?_9": { "name": "Diogo Gameiro Imortal", "position": "Guard" },
+        "?_10": { "name": "Luis Silva", "position": "Forward" }
+      }
+    },
+    "Esgueira": {
+      "kits": {
+        "home": ["Blue", "White"],
+        "away": ["Black", "Blue"]
+      },
+      "roster": {
+        "?_1": { "name": "Hugo Ferreira", "position": "Guard" },
+        "?_2": { "name": "Tra Holder", "position": "Guard" },
+        "?_3": { "name": "Marquise Moore", "position": "Guard" },
+        "?_4": { "name": "Ashanti Cook", "position": "Guard" },
+        "?_5": { "name": "Miguel Monteiro", "position": "Forward" },
+        "?_6": { "name": "Pedro Catarino", "position": "Guard" },
+        "?_7": { "name": "Joao Pedro Silva", "position": "Guard" },
+        "?_8": { "name": "Vladimer Korsanov", "position": "Forward" },
+        "?_9": { "name": "Bernardo Ferreira", "position": "Guard" },
+        "?_10": { "name": "Goncalo Ramos", "position": "Forward" }
+      }
+    },
+    "SC Braga": {
+      "kits": {
+        "home": ["Red", "White"],
+        "away": ["Black", "Red"]
+      },
+      "roster": {
+        "?_1": { "name": "Ivan Tkachenko", "position": "Forward" },
+        "?_2": { "name": "Mickaël Evora", "position": "Forward" },
+        "?_3": { "name": "Nuno Oliveira", "position": "Guard" },
+        "?_4": { "name": "Jaime Andre", "position": "Guard" },
+        "?_5": { "name": "Tim Guers", "position": "Guard" },
+        "?_6": { "name": "Shawn Tanner", "position": "Forward" },
+        "?_7": { "name": "Joao Balseiro", "position": "Guard" },
+        "?_8": { "name": "Diogo Ribeiro", "position": "Guard" },
+        "?_9": { "name": "Francisco Oliveira", "position": "Guard" },
+        "?_10": { "name": "Paulo Cunha", "position": "Center" },
+        "?_11": { "name": "Jose Alberto Soares", "position": "Forward" }
+      }
+    },
+    "Vitoria SC": {
+      "kits": {
+        "home": ["White", "Black"],
+        "away": ["Black", "White"]
+      },
+      "roster": {
+        "?_1": { "name": "Kenari Holland", "position": "Guard" },
+        "?_2": { "name": "Jaime Silva", "position": "Guard" },
+        "?_3": { "name": "Terry Nolan Jr.", "position": "Guard" },
+        "?_4": { "name": "Noah Baumann", "position": "Guard" },
+        "?_5": { "name": "Manuel Vaz", "position": "Forward" },
+        "?_6": { "name": "Pedro Romao", "position": "Forward" },
+        "?_7": { "name": "Marquise Eaddy", "position": "Guard" },
+        "?_8": { "name": "Joao Ribeiro", "position": "Guard" },
+        "?_9": { "name": "Goncalo Santos", "position": "Forward" },
+        "?_10": { "name": "Pedro Pinto", "position": "Guard" }
+      }
+    },
+    "Queluz": {
+      "kits": {
+        "home": ["Red", "Blue"],
+        "away": ["White", "Red"]
+      },
+      "roster": {
+        "?_1": { "name": "Massine Fall", "position": "Center" },
+        "?_2": { "name": "Sasa Borovnjak", "position": "Center" },
+        "?_3": { "name": "Malcolm Dandridge", "position": "Center" },
+        "?_4": { "name": "Kevion Taylor", "position": "Forward" },
+        "?_5": { "name": "Rafael Lisboa", "position": "Guard" },
+        "?_6": { "name": "Diogo Correia", "position": "Guard" },
+        "?_7": { "name": "Goncalo Silva", "position": "Forward" },
+        "?_8": { "name": "Martim Pereira", "position": "Guard" },
+        "?_9": { "name": "Andre Silva", "position": "Guard" },
+        "?_10": { "name": "Diogo Peixoto", "position": "Guard" }
+      }
+    },
+    "Vasco da Gama": {
+      "kits": {
+        "home": ["Green", "Black"],
+        "away": ["White", "Green"]
+      },
+      "roster": {
+        "?_1": { "name": "Andre Caldas", "position": "Guard" },
+        "?_2": { "name": "Jose Macalhau", "position": "Guard" },
+        "?_3": { "name": "Joao Costa", "position": "Center" },
+        "?_4": { "name": "Miguel Miranda", "position": "Forward" },
+        "?_5": { "name": "Nuno Sa", "position": "Forward" },
+        "?_6": { "name": "Carlos Cardoso", "position": "Guard" },
+        "?_7": { "name": "Francisco Moreira", "position": "Guard" },
+        "?_8": { "name": "Bernardo Alentejano", "position": "Forward" },
+        "?_9": { "name": "Rodrigo Neves", "position": "Guard" },
+        "?_10": { "name": "Goncalo Morais", "position": "Guard" }
+      }
+    },
+    "Galitos Barreiro": {
+      "kits": {
+        "home": ["Red", "White"],
+        "away": ["Blue", "White"]
+      },
+      "roster": {
+        "?_1": { "name": "Tomas Barroso Galitos", "position": "Guard" },
+        "?_2": { "name": "Diogo Carreira", "position": "Guard" },
+        "?_3": { "name": "Joao Fernandes", "position": "Forward" },
+        "?_4": { "name": "Vasco Encarnacao", "position": "Guard" },
+        "?_5": { "name": "Catarino Sousa", "position": "Guard" },
+        "?_6": { "name": "Simao Matos", "position": "Guard" },
+        "?_7": { "name": "Martim Carvalheiro", "position": "Forward" },
+        "?_8": { "name": "Bernardo Gomes", "position": "Forward" },
+        "?_9": { "name": "Andre Quartin", "position": "Guard" }
+      }
+    }
+  }
+}

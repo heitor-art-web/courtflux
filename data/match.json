@@ -1,0 +1,41 @@
+{
+    "FC Porto": {
+      "kits": {
+        "home": ["Blue", "White", "Red"],
+        "away": ["Black", "Red"]
+      },
+      "roster": {
+        "2": { "name": "Tanner Omlid", "position": "Forward" },
+        "3": { "name": "Miguel Cardoso", "position": "Guard" },
+        "4": { "name": "Miguel Queiroz", "position": "Forward" },
+        "7": { "name": "Charlon Kloof", "position": "Guard" },
+        "10": { "name": "Vladyslav Voytso", "position": "Forward" },
+        "14": { "name": "Goncalo Delgado", "position": "Center" },
+        "15": { "name": "Joao Guerreiro", "position": "Forward" },
+        "?_1": { "name": "Wes Washpun", "position": "Guard" },
+        "?_2": { "name": "Jhonathan Dunn", "position": "Guard" },
+        "?_3": { "name": "Corey Allen-Williams", "position": "Guard" },
+        "?_4": { "name": "Cornelius Hudson", "position": "Forward" },
+        "?_5": { "name": "Robert Beran", "position": "Forward" }
+      }
+    },
+    "Ovarense": {
+      "kits": {
+        "home": ["White", "Red"],
+        "away": ["Black", "White"]
+      },
+      "roster": {
+        "4": { "name": "Rodrigo Soeiro", "position": "Guard" },
+        "7": { "name": "Gustavo Teixeira", "position": "Guard" },
+        "10": { "name": "Jalen Jenkins", "position": "Forward" },
+        "?_1": { "name": "Nuno Morais", "position": "Guard" },
+        "?_2": { "name": "Antonio Woods", "position": "Guard" },
+        "?_3": { "name": "Xavier Bishop", "position": "Guard" },
+        "?_4": { "name": "Nuno Delany", "position": "Forward" },
+        "?_5": { "name": "Jose Cardoso", "position": "Guard" },
+        "?_6": { "name": "Ruben Sa", "position": "Center" },
+        "?_7": { "name": "Marcuslon Jackson", "position": "Guard" }
+      }
+    }
+
+  }
