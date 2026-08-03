@@ -10,7 +10,7 @@ class Settings:
     # -----------------------------
     # YOLO & Hardware Optimization
     # -----------------------------
-    yolo_model: str = "weights/yolo26n.pt"  # Switch to "yolo26n.pt" (Nano) if you need a major FPS boost
+    model: str = "weights/Model_v0.1.pt"  #Switch to the most up to date model
     tracker: str = "botsort.yaml"
     confidence: float = 0.15
     device: str = "mps"             # Use "mps" for Apple Silicon (or "cuda" for NVIDIA GPUs)

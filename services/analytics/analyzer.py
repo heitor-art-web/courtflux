@@ -123,13 +123,13 @@ def main():
       gpu=False,
   )
 
-  visual = VisualAnalyzer(reader,profiling_path="data/match.json")
+  visual = VisualAnalyzer(reader,profiling_path="data/match_config.json")
 
   # --------------------------------------------------
   # YOLO
   # --------------------------------------------------
 
-  model = YOLO(settings.yolo_model)
+  model = YOLO(settings.model)
 
   # --------------------------------------------------
   # Pipeline
@@ -142,7 +142,11 @@ def main():
           max_grace_frames=15,       # Frames to hold state through brief occlusions/cuts
           processing_scale=0.5     # Runs math on 1/2th resolution for peak performance
       ),
-      detector=Detector(model, visual),
+      detector = Detector(
+        model=model,
+        visual_analyzer=visual,
+        profiling_path="data/match_config.json"  # <-- ADD THIS (update with your actual JSON filename)
+      ),
       camera_tracker=camera_tracker,
       engine=Engine(),
       database=db_service,
@@ -185,8 +189,6 @@ def main():
         if frame_state.annotated_frame is not None
         else frame_state.frame
     )
-    
-    
 
     cv2.imshow("Basketball AI", frame)
 
@@ -200,7 +202,8 @@ def main():
   # --------------------------------------------------
   # Shutdown
   # --------------------------------------------------
-
+  pipeline.engine.metrics.export()
+  
   conn.commit()
   conn.close()
 

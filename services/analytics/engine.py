@@ -2,6 +2,7 @@ import numpy as np
 import supervision as sv
 from collections import deque
 from typing import Dict, Any, Optional
+from services.analytics.metrics import AnalysisMetrics
 
 class Engine:
     def __init__(self, fps: int = 30, history_window_sec: float = 0.5, rim_pixel_coords=None):
@@ -19,9 +20,11 @@ class Engine:
         self.ball_lost_frames = 0
         self.current_possession_team = None
         self.last_shot_frame = -100
+        self.metrics = AnalysisMetrics()
 
     def process(self, frame_state: Any) -> Any:
         current_frame_id = getattr(frame_state, "frame_id", 0)
+        self.metrics.total_frames += 1
         H = getattr(frame_state, "homography_matrix", None)
 
         # 1. Extract and interpolate ball state from frame_state.ball
@@ -49,6 +52,11 @@ class Engine:
                 f" Possession team: {self.current_possession_team}"
             )
 
+        self.metrics.log_detection(
+            players=len(frame_state.players),
+            ball_detected=frame_state.ball is not None,
+        )
+        
         jump_events_count = 0
         players_list = []
 
@@ -96,6 +104,10 @@ class Engine:
                 "feet": foot_point,
                 "label": label  # Renderer can read this directly
             }
+            
+            if "ocr_success" in p:
+                self.metrics.log_ocr(p["ocr_success"])
+            
             players_list.append(p_dict)
 
         # 3. Check for Rim Shots & Turnovers
@@ -120,16 +132,18 @@ class Engine:
             if "SHOT_ATTEMPT" not in frame_state.events:
                 frame_state.events.append("SHOT_ATTEMPT")
             frame_state.is_snapshot_moment = True
+            self.metrics.log_shot();
             print(f"\n🎯 [EVENTO] Lançamento detetado no frame {current_frame_id}!")
 
         if turnover_triggered:
             frame_state.events.append("TURNOVER")
             frame_state.is_snapshot_moment = True
+            self.metrics.log_turnover();
             print(f"\n🔄 [EVENTO] Turnover detetado no frame {current_frame_id}!")
 
         # Only assign attributes that officially exist in FrameState schema
         frame_state.players = players_list
-
+        
         return frame_state
 
     def _extract_ball_center(self, frame_state) -> Optional[np.ndarray]:

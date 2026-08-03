@@ -49,24 +49,25 @@ class TemporalJerseyClassifier(nn.Module):
 
 
 class VisualAnalyzer:
-    """Handles pixel-level feature extraction (temporal jersey recognition, color classification) 
-    and resolves player metadata using match profiling data.
+    """Handles pixel-level feature extraction (temporal jersey recognition, HSV team color 
+    classification, backboard/rim detection) and resolves player metadata using match profiling data.
     """
 
     def __init__(self, reader=None, roster_path: str = None, profiling_path: str = None):
         self.reader = reader
         
-        # macOS device selection (MPS for Apple Silicon, fallback to CPU)
+        # Device selection (MPS for Apple Silicon, CUDA, or CPU)
         if torch.backends.mps.is_available():
             self.device = torch.device("mps")
-            print("🚀 Using Apple Silicon GPU (MPS)")
+            print("🚀 VisualAnalyzer: Using Apple Silicon GPU (MPS)")
+        elif torch.cuda.is_available():
+            self.device = torch.device("cuda")
+            print("🚀 VisualAnalyzer: Using NVIDIA CUDA GPU")
         else:
             self.device = torch.device("cpu")
-            print("💻 Using CPU")
+            print("💻 VisualAnalyzer: Using CPU")
 
         self.number_model = None
-        
-        # Buffer to keep track of historical crop sequences per player track ID for temporal smoothing
         self.track_crop_buffers: Dict[int, List[np.ndarray]] = {}
 
         # Preprocessing required by EfficientNet-B0
@@ -76,25 +77,17 @@ class VisualAnalyzer:
             transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])
         ])
 
-        # Load optional individual roster path if provided
-        if roster_path and os.path.exists(roster_path):
-            try:
-                with open(roster_path, 'r', encoding='utf-8') as f:
-                    pass
-            except Exception as e:
-                print(f"⚠️ Warning: Could not load roster path {roster_path}: {e}")
-
         # Initialize team rosters dictionary from profiling JSON
         self.rosters = self._load_profiling_data(profiling_path) if profiling_path else {}
 
-        # Load the local temporal model weights from weights/jersey_number_recon
+        # Load the local temporal model weights
         model_path = "weights/jersey_number_recon/best_temporal.pt"
         if not os.path.exists(model_path):
             model_path = "weights/jersey_number_recon.pt"
 
         try:
             if os.path.exists(model_path):
-                print(f"📦 Loading temporal jersey model from local path: {model_path}")
+                print(f"📦 Loading temporal jersey model from: {model_path}")
                 self.number_model = TemporalJerseyClassifier().to(self.device)
                 checkpoint = torch.load(model_path, map_location=self.device)
                 
@@ -106,9 +99,9 @@ class VisualAnalyzer:
                     self.number_model = checkpoint.to(self.device)
                     
                 self.number_model.eval()
-                print("✅ Successfully loaded local temporal jersey model!")
+                print("✅ Successfully loaded temporal jersey model!")
             else:
-                print("⚠️ Warning: Model weights not found at 'weights/jersey_number_recon/'")
+                print("⚠️ Warning: Model weights not found at local path.")
         except Exception as e:
             print(f"⚠️ Could not load temporal jersey model: {e}")
             self.number_model = None
@@ -124,6 +117,9 @@ class VisualAnalyzer:
                 print(f"⚠️ Warning: Could not parse {path}: {e}")
         return {}
 
+    # ------------------------------------------------------------------
+    # 1. TEAM COLOR CLASSIFICATION
+    # ------------------------------------------------------------------
     def get_team_color(self, crop: np.ndarray) -> Optional[str]:
         """Classifies the team by comparing the chest crop against active match rosters."""
         if crop is None or crop.size == 0 or not self.rosters:
@@ -133,7 +129,7 @@ class VisualAnalyzer:
         if h < 10 or w < 10:
             return None
 
-        # Tighter upper-chest crop (avoids shorts, legs, skin, and floor reflections)
+        # Torso crop
         y1, y2 = int(h * 0.12), int(h * 0.50)
         x1, x2 = int(w * 0.20), int(w * 0.80)
         chest_crop = crop[y1:y2, x1:x2]
@@ -145,16 +141,11 @@ class VisualAnalyzer:
         if total_pixels == 0:
             return None
 
-        # HSV Mask definitions tuned specifically for indoor arena lighting
         color_masks = {
-            # Low brightness + low saturation = true black/dark kit
             "Black": (hsv[:, :, 2] < 75) & (hsv[:, :, 1] < 90),
-            # Low saturation + mid-range brightness = neutral grey (Referees)
             "Grey": (hsv[:, :, 1] < 45) & (hsv[:, :, 2] >= 75) & (hsv[:, :, 2] <= 165),
             "Gray": (hsv[:, :, 1] < 45) & (hsv[:, :, 2] >= 75) & (hsv[:, :, 2] <= 165),
-            # Low saturation + high brightness = white
             "White": (hsv[:, :, 1] < 45) & (hsv[:, :, 2] > 165),
-            # FC Porto Blue (requires minimum saturation and brightness so shadows don't flip it to black)
             "Blue": (hsv[:, :, 0] >= 95) & (hsv[:, :, 0] <= 135) & (hsv[:, :, 1] > 50) & (hsv[:, :, 2] >= 50),
             "Navy": (hsv[:, :, 0] >= 95) & (hsv[:, :, 0] <= 135) & (hsv[:, :, 1] > 40) & (hsv[:, :, 2] >= 35) & (hsv[:, :, 2] < 100),
             "Red": ((hsv[:, :, 0] <= 10) | (hsv[:, :, 0] >= 160)) & (hsv[:, :, 1] > 60),
@@ -193,6 +184,9 @@ class VisualAnalyzer:
 
         return None
 
+    # ------------------------------------------------------------------
+    # 2. JERSEY NUMBER RECOGNITION
+    # ------------------------------------------------------------------
     def get_shirt_number(self, crop: np.ndarray, track_id: int = 0, team_name: Optional[str] = None) -> str:
         """Extracts jersey numbers using the temporal sequence model."""
         if self.number_model is None or crop is None or crop.size == 0:
@@ -202,11 +196,9 @@ class VisualAnalyzer:
         if h < 40 or w < 40:
             return ""
 
-        # Auto-classify team color if team_name was not explicitly passed
         if not team_name:
             team_name = self.get_team_color(crop)
 
-        # Isolate upper torso area containing the jersey number
         ymin, ymax = int(h * 0.15), int(h * 0.65)
         xmin, xmax = int(w * 0.10), int(w * 0.90)
         torso_crop = crop[ymin:ymax, xmin:xmax]
@@ -214,13 +206,11 @@ class VisualAnalyzer:
         if torso_crop.size == 0:
             return ""
 
-        # Prevent memory leaks by capping the tracking buffer size
+        # Buffer capping
         if len(self.track_crop_buffers) > 200:
-            # Retain only the 50 most recent track IDs
             recent_keys = list(self.track_crop_buffers.keys())[-50:]
             self.track_crop_buffers = {k: self.track_crop_buffers[k] for k in recent_keys}
 
-        # Buffer tracking frames per track_id
         if track_id not in self.track_crop_buffers:
             self.track_crop_buffers[track_id] = []
 
@@ -228,12 +218,10 @@ class VisualAnalyzer:
         if len(self.track_crop_buffers[track_id]) > 8:
             self.track_crop_buffers[track_id].pop(0)
 
-        # Pad buffer to 8 frames so inference works immediately on frame 1
         buffered_crops = list(self.track_crop_buffers[track_id])
         while len(buffered_crops) < 8:
             buffered_crops.append(torso_crop)
 
-        # Prepare 8-frame sequence tensor stack
         tensor_list = []
         for c in buffered_crops[:8]:
             rgb = cv2.cvtColor(c, cv2.COLOR_BGR2RGB)
@@ -249,7 +237,7 @@ class VisualAnalyzer:
 
         raw_number = f"{tens_pred}{units_pred}"
 
-        # Strictly validate against JSON match roster if team name is identified
+        # Validate against roster JSON if available
         if team_name and team_name in self.rosters:
             team_data = self.rosters.get(team_name, {})
             raw_roster = team_data.get("roster", {})
@@ -263,7 +251,100 @@ class VisualAnalyzer:
                 return ""
 
         return raw_number
-    
+
+    # ------------------------------------------------------------------
+    # 3. BACKBOARD DETECTION & RIM ESTIMATION
+    # ------------------------------------------------------------------
+    def detect_backboard(
+        self,
+        frame: np.ndarray,
+        roi: Optional[tuple] = None
+    ) -> Optional[Dict[str, Any]]:
+        """Detects the basketball backboard using classical CV inside an optional ROI."""
+        if frame is None or frame.size == 0:
+            return None
+
+        # Restrict search region if ROI provided (x, y, w, h)
+        if roi is not None:
+            x0, y0, w0, h0 = roi
+            h_f, w_f = frame.shape[:2]
+            x0, y0 = max(0, x0), max(0, y0)
+            w0, h0 = min(w_f - x0, w0), min(h_f - y0, h0)
+            if w0 <= 0 or h0 <= 0:
+                image = frame
+                x0 = y0 = 0
+            else:
+                image = frame[y0:y0 + h0, x0:x0 + w0]
+        else:
+            image = frame
+            x0 = y0 = 0
+
+        gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
+        clahe = cv2.createCLAHE(clipLimit=2.0, tileGridSize=(8, 8))
+        gray = clahe.apply(gray)
+        gray = cv2.GaussianBlur(gray, (5, 5), 0)
+
+        _, binary = cv2.threshold(gray, 180, 255, cv2.THRESH_BINARY)
+        kernel = np.ones((3, 3), np.uint8)
+        binary = cv2.morphologyEx(binary, cv2.MORPH_CLOSE, kernel, iterations=2)
+
+        contours, _ = cv2.findContours(binary, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+        best = None
+        best_score = -1.0
+
+        for contour in contours:
+            area = cv2.contourArea(contour)
+            if area < 300:
+                continue
+
+            x, y, w, h = cv2.boundingRect(contour)
+            if h == 0:
+                continue
+
+            aspect = w / float(h)
+            if aspect < 1.2 or aspect > 2.8:
+                continue
+
+            rect_area = w * h
+            fill_ratio = area / float(rect_area)
+            if fill_ratio < 0.60:
+                continue
+
+            score = area * fill_ratio
+            if score > best_score:
+                best_score = score
+                best = {
+                    "bbox": (x + x0, y + y0, w, h),
+                    "center": (x + x0 + w // 2, y + y0 + h // 2),
+                    "area": area,
+                }
+
+        return best
+
+    def estimate_rims(self, backboards: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+        """Estimates 2D rim location relative to detected backboard(s)."""
+        rims = []
+        for bb in backboards:
+            if not bb or "bbox" not in bb:
+                continue
+            bx, by, bw, bh = bb["bbox"]
+            rim_center_x = int(bx + bw / 2.0)
+            rim_center_y = int(by + bh * 0.88)
+            rim_radius = int(bw * 0.18)
+
+            rims.append({
+                "center": (rim_center_x, rim_center_y),
+                "radius": rim_radius,
+                "bbox": [
+                    rim_center_x - rim_radius,
+                    rim_center_y - rim_radius,
+                    rim_center_x + rim_radius,
+                    rim_center_y + rim_radius
+                ]
+            })
+
+        return rims
+
     def resolve_player(self, team_name: str, shirt_num: str) -> Dict[str, str]:
         """Looks up player metadata from the profiling dictionary."""
         if team_name in self.rosters and shirt_num in self.rosters[team_name].get("roster", {}):
