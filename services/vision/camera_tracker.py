@@ -267,9 +267,75 @@ class CameraTracker:
         x_m, y_m = coords
         return (-margin_meters <= x_m <= 28.0 + margin_meters) and (-margin_meters <= y_m <= 15.0 + margin_meters)
 
+    def get_backboard_roi_from_homography(
+        self, 
+        current_H: np.ndarray, 
+        roi_width_ratio: float = 0.12, 
+        roi_height_ratio: float = 0.22
+    ) -> Optional[Tuple[int, int, int, int]]:
+        """Projects FIBA hoop locations into image pixel space using Inverse Homography.
+        
+        Returns (x, y, w, h) ROI bounding box for the visible hoop, or None if H is invalid.
+        """
+        if current_H is None or np.array_equal(current_H, np.eye(3)):
+            return None
+
+        try:
+            # 1. Compute Image-to-World Inverse Homography (World -> Pixel)
+            H_inv = np.linalg.inv(current_H)
+
+            # 2. FIBA Hoop standard court coordinates (in meters)
+            # Left Rim: (1.575m, 7.5m), Right Rim: (26.425m, 7.5m)
+            hoops_world = [
+                np.array([1.575, 7.5, 1.0], dtype=np.float32),   # Left Hoop
+                np.array([26.425, 7.5, 1.0], dtype=np.float32)   # Right Hoop
+            ]
+
+            visible_hoop_px = None
+
+            # Project both hoops to screen coordinates
+            for hoop_m in hoops_world:
+                px_homo = np.dot(H_inv, hoop_m.reshape(3, 1))
+                if px_homo[2][0] == 0:
+                    continue
+
+                u = px_homo[0][0] / px_homo[2][0]
+                v = px_homo[1][0] / px_homo[2][0]
+
+                # Check if projected hoop point lands inside the frame
+                if 0 <= u <= self.frame_w and 0 <= v <= self.frame_h:
+                    visible_hoop_px = (u, v)
+                    break  # Focus on the primary visible hoop in frame
+
+            if visible_hoop_px is None:
+                return None
+
+            u_c, v_c = visible_hoop_px
+
+            # 3. Construct ROI around projected hoop base
+            # Backboards extend UPWARD above the rim baseline by ~1.0m to 1.5m
+            roi_w = int(self.frame_w * roi_width_ratio)
+            roi_h = int(self.frame_h * roi_height_ratio)
+
+            # Shift Y center slightly upward since the backboard sits above the rim line
+            x0 = max(0, int(u_c - (roi_w / 2.0)))
+            y0 = max(0, int(v_c - (roi_h * 0.75))) # 75% height above rim base
+            w0 = min(self.frame_w - x0, roi_w)
+            h0 = min(self.frame_h - y0, roi_h)
+
+            return (x0, y0, w0, h0)
+
+        except Exception as e:
+            # Homography singular matrix or non-invertible
+            return None
+    
     def process(self, frame_state) -> Any:
         """Updates dynamic homography and court polygon in frame_state."""
         current_H, current_polygon = self.update(frame_state.frame)
         frame_state.homography_matrix = current_H
         frame_state.camera_polygon = current_polygon
+        
+        # Calculate dynamic backboard ROI driven by court keypoints
+        frame_state.backboard_roi = self.get_backboard_roi_from_homography(current_H)
+        
         return frame_state

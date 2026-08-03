@@ -1,73 +1,82 @@
 from dataclasses import dataclass, field
-from typing import Any
-
+from typing import Any, Dict, List, Optional, Tuple
 import numpy as np
-
-from .player_state import PlayerState
-from .ball_state import BallState
 
 
 @dataclass(slots=True)
 class FrameState:
     """
-    Object passed through the whole pipeline.
+    Unified object passed through the entire video processing pipeline.
 
-    Every module reads and writes only this object.
+    Single source of truth using standard Python dictionaries for player/ball detections,
+    supporting camera tracking metadata, backboard ROI, and backward-compatible aliases.
     """
 
+    # Primary Video Metadata
     frame_id: int
-
     timestamp: float
-
     frame: np.ndarray
+    fps: float = 30.0
 
-    fps: float
+    # Processed Frame Visuals
+    annotated_frame: Optional[np.ndarray] = None
 
-    annotated_frame: np.ndarray | None = None
+    # Camera Tracking & Geometry
+    homography_matrix: Optional[np.ndarray] = None
+    court_polygon: Optional[np.ndarray] = None
+    camera_polygon: Optional[np.ndarray] = None
+    backboard_roi: Optional[Tuple[int, int, int, int]] = None
 
-    homography_matrix: np.ndarray | None = None
-
-    court_polygon: np.ndarray | None = None
-
-    players: list[PlayerState] = field(default_factory=list)
-
-    ball: BallState | None = None
-
-    metrics: dict[str, Any] = field(default_factory=dict)
-
-    events: list[str] = field(default_factory=list)
-
-    offensive_team: str | None = None
-
-    ball_handler: PlayerState | None = None
-
-    valid_gameplay: bool = True
-    
-    annotated_frame = None
-    
-    is_snapshot_moment: bool = False
-    
-    # preenchidos pelo detector
+    # Detected Entities (Pure Dictionaries)
     players: List[Dict[str, Any]] = field(default_factory=list)
     ball: Optional[Dict[str, Any]] = None
+    ball_handler: Optional[Dict[str, Any]] = None
 
-    # preenchidos pelo camera tracker
-    camera_polygon: Optional[np.ndarray] = None
-    homography_matrix: Optional[np.ndarray] = None
+    # Analytics & Gameplay State
+    offensive_team: Optional[str] = None
+    is_valid_gameplay: bool = True
+    is_snapshot_moment: bool = False
 
-    # analytics
     metrics: Dict[str, Any] = field(default_factory=dict)
     events: List[str] = field(default_factory=list)
 
-    # gameplay filter
-    is_valid_gameplay: bool = True
+    # ------------------------------------------------------------------
+    # Property Aliases (Ensures backward compatibility across models)
+    # ------------------------------------------------------------------
 
-    def add_event(self, event: str):
+    @property
+    def homography(self) -> Optional[np.ndarray]:
+        """Alias for homography_matrix."""
+        return self.homography_matrix
 
+    @homography.setter
+    def homography(self, value: Optional[np.ndarray]):
+        self.homography_matrix = value
+
+    @property
+    def camera(self) -> Optional[np.ndarray]:
+        """Alias for camera_polygon."""
+        return self.camera_polygon
+
+    @camera.setter
+    def camera(self, value: Optional[np.ndarray]):
+        self.camera_polygon = value
+
+    @property
+    def valid_gameplay(self) -> bool:
+        """Alias for is_valid_gameplay."""
+        return self.is_valid_gameplay
+
+    @valid_gameplay.setter
+    def valid_gameplay(self, value: bool):
+        self.is_valid_gameplay = value
+
+    # ------------------------------------------------------------------
+    # Helper Methods
+    # ------------------------------------------------------------------
+
+    def add_event(self, event: str) -> None:
         self.events.append(event)
 
-    def add_metric(self, name: str, value: Any):
-
+    def add_metric(self, name: str, value: Any) -> None:
         self.metrics[name] = value
-        
-        

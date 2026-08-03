@@ -25,7 +25,6 @@ from ultralytics import YOLO
 from services.vision.camera_tracker import CameraTracker
 from core.config import settings
 from services.profiler import PipelineProfiler
-from services.vision.radar_visualizer import RadarVisualizer
 
 # Persistence & Database Services
 from services.database_service import DatabaseService
@@ -38,6 +37,7 @@ from services.ingestion.youtube_downloader import YouTubeDownloader
 from services.vision.camera_tracker import CameraTracker
 from services.vision.detector import Detector
 from services.vision.visual_analyzer import VisualAnalyzer
+from services.vision.radar_visualizer import RadarVisualizer
 
 # Analytics Services
 from services.analytics.engine import Engine
@@ -148,6 +148,7 @@ def main():
         profiling_path="data/match_config.json"  # <-- ADD THIS (update with your actual JSON filename)
       ),
       camera_tracker=camera_tracker,
+      backboard_roi= None,
       engine=Engine(),
       database=db_service,
       renderer=Renderer(save_snapshots=True),

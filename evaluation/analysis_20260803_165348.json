@@ -1,0 +1,31 @@
+{
+    "timestamp": "2026-08-03T16:53:48.484479",
+    "model": "weights/Model_v0.1.pt",
+    "video": "",
+    "detections": {
+        "frames_processed": 743,
+        "players_detected": 5072,
+        "average_players_per_frame": 6.83,
+        "ball_detected": 555,
+        "ball_detection_rate": 74.7
+    },
+    "ocr": {
+        "attempts": 5072,
+        "success": 24,
+        "success_rate": 0.005
+    },
+    "teams": {
+        "predictions": 0,
+        "unknown": 0
+    },
+    "tracking": {
+        "track_switches": 0
+    },
+    "events": {
+        "shot_attempts": 0,
+        "shots_made": 0,
+        "rebounds": 0,
+        "turnovers": 5,
+        "possessions": 0
+    }
+}

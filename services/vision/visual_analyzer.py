@@ -9,7 +9,7 @@ import torch.nn as nn
 from torchvision import transforms
 from torchvision.models import efficientnet_b0, EfficientNet_B0_Weights
 from PIL import Image
-
+from typing import Optional, Dict, List, Any, Tuple
 
 class TemporalJerseyClassifier(nn.Module):
     """Reconstructs the PyTorch architecture matching prxkc/jersey-number-recognition"""
@@ -55,6 +55,7 @@ class VisualAnalyzer:
 
     def __init__(self, reader=None, roster_path: str = None, profiling_path: str = None):
         self.reader = reader
+        self.profiling_path = profiling_path
         
         # Device selection (MPS for Apple Silicon, CUDA, or CPU)
         if torch.backends.mps.is_available():
@@ -69,6 +70,10 @@ class VisualAnalyzer:
 
         self.number_model = None
         self.track_crop_buffers: Dict[int, List[np.ndarray]] = {}
+        
+        # Memory tracking for backboard smoothing
+        self.smoothed_backboard : Optional[Tuple[float, float, float, float]] = None
+        self.smoothing_factor : float = 0.30
 
         # Preprocessing required by EfficientNet-B0
         self.transform = transforms.Compose([
@@ -258,43 +263,44 @@ class VisualAnalyzer:
     def detect_backboard(
         self,
         frame: np.ndarray,
-        roi: Optional[tuple] = None
+        roi: Optional[Tuple[int, int, int, int]] = None
     ) -> Optional[Dict[str, Any]]:
-        """Detects the basketball backboard using classical CV inside an optional ROI."""
+        """Detects backboard using homography ROI crop + Canny contour refinement."""
         if frame is None or frame.size == 0:
             return None
 
-        # Restrict search region if ROI provided (x, y, w, h)
+        h_f, w_f = frame.shape[:2]
+
+        # 1. Use passed ROI (from CameraTracker homography) or default to upper region
         if roi is not None:
             x0, y0, w0, h0 = roi
-            h_f, w_f = frame.shape[:2]
-            x0, y0 = max(0, x0), max(0, y0)
-            w0, h0 = min(w_f - x0, w0), min(h_f - y0, h0)
-            if w0 <= 0 or h0 <= 0:
-                image = frame
-                x0 = y0 = 0
-            else:
-                image = frame[y0:y0 + h0, x0:x0 + w0]
+            x0, y0 = max(0, int(x0)), max(0, int(y0))
+            w0, h0 = min(w_f - x0, int(w0)), min(h_f - y0, int(h0))
         else:
-            image = frame
-            x0 = y0 = 0
+            x0, y0, w0, h0 = 0, int(h_f * 0.10), w_f, int(h_f * 0.35)
 
-        gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
-        clahe = cv2.createCLAHE(clipLimit=2.0, tileGridSize=(8, 8))
-        gray = clahe.apply(gray)
-        gray = cv2.GaussianBlur(gray, (5, 5), 0)
+        if w0 <= 10 or h0 <= 10:
+            return None
 
-        _, binary = cv2.threshold(gray, 180, 255, cv2.THRESH_BINARY)
+        # Crop to the focused ROI area
+        crop = frame[y0:y0 + h0, x0:x0 + w0]
+
+        # 2. Contour detection inside crop
+        gray = cv2.cvtColor(crop, cv2.COLOR_BGR2GRAY)
+        blurred = cv2.GaussianBlur(gray, (5, 5), 0)
+        edges = cv2.Canny(blurred, 50, 150)
+        
         kernel = np.ones((3, 3), np.uint8)
-        binary = cv2.morphologyEx(binary, cv2.MORPH_CLOSE, kernel, iterations=2)
+        dilated = cv2.dilate(edges, kernel, iterations=1)
 
-        contours, _ = cv2.findContours(binary, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
-        best = None
+        contours, _ = cv2.findContours(dilated, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+        
+        best_bbox = None
         best_score = -1.0
 
         for contour in contours:
             area = cv2.contourArea(contour)
-            if area < 300:
+            if area < 150:
                 continue
 
             x, y, w, h = cv2.boundingRect(contour)
@@ -302,49 +308,77 @@ class VisualAnalyzer:
                 continue
 
             aspect = w / float(h)
-            if aspect < 1.2 or aspect > 2.8:
+            # FIBA backboards have aspect ratio ~1.71 (180cm / 105cm)
+            if aspect < 1.1 or aspect > 2.3:
                 continue
 
-            rect_area = w * h
-            fill_ratio = area / float(rect_area)
-            if fill_ratio < 0.60:
-                continue
-
-            score = area * fill_ratio
+            score = area * (w / float(h))
             if score > best_score:
                 best_score = score
-                best = {
-                    "bbox": (x + x0, y + y0, w, h),
-                    "center": (x + x0 + w // 2, y + y0 + h // 2),
-                    "area": area,
+                # Translate crop coordinates back to global frame coordinates
+                best_bbox = (x + x0, y + y0, w, h)
+
+        # 3. Fallback to Homography ROI center if classical CV missed contour
+        if best_bbox is None:
+            if roi is not None:
+                # Use standard backboard shape centered in the court ROI
+                bw = int(w0 * 0.7)
+                bh = int(bw / 1.7)
+                bx = x0 + (w0 - bw) // 2
+                by = y0 + (h0 - bh) // 2
+                best_bbox = (bx, by, bw, bh)
+            elif self.smoothed_backboard is not None:
+                sx, sy, sw, sh = self.smoothed_backboard
+                return {
+                    "bbox": (int(sx), int(sy), int(sw), int(sh)),
+                    "center": (int(sx + sw / 2), int(sy + sh / 2)),
+                    "area": int(sw * sh)
                 }
+            else:
+                return None
 
-        return best
+        # 4. Temporal Smoothing (Exponential Moving Average)
+        if self.smoothed_backboard is None:
+            self.smoothed_backboard = best_bbox
+        else:
+            alpha = self.smoothing_factor
+            self.smoothed_backboard = tuple(
+                alpha * curr + (1 - alpha) * prev
+                for curr, prev in zip(best_bbox, self.smoothed_backboard)
+            )
 
+        sx, sy, sw, sh = self.smoothed_backboard
+        return {
+            "bbox": (int(sx), int(sy), int(sw), int(sh)),
+            "center": (int(sx + sw / 2.0), int(sy + sh / 2.0)),
+            "area": int(sw * sh)
+        }
+    
     def estimate_rims(self, backboards: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
-        """Estimates 2D rim location relative to detected backboard(s)."""
+        """Estimates rim position and radius geometrically relative to detected backboards."""
         rims = []
         for bb in backboards:
-            if not bb or "bbox" not in bb:
+            if not isinstance(bb, dict) or "bbox" not in bb:
                 continue
+
             bx, by, bw, bh = bb["bbox"]
-            rim_center_x = int(bx + bw / 2.0)
-            rim_center_y = int(by + bh * 0.88)
-            rim_radius = int(bw * 0.18)
+
+            # FIBA Hoop Geometry Ratios:
+            # - Rim center horizontal = backboard center
+            # - Rim center vertical = ~82% down from top of backboard
+            # - Rim radius = ~12.5% of backboard width (diameter is 45cm vs 180cm width)
+            rx = int(bx + (bw / 2.0))
+            ry = int(by + (bh * 0.82))
+            radius = max(6, int(bw * 0.125))
 
             rims.append({
-                "center": (rim_center_x, rim_center_y),
-                "radius": rim_radius,
-                "bbox": [
-                    rim_center_x - rim_radius,
-                    rim_center_y - rim_radius,
-                    rim_center_x + rim_radius,
-                    rim_center_y + rim_radius
-                ]
+                "center": (rx, ry),
+                "radius": radius,
+                "backboard_bbox": (bx, by, bw, bh)
             })
 
         return rims
-
+    
     def resolve_player(self, team_name: str, shirt_num: str) -> Dict[str, str]:
         """Looks up player metadata from the profiling dictionary."""
         if team_name in self.rosters and shirt_num in self.rosters[team_name].get("roster", {}):

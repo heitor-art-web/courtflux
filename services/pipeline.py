@@ -13,6 +13,7 @@ class Pipeline:
         renderer,
         profiler,
         engine,
+        backboard_roi,
         db_conn=None # needs to be last
         
     ):
@@ -23,6 +24,7 @@ class Pipeline:
         self.renderer = renderer
         self.profiler = profiler
         self.engine = engine
+        self.backboard_roi = backboard_roi
         self.db_conn = db_conn
         
         
