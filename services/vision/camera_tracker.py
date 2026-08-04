@@ -2,14 +2,22 @@ import cv2
 import numpy as np
 import os
 from typing import Tuple, Optional, Any
+from dotenv import load_dotenv
+
+# Load environment variables from .env file
+load_dotenv()
+
+# Retrieve key securely (returns None if not set instead of crashing)
+roboflow_api_key = os.getenv("ROBOFLOW_API_KEY")
+
+if not roboflow_api_key:
+    raise ValueError("ROBOFLOW_API_KEY is not set in environment or .env file.")
 
 try:
     from inference import get_model
     INFERENCE_AVAILABLE = True
 except ImportError:
     INFERENCE_AVAILABLE = False
-
-os.environ["ROBOFLOW_API_KEY"] = "MEOadFTOvV85Z55IwlYY" #<-- not be hardcoded
 
 # Official 14-Keypoint FIBA Court Reference Map (28m x 15m in Meters)
 FIBA_COURT_KEYPOINTS_14 = {
