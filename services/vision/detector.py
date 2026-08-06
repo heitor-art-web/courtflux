@@ -90,9 +90,10 @@ class Detector:
             frame,
             persist=True,
             tracker="botsort.yaml",
-            conf=0.10,
+            conf=0.40,
             iou=0.5,
             imgsz=640,
+            max_det = 40,
             device="mps", # Change back to 'cpu' or 0 for CUDA if not on Apple Silicon
             verbose=False,
         )

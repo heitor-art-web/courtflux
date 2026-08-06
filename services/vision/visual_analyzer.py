@@ -86,9 +86,7 @@ class VisualAnalyzer:
         self.rosters = self._load_profiling_data(profiling_path) if profiling_path else {}
 
         # Load the local temporal model weights
-        model_path = "weights/jersey_number_recon/best_temporal.pt"
-        if not os.path.exists(model_path):
-            model_path = "weights/jersey_number_recon.pt"
+        model_path = "weights/jersey_number_recon.pt"
 
         try:
             if os.path.exists(model_path):

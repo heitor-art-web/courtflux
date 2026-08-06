@@ -4,6 +4,7 @@
 from pathlib import Path
 import sqlite3
 import sys
+import torch
 
 # Anchor project root and insert it into Python's module search path
 PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
@@ -111,6 +112,8 @@ def main():
       homography,
       court_polygon,
   )
+  
+  
 
   # --------------------------------------------------
   # OCR
@@ -120,7 +123,7 @@ def main():
 
   reader = easyocr.Reader(
       ["en"],
-      gpu=False,
+      gpu=True,
   )
 
   visual = VisualAnalyzer(reader,profiling_path="data/match_config.json")
@@ -129,7 +132,20 @@ def main():
   # YOLO
   # --------------------------------------------------
 
+  DEVICE = (
+    "cuda"
+    if torch.cuda.is_available()
+    else "mps"
+    if torch.backends.mps.is_available()
+    else "cpu"
+  )
+
   model = YOLO(settings.model)
+  model.to(DEVICE)
+
+  print(f"MPS available: {torch.backends.mps.is_available()}")
+  print(f"CUDA available: {torch.cuda.is_available()}")
+  print(f"YOLO device: {DEVICE}")
 
   # --------------------------------------------------
   # Pipeline
