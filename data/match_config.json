@@ -1,4 +1,9 @@
 {
+  "metadata": {
+    "home_team": "FC Porto",
+    "away_team": "Ovarense"
+  },
+  "teams": {
     "FC Porto": {
       "kits": {
         "home": ["Blue", "White", "Red"],
@@ -39,3 +44,4 @@
     }
 
   }
+}

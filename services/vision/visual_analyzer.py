@@ -115,7 +115,7 @@ class VisualAnalyzer:
             try:
                 with open(path, 'r', encoding='utf-8') as f:
                     data = json.load(f)
-                    return data.get("rosters", data)
+                    return data.get("teams",data.get("rosters", data))
             except Exception as e:
                 print(f"⚠️ Warning: Could not parse {path}: {e}")
         return {}
