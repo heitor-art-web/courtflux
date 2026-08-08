@@ -129,7 +129,7 @@ def main(video_source: str, start_time: float, end_time: float):
     model = YOLO(settings.model)
     model.to(DEVICE)
 
-    print(f"🧠 YOLO device set to: {DEVICE}", flush=True)
+    print(f"🧠 YOLO model : {settings.model} device set to: {DEVICE}", flush=True)
 
     # --------------------------------------------------
     # Pipeline
