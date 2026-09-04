@@ -17,7 +17,7 @@ export function LegalPage({
   children: ReactNode;
 }) {
   return (
-    <main className={styles.legalPage} id="main-content">
+    <main className={styles.legalPage}>
       <header className={styles.header}>
         <Link className={styles.brand} href="/" aria-label="CourtFlux home">
           <Image
