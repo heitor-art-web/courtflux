@@ -15,74 +15,43 @@ from torchvision.models import efficientnet_b0
 from services.vision.team_only_analyzer import TeamOnlyAnalyzer
 
 
-class TemporalJerseyClassifier(nn.Module):
-    """Checkpoint-native temporal jersey recognizer.
+class CheckpointJerseyClassifier(nn.Module):
+    """Single-frame jersey recognizer matching the repository-local checkpoint.
 
-    The local checkpoint uses this exact module layout:
+    The checkpoint discovered in production uses:
       backbone.features.*
-      feature_projection.0.*
-      lstm.*
-      tens_head.{0,3}.*
-      units_head.{0,3}.*
+      proj.*
+      head_tens.*
+      head_ones.*
 
-    Parameter count is 5,194,384, matching the published temporal EfficientNet-B0 +
-    2-layer BiLSTM architecture. No external pretrained weights are requested at
-    inference time; every learned parameter comes from the repository-local checkpoint.
+    Temporal stability is intentionally handled outside this network by aggregating
+    probabilities across real crops from the same tracked player.
     """
 
     def __init__(
         self,
-        feature_dim: int = 256,
-        lstm_hidden: int = 128,
-        lstm_layers: int = 2,
-        dropout: float = 0.3,
+        projection_in: int,
+        projection_out: int,
+        tens_classes: int,
+        ones_classes: int,
     ) -> None:
         super().__init__()
         self.backbone = efficientnet_b0(weights=None)
         self.backbone.classifier = nn.Identity()
-
-        self.feature_projection = nn.Sequential(
-            nn.Linear(1280, feature_dim),
-            nn.ReLU(),
-            nn.Dropout(dropout),
-        )
-
-        self.lstm = nn.LSTM(
-            input_size=feature_dim,
-            hidden_size=lstm_hidden,
-            num_layers=lstm_layers,
-            batch_first=True,
-            dropout=dropout if lstm_layers > 1 else 0.0,
-            bidirectional=True,
-        )
-
-        lstm_output_dim = lstm_hidden * 2
-        self.tens_head = nn.Sequential(
-            nn.Linear(lstm_output_dim, 128),
-            nn.ReLU(),
-            nn.Dropout(dropout),
-            nn.Linear(128, 10),
-        )
-        self.units_head = nn.Sequential(
-            nn.Linear(lstm_output_dim, 128),
-            nn.ReLU(),
-            nn.Dropout(dropout),
-            nn.Linear(128, 10),
-        )
+        self.proj = nn.Linear(projection_in, projection_out)
+        self.head_tens = nn.Linear(projection_out, tens_classes)
+        self.head_ones = nn.Linear(projection_out, ones_classes)
 
     def forward(self, x: torch.Tensor):
-        batch_size, sequence_length, channels, height, width = x.shape
-        x = x.view(batch_size * sequence_length, channels, height, width)
         features = self.backbone(x)
-        features = self.feature_projection(features)
-        features = features.view(batch_size, sequence_length, -1)
-        lstm_out, _ = self.lstm(features)
-        final_features = lstm_out[:, -1, :]
-        return self.tens_head(final_features), self.units_head(final_features)
+        features = torch.relu(self.proj(features))
+        return self.head_tens(features), self.head_ones(features)
 
 
 class PerformanceJerseyAnalyzer(TeamOnlyAnalyzer):
-    """Team scoring + structured temporal jersey decoding for beta identity runs."""
+    """Checkpoint-native jersey inference + temporal track-level aggregation."""
+
+    CHECKPOINT_ARCH_VERSION = "single_frame_efficientnet_b0_proj_digit_heads_v1"
 
     def __init__(
         self,
@@ -103,9 +72,52 @@ class PerformanceJerseyAnalyzer(TeamOnlyAnalyzer):
         else:
             self.device = torch.device("cpu")
 
+        checkpoint_path = Path(model_path)
+        if not checkpoint_path.exists():
+            raise FileNotFoundError(f"Jersey checkpoint not found: {checkpoint_path}")
+
+        started = perf_counter()
+        print(
+            f"📦 Loading jersey checkpoint [{self.CHECKPOINT_ARCH_VERSION}] "
+            f"from {checkpoint_path} on {self.device.type}...",
+            flush=True,
+        )
+        checkpoint = torch.load(checkpoint_path, map_location="cpu")
+
+        if isinstance(checkpoint, nn.Module):
+            model = checkpoint
+            state_source = "root.nn_module"
+            state_dict = model.state_dict()
+            model_state = state_dict
+            img_size = int(getattr(model, "img_size", 128) or 128)
+            projection_in = None
+            projection_out = None
+            tens_classes = None
+            ones_classes = None
+        else:
+            state_source, state_dict = self._select_checkpoint_state(checkpoint)
+            (
+                projection_in,
+                projection_out,
+                tens_classes,
+                ones_classes,
+            ) = self._infer_head_dimensions(state_dict)
+
+            model = CheckpointJerseyClassifier(
+                projection_in=projection_in,
+                projection_out=projection_out,
+                tens_classes=tens_classes,
+                ones_classes=ones_classes,
+            )
+            model_state = model.state_dict()
+            self._validate_state_dict(state_dict, model_state, state_source)
+            model.load_state_dict(state_dict, strict=True)
+            img_size = int(self._find_scalar(checkpoint, ("img_size", "image_size", "input_size")) or 128)
+
+        img_size = max(64, min(int(img_size), 512))
         self.transform = transforms.Compose(
             [
-                transforms.Resize((128, 128)),
+                transforms.Resize((img_size, img_size)),
                 transforms.ToTensor(),
                 transforms.Normalize(
                     mean=[0.485, 0.456, 0.406],
@@ -114,91 +126,40 @@ class PerformanceJerseyAnalyzer(TeamOnlyAnalyzer):
             ]
         )
 
-        checkpoint_path = Path(model_path)
-        if not checkpoint_path.exists():
-            raise FileNotFoundError(f"Jersey checkpoint not found: {checkpoint_path}")
-
-        started = perf_counter()
-        print(f"📦 Loading local jersey model from {checkpoint_path} on {self.device.type}...", flush=True)
-        checkpoint = torch.load(checkpoint_path, map_location="cpu")
-
-        if isinstance(checkpoint, nn.Module):
-            model = checkpoint
-            model_state = model.state_dict()
-            state_source = "root.nn_module"
-            shape_matches = len(model_state)
-            key_matches = len(model_state)
-            tensor_keys = len(model_state)
-            coverage = 1.0
-            missing_count = 0
-            unexpected_count = 0
-        else:
-            model = TemporalJerseyClassifier()
-            model_state = model.state_dict()
-            state_source, state_dict, inspection = self._select_state_dict(checkpoint, model_state)
-            shape_matches = int(inspection["shape_matches"])
-            key_matches = int(inspection["key_matches"])
-            tensor_keys = int(inspection["tensor_keys"])
-            coverage = shape_matches / max(len(model_state), 1)
-
-            print(
-                "🔎 Jersey checkpoint inspection: "
-                f"source={state_source} "
-                f"shape_matches={shape_matches}/{len(model_state)} "
-                f"key_matches={key_matches} tensor_keys={tensor_keys}",
-                flush=True,
-            )
-
-            if coverage < 0.98:
-                sample_keys = ", ".join(list(state_dict.keys())[:8])
-                tail_keys = ", ".join(list(state_dict.keys())[-8:])
-                raise RuntimeError(
-                    "Jersey checkpoint architecture mismatch after nested checkpoint inspection. "
-                    f"Best tensor dictionary='{state_source}', coverage={coverage:.1%} "
-                    f"({shape_matches}/{len(model_state)} shape-compatible model keys). "
-                    f"Sample checkpoint keys: {sample_keys}. Tail checkpoint keys: {tail_keys}"
-                )
-
-            compatible = {
-                key: value
-                for key, value in state_dict.items()
-                if key in model_state
-                and torch.is_tensor(value)
-                and tuple(value.shape) == tuple(model_state[key].shape)
-            }
-            missing, unexpected = model.load_state_dict(compatible, strict=False)
-            missing_count = len(missing)
-            unexpected_count = len(unexpected)
-
-            if missing_count:
-                raise RuntimeError(
-                    f"Jersey checkpoint passed compatibility scoring but still left "
-                    f"{missing_count} model keys unloaded. First missing keys: {list(missing)[:8]}"
-                )
-
         parameter_count = sum(parameter.numel() for parameter in model.parameters())
         self.checkpoint_diagnostics = {
             "source": state_source,
-            "coverage": round(float(coverage), 4),
-            "shape_matches": int(shape_matches),
-            "key_matches": int(key_matches),
-            "tensor_keys": int(tensor_keys),
-            "model_state_keys": int(len(model.state_dict())),
-            "missing_keys": int(missing_count),
-            "unexpected_keys": int(unexpected_count),
+            "coverage": 1.0,
+            "shape_matches": int(len(model_state)),
+            "key_matches": int(len(model_state)),
+            "tensor_keys": int(len(state_dict)),
+            "model_state_keys": int(len(model_state)),
+            "missing_keys": 0,
+            "unexpected_keys": 0,
             "parameter_count": int(parameter_count),
-            "architecture": "efficientnet_b0+projection256+bilstm128x2+digit_heads",
+            "architecture": self.CHECKPOINT_ARCH_VERSION,
+            "img_size": int(img_size),
+            "projection_in": projection_in,
+            "projection_out": projection_out,
+            "tens_classes": tens_classes,
+            "ones_classes": ones_classes,
+            "temporal_aggregation": f"mean_probabilities_over_{self.sequence_length}_track_crops",
         }
 
         self.number_model = model.to(self.device).eval()
         print(
             f"✅ Jersey model ready in {perf_counter() - started:.2f}s; "
-            f"checkpoint coverage={coverage:.1%}; params={parameter_count:,}.",
+            f"checkpoint coverage=100.0%; state_keys={len(model_state)}; "
+            f"imgsz={img_size}; heads={tens_classes}x{ones_classes}.",
             flush=True,
         )
 
     @staticmethod
-    def _iter_tensor_dicts(value, path: str = "root", depth: int = 0) -> Iterable[tuple[str, dict]]:
+    def _iter_tensor_dicts(
+        value,
+        path: str = "root",
+        depth: int = 0,
+    ) -> Iterable[tuple[str, dict]]:
         if depth > 5 or not isinstance(value, dict):
             return
 
@@ -233,42 +194,143 @@ class PerformanceJerseyAnalyzer(TeamOnlyAnalyzer):
                 )
 
     @classmethod
-    def _select_state_dict(cls, checkpoint, model_state: dict) -> tuple[str, dict, dict]:
+    def _select_checkpoint_state(cls, checkpoint) -> tuple[str, dict]:
         candidates = list(cls._iter_tensor_dicts(checkpoint)) if isinstance(checkpoint, dict) else []
         if not candidates:
             raise TypeError(
                 "Unsupported jersey checkpoint format: no tensor state dictionary found."
             )
 
+        required = {
+            "proj.weight",
+            "proj.bias",
+            "head_tens.weight",
+            "head_tens.bias",
+            "head_ones.weight",
+            "head_ones.bias",
+        }
         best = None
         for source, raw_state in candidates:
             for variant_name, candidate in cls._state_variants(raw_state):
-                key_matches = sum(1 for key in candidate if key in model_state)
-                shape_matches = sum(
-                    1
-                    for key, value in candidate.items()
-                    if key in model_state
-                    and torch.is_tensor(value)
-                    and tuple(value.shape) == tuple(model_state[key].shape)
+                required_matches = len(required.intersection(candidate.keys()))
+                backbone_matches = sum(
+                    1 for key in candidate if str(key).startswith("backbone.features.")
                 )
-                score = (shape_matches, key_matches, -abs(len(candidate) - len(model_state)))
+                score = (
+                    required_matches,
+                    backbone_matches,
+                    len(candidate),
+                )
                 if best is None or score > best[0]:
                     best = (
                         score,
                         f"{source}[{variant_name}]",
                         candidate,
-                        {
-                            "shape_matches": shape_matches,
-                            "key_matches": key_matches,
-                            "tensor_keys": len(candidate),
-                        },
                     )
 
         assert best is not None
-        return best[1], best[2], best[3]
+        source = best[1]
+        state_dict = best[2]
+        missing_required = sorted(required.difference(state_dict.keys()))
+        if missing_required:
+            sample_keys = ", ".join(list(state_dict.keys())[-12:])
+            raise RuntimeError(
+                "Jersey checkpoint does not contain the checkpoint-native projection/digit heads. "
+                f"Best tensor dictionary='{source}'. Missing keys={missing_required}. "
+                f"Tail checkpoint keys: {sample_keys}"
+            )
+
+        return source, state_dict
+
+    @staticmethod
+    def _infer_head_dimensions(state_dict: dict) -> tuple[int, int, int, int]:
+        proj_weight = state_dict["proj.weight"]
+        tens_weight = state_dict["head_tens.weight"]
+        ones_weight = state_dict["head_ones.weight"]
+
+        if proj_weight.ndim != 2 or tens_weight.ndim != 2 or ones_weight.ndim != 2:
+            raise RuntimeError(
+                "Jersey checkpoint projection and digit-head weights must all be rank-2 tensors."
+            )
+
+        projection_out, projection_in = map(int, proj_weight.shape)
+        tens_classes, tens_in = map(int, tens_weight.shape)
+        ones_classes, ones_in = map(int, ones_weight.shape)
+
+        if tens_in != projection_out or ones_in != projection_out:
+            raise RuntimeError(
+                "Jersey checkpoint head dimensions are inconsistent: "
+                f"proj_out={projection_out}, head_tens_in={tens_in}, head_ones_in={ones_in}."
+            )
+        if projection_in != 1280:
+            raise RuntimeError(
+                "Jersey checkpoint projection does not match EfficientNet-B0 output: "
+                f"expected 1280 input features, found {projection_in}."
+            )
+        if tens_classes < 10 or ones_classes < 10:
+            raise RuntimeError(
+                "Jersey checkpoint digit heads must expose at least digits 0-9: "
+                f"tens_classes={tens_classes}, ones_classes={ones_classes}."
+            )
+
+        return projection_in, projection_out, tens_classes, ones_classes
+
+    @staticmethod
+    def _validate_state_dict(state_dict: dict, model_state: dict, source: str) -> None:
+        missing = [key for key in model_state if key not in state_dict]
+        unexpected = [key for key in state_dict if key not in model_state]
+        shape_mismatches = [
+            (
+                key,
+                tuple(state_dict[key].shape),
+                tuple(model_state[key].shape),
+            )
+            for key in model_state
+            if key in state_dict
+            and torch.is_tensor(state_dict[key])
+            and tuple(state_dict[key].shape) != tuple(model_state[key].shape)
+        ]
+
+        if missing or unexpected or shape_mismatches:
+            raise RuntimeError(
+                "Jersey checkpoint still does not exactly match the inferred single-frame model. "
+                f"source='{source}', missing={missing[:8]}, unexpected={unexpected[:8]}, "
+                f"shape_mismatches={shape_mismatches[:5]}"
+            )
+
+        print(
+            "🔎 Jersey checkpoint inspection: "
+            f"source={source} shape_matches={len(model_state)}/{len(model_state)} "
+            f"key_matches={len(model_state)} tensor_keys={len(state_dict)}",
+            flush=True,
+        )
+
+    @staticmethod
+    def _find_scalar(value, names: tuple[str, ...], depth: int = 0):
+        if depth > 4 or not isinstance(value, dict):
+            return None
+
+        for name in names:
+            candidate = value.get(name)
+            if isinstance(candidate, (int, float, str)):
+                try:
+                    return int(candidate)
+                except (TypeError, ValueError):
+                    pass
+
+        for item in value.values():
+            if isinstance(item, dict):
+                found = PerformanceJerseyAnalyzer._find_scalar(
+                    item,
+                    names,
+                    depth=depth + 1,
+                )
+                if found is not None:
+                    return found
+        return None
 
     def observe_track(self, crop: np.ndarray, track_id: int) -> None:
-        """Collect one genuine torso observation per frame for the temporal sequence."""
+        """Collect one genuine torso observation per frame without neural inference."""
         if track_id < 0 or crop is None or crop.size == 0:
             return
         height, width = crop.shape[:2]
@@ -314,16 +376,33 @@ class PerformanceJerseyAnalyzer(TeamOnlyAnalyzer):
     def _candidate_probability(
         number: str,
         tens_probs: list[float],
-        units_probs: list[float],
+        ones_probs: list[float],
     ) -> float:
         value = int(number)
-        return float(tens_probs[value // 10] * units_probs[value % 10])
+        ones_digit = value % 10
+        if ones_digit >= len(ones_probs):
+            return 0.0
+
+        if value <= 9:
+            # Some digit-wise checkpoints expose an explicit blank tens class at index
+            # 10. For 10-class heads, legacy training represented one-digit numbers as
+            # a leading zero.
+            if len(tens_probs) > 10:
+                tens_index = 10
+            else:
+                tens_index = 0
+        else:
+            tens_index = value // 10
+
+        if tens_index >= len(tens_probs):
+            return 0.0
+        return float(tens_probs[tens_index] * ones_probs[ones_digit])
 
     def _decode_roster(
         self,
         team_name: str | None,
         tens_probs: list[float],
-        units_probs: list[float],
+        ones_probs: list[float],
     ) -> dict:
         valid = self._valid_roster_numbers(team_name)
         if not valid:
@@ -337,7 +416,7 @@ class PerformanceJerseyAnalyzer(TeamOnlyAnalyzer):
             }
 
         scored = [
-            (number, self._candidate_probability(number, tens_probs, units_probs))
+            (number, self._candidate_probability(number, tens_probs, ones_probs))
             for number in valid
         ]
         scored.sort(key=lambda item: item[1], reverse=True)
@@ -358,6 +437,44 @@ class PerformanceJerseyAnalyzer(TeamOnlyAnalyzer):
             ],
         }
 
+    @staticmethod
+    def _raw_prediction(
+        tens_probs: list[float],
+        ones_probs: list[float],
+    ) -> dict:
+        tens_pred = int(np.argmax(tens_probs))
+        ones_pred = int(np.argmax(ones_probs))
+
+        if ones_pred >= 10:
+            raw_number = None
+            raw_canonical = None
+            raw_reason = "ones_unknown_class"
+        elif tens_pred == 10 and len(tens_probs) > 10:
+            raw_number = str(ones_pred)
+            raw_canonical = raw_number
+            raw_reason = "single_digit_blank_tens"
+        elif tens_pred >= 10:
+            raw_number = None
+            raw_canonical = None
+            raw_reason = "tens_unknown_class"
+        else:
+            raw_number = f"{tens_pred}{ones_pred}"
+            raw_canonical = str(int(raw_number))
+            raw_reason = "digit_pair"
+
+        tens_conf = float(tens_probs[tens_pred])
+        ones_conf = float(ones_probs[ones_pred])
+        return {
+            "raw_number": raw_number,
+            "raw_canonical": raw_canonical,
+            "raw_decode_reason": raw_reason,
+            "raw_probability": round(tens_conf * ones_conf, 6),
+            "tens_digit": tens_pred,
+            "units_digit": ones_pred,
+            "tens_confidence": round(tens_conf, 6),
+            "units_confidence": round(ones_conf, 6),
+        }
+
     def predict_jersey(self, track_id: int, team_name: Optional[str] = None) -> dict:
         if track_id < 0 or not self.ready(track_id):
             return {"accepted": False, "rejection_reason": "sequence_not_ready"}
@@ -368,21 +485,21 @@ class PerformanceJerseyAnalyzer(TeamOnlyAnalyzer):
             rgb = cv2.cvtColor(frame_crop, cv2.COLOR_BGR2RGB)
             tensors.append(self.transform(Image.fromarray(rgb)))
 
-        input_tensor = torch.stack(tensors).unsqueeze(0).to(self.device)
+        # The checkpoint is a single-frame model. Run the real track crops as one batch,
+        # convert every crop to probabilities, then average those probabilities. This
+        # preserves temporal evidence without inventing an LSTM that is absent from the
+        # saved weights.
+        input_tensor = torch.stack(tensors).to(self.device)
         with torch.inference_mode():
-            tens_logits, units_logits = self.number_model(input_tensor)
-            tens_prob_tensor = torch.softmax(tens_logits, dim=1)[0].detach().cpu()
-            units_prob_tensor = torch.softmax(units_logits, dim=1)[0].detach().cpu()
+            tens_logits, ones_logits = self.number_model(input_tensor)
+            tens_prob_tensor = torch.softmax(tens_logits, dim=1).mean(dim=0).detach().cpu()
+            ones_prob_tensor = torch.softmax(ones_logits, dim=1).mean(dim=0).detach().cpu()
 
         tens_probs = [float(value) for value in tens_prob_tensor.tolist()]
-        units_probs = [float(value) for value in units_prob_tensor.tolist()]
-        tens_pred = int(np.argmax(tens_probs))
-        units_pred = int(np.argmax(units_probs))
-        raw_number = f"{tens_pred}{units_pred}"
-        raw_canonical = str(int(raw_number))
-        raw_probability = float(tens_probs[tens_pred] * units_probs[units_pred])
+        ones_probs = [float(value) for value in ones_prob_tensor.tolist()]
+        raw = self._raw_prediction(tens_probs, ones_probs)
 
-        decoded = self._decode_roster(team_name, tens_probs, units_probs)
+        decoded = self._decode_roster(team_name, tens_probs, ones_probs)
         candidate = decoded.get("candidate_number")
         posterior = float(decoded.get("candidate_posterior", 0.0) or 0.0)
         margin = float(decoded.get("candidate_margin", 0.0) or 0.0)
@@ -405,7 +522,7 @@ class PerformanceJerseyAnalyzer(TeamOnlyAnalyzer):
             team_decode = self._decode_roster(
                 str(candidate_team),
                 tens_probs,
-                units_probs,
+                ones_probs,
             )
             cross_team[str(candidate_team)] = {
                 "candidate_number": team_decode.get("candidate_number"),
@@ -417,15 +534,10 @@ class PerformanceJerseyAnalyzer(TeamOnlyAnalyzer):
             "accepted": accepted,
             "rejection_reason": reason,
             "team": team_name,
-            "raw_number": raw_number,
-            "raw_canonical": raw_canonical,
-            "raw_probability": round(raw_probability, 6),
-            "tens_digit": tens_pred,
-            "units_digit": units_pred,
-            "tens_confidence": round(tens_probs[tens_pred], 6),
-            "units_confidence": round(units_probs[units_pred], 6),
+            **raw,
             **decoded,
             "cross_team_best": cross_team,
+            "sequence_crops": len(buffered),
             "checkpoint": self.checkpoint_diagnostics,
         }
 
