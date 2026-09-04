@@ -41,12 +41,12 @@ function formatDate(value: string | null | undefined) {
 
 function formatDuration(start: number | null | undefined, end: number | null | undefined) {
   if (typeof start !== "number" || typeof end !== "number" || end <= start) return null;
-  const minutes = (end - start) / 60;
-  return `${formatMinutes(minutes)} min`;
+  return `${formatMinutes((end - start) / 60)} min`;
 }
 
 function sourceLabel(value: string | null | undefined) {
   if (!value) return "Video analysis";
+  if (value.startsWith("supabase://")) return "Uploaded video";
   if (/youtu(?:\.be|be\.com)/i.test(value)) return "YouTube video";
   const clean = value.split(/[?#]/)[0];
   const segment = clean.split(/[\\/]/).filter(Boolean).at(-1) ?? value;
@@ -81,19 +81,17 @@ export default async function AccountPage() {
 
   if (!user) redirect("/login");
 
-  const { data: profile } = await supabase
-    .from("profiles")
-    .select("full_name")
-    .eq("id", user.id)
-    .maybeSingle();
-
-  const { data: membership } = await supabase
-    .from("workspace_members")
-    .select("workspace_id, role, workspaces(name, slug)")
-    .eq("user_id", user.id)
-    .eq("status", "active")
-    .limit(1)
-    .maybeSingle();
+  const [{ data: profile }, { data: membership }] = await Promise.all([
+    supabase.from("profiles").select("full_name").eq("id", user.id).maybeSingle(),
+    supabase
+      .from("workspace_members")
+      .select("workspace_id, role, workspaces(name, slug)")
+      .eq("user_id", user.id)
+      .eq("status", "active")
+      .order("created_at", { ascending: true })
+      .limit(1)
+      .maybeSingle(),
+  ]);
 
   const workspaceId = membership?.workspace_id ?? null;
   const workspace = Array.isArray(membership?.workspaces)
@@ -190,6 +188,7 @@ export default async function AccountPage() {
   const displayName = profile?.full_name?.trim() || user.email?.split("@")[0] || "Coach";
   const firstName = displayName.split(/\s+/)[0];
   const role = membership?.role ?? "member";
+  const canManageAnalysis = analysisAllowed && ["owner", "admin", "analyst"].includes(role);
 
   return (
     <main className={styles.dashboard}>
@@ -215,21 +214,22 @@ export default async function AccountPage() {
           <div className={styles.eyebrow}>CourtFlux workspace</div>
           <h1 id="dashboard-title">Welcome back, <span>{firstName}.</span></h1>
           <p>
-            Review your workspace, monthly analysis usage and recent processing activity from one place.
-            The customer upload flow is the next product step; during private beta, analysis still runs through the Beta Lab.
+            Review your monthly analysis usage and recent processing activity, then start a new customer analysis without opening engineering controls.
           </p>
         </div>
         <div className={styles.primaryAction}>
-          <strong>{analysisAllowed ? "Analyse basketball video" : "Monthly allowance used"}</strong>
+          <strong>{canManageAnalysis ? "Analyse basketball video" : analysisAllowed ? "Analysis access is view-only" : "Monthly allowance used"}</strong>
           <span>
-            {analysisAllowed
-              ? "Open the private-beta analysis workspace to run a game or clip with the current pipeline."
-              : "New customer analyses pause at 100% of the monthly allowance. Ask the CourtFlux team for a beta top-up or compare plans."}
+            {canManageAnalysis
+              ? "Upload game film or add a YouTube source, enter the two teams and review the minute estimate before processing."
+              : analysisAllowed
+                ? "Your workspace role can review analyses but cannot start a new one."
+                : "New analyses pause at 100% of the monthly allowance. Ask the CourtFlux team for a beta top-up or compare plans."}
           </span>
-          {analysisAllowed ? (
-            <Link className={styles.primaryButton} href="/lab">Start beta analysis</Link>
+          {canManageAnalysis ? (
+            <Link className={styles.primaryButton} href="/analysis/new">Start new analysis</Link>
           ) : (
-            <span className={styles.disabledButton} aria-disabled="true">Analysis paused</span>
+            <span className={styles.disabledButton} aria-disabled="true">Analysis unavailable</span>
           )}
         </div>
       </section>
@@ -265,7 +265,7 @@ export default async function AccountPage() {
                 <h2 id="recent-analyses-title">Recent analyses</h2>
                 <p>Latest game and clip processing activity for this workspace.</p>
               </div>
-              <Link className={styles.secondaryButton} href="/lab">Open Beta Lab</Link>
+              {canManageAnalysis ? <Link className={styles.secondaryButton} href="/analysis/new">New analysis</Link> : null}
             </div>
 
             {recentRuns.length ? (
@@ -293,10 +293,10 @@ export default async function AccountPage() {
               <div className={styles.emptyState}>
                 <strong>No analyses yet</strong>
                 <p>Your completed, queued and running analyses will appear here once you process your first basketball video.</p>
-                {analysisAllowed ? (
-                  <Link className={styles.primaryButton} href="/lab">Run your first beta analysis</Link>
+                {canManageAnalysis ? (
+                  <Link className={styles.primaryButton} href="/analysis/new">Run your first analysis</Link>
                 ) : (
-                  <span className={styles.disabledButton} aria-disabled="true">Analysis paused</span>
+                  <span className={styles.disabledButton} aria-disabled="true">Analysis unavailable</span>
                 )}
               </div>
             )}
@@ -336,7 +336,7 @@ export default async function AccountPage() {
             {usageLevel === "exhausted" ? (
               <div className={`${styles.usageNotice} ${styles.usageNoticeExhausted}`} role="status">
                 <strong>Monthly analysis allowance reached.</strong>
-                <span>New customer analyses are paused. A trusted CourtFlux admin can grant additional beta minutes; there is no automatic overage billing.</span>
+                <span>New analyses are paused. A trusted CourtFlux admin can grant additional beta minutes; there is no automatic overage billing.</span>
               </div>
             ) : null}
 
@@ -373,7 +373,7 @@ export default async function AccountPage() {
               </div>
             ) : (
               <div className={styles.betaNote}>
-                No team is configured yet. Team setup is optional for the current beta and will become part of the customer onboarding and roster workflow.
+                No team is configured yet. That does not block analysis: entering the two team names in New Analysis will create the match context automatically.
               </div>
             )}
           </section>
@@ -382,14 +382,14 @@ export default async function AccountPage() {
             <div className={styles.panelHeader}>
               <div>
                 <h2>Quick actions</h2>
-                <p>Useful paths without exposing engineering diagnostics on the public site.</p>
+                <p>Customer workflows first; engineering diagnostics remain separate.</p>
               </div>
             </div>
             <div className={styles.quickActions}>
-              {analysisAllowed ? <Link href="/lab">Start beta analysis <span>→</span></Link> : <div className={styles.quickActionDisabled}>Analysis paused <span>Allowance used</span></div>}
+              {canManageAnalysis ? <Link href="/analysis/new">Start new analysis <span>→</span></Link> : <div className={styles.quickActionDisabled}>Analysis unavailable <span>{analysisAllowed ? "View-only role" : "Allowance used"}</span></div>}
               <Link href="/basketball-video-analysis">Basketball video analysis <span>→</span></Link>
               <Link href="/#pricing">Plans and analysis minutes <span>→</span></Link>
-              <Link href="/">CourtFlux public site <span>→</span></Link>
+              <Link href="/lab">Engineering Beta Lab <span>→</span></Link>
             </div>
           </section>
         </aside>
