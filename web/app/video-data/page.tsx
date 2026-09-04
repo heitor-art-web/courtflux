@@ -2,7 +2,7 @@ import type { Metadata } from "next";
 import { LegalPage, legalStyles as styles } from "../legal-page";
 
 export const metadata: Metadata = {
-  title: "Video & Data Policy | CourtFlux",
+  title: "Video & Data Policy",
   description: "How CourtFlux stores, processes and removes uploaded basketball video while retaining analysis results.",
   alternates: { canonical: "/video-data" },
 };
