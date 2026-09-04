@@ -90,18 +90,22 @@ export default function LabPage() {
     }
   }
 
-  useEffect(() => { void refreshHealth(); }, []);
+  useEffect(() => {
+    void refreshHealth();
+  }, []);
 
   useEffect(() => {
     if (!job?.job_id || ["completed", "failed"].includes(job.status ?? "")) return;
     const jobId = job.job_id;
     let cancelled = false;
+
     async function poll() {
       try {
         const [jobResponse, logResponse] = await Promise.all([
           fetch(`/api/jobs/${jobId}`, { cache: "no-store" }),
           fetch(`/api/jobs/${jobId}/log?tail=120`, { cache: "no-store" }),
         ]);
+
         if (!cancelled) {
           setJob(await jobResponse.json());
           if (logResponse.ok) {
@@ -113,19 +117,27 @@ export default function LabPage() {
         if (!cancelled) setFormError(error instanceof Error ? error.message : String(error));
       }
     }
+
     void poll();
     const timer = window.setInterval(() => void poll(), 3000);
-    return () => { cancelled = true; window.clearInterval(timer); };
+    return () => {
+      cancelled = true;
+      window.clearInterval(timer);
+    };
   }, [job?.job_id, job?.status]);
 
   const parsedMatchConfig = useMemo(() => {
-    try { return { value: JSON.parse(matchConfigText), error: "" }; }
-    catch (error) { return { value: null, error: error instanceof Error ? error.message : String(error) }; }
+    try {
+      return { value: JSON.parse(matchConfigText), error: "" };
+    } catch (error) {
+      return { value: null, error: error instanceof Error ? error.message : String(error) };
+    }
   }, [matchConfigText]);
 
   async function submitJob() {
     setFormError("");
     setLogs([]);
+
     if (!parsedMatchConfig.value) {
       setFormError(`Invalid match_config.json: ${parsedMatchConfig.error}`);
       return;
@@ -175,6 +187,8 @@ export default function LabPage() {
   const processingFps = performance?.analysis_fps ?? (
     summary?.total_frames && summary?.elapsed_sec ? summary.total_frames / summary.elapsed_sec : 0
   );
+  const analysisActive = ["queued", "running"].includes(job?.status ?? "");
+  const workerLabel = health.status === "ok" ? "online" : health.status ? "offline" : "checking";
 
   return (
     <main>
@@ -183,53 +197,125 @@ export default function LabPage() {
           <h1>Basketball AI Analytics</h1>
           <p>Performance beta. Results and logs only; inference runs on the Python worker.</p>
         </div>
-        <button className={`badge ${health.status === "ok" ? "ok" : health.status ? "error" : ""}`} onClick={() => void refreshHealth()} type="button">
-          Worker: {health.status === "ok" ? "online" : "offline"}
-          {health.devices?.mps ? " · MPS" : health.devices?.cuda ? " · CUDA" : health.status === "ok" ? " · CPU" : ""}
+        <button
+          className={`badge ${health.status === "ok" ? "ok" : health.status ? "error" : ""}`}
+          onClick={() => void refreshHealth()}
+          type="button"
+          aria-label={`Refresh worker status. Worker is ${workerLabel}.`}
+        >
+          <span aria-live="polite" aria-atomic="true">
+            Worker: {health.status === "ok" ? "online" : "offline"}
+            {health.devices?.mps ? " · MPS" : health.devices?.cuda ? " · CUDA" : health.status === "ok" ? " · CPU" : ""}
+          </span>
         </button>
       </header>
 
       <div className="grid">
-        <section className="panel span-8">
-          <h2>Analysis run</h2>
+        <section className="panel span-8" aria-labelledby="analysis-run-title">
+          <h2 id="analysis-run-title">Analysis run</h2>
           <div className="form-grid">
-            <div className="field full"><label>YouTube URL / worker-local video path</label><input value={videoSource} onChange={(e) => setVideoSource(e.target.value)} /></div>
-            <div className="field"><label>Start (seconds)</label><input type="number" min="0" step="1" value={startTime} onChange={(e) => setStartTime(Number(e.target.value))} /></div>
-            <div className="field"><label>End (seconds)</label><input type="number" min="1" step="1" value={endTime} onChange={(e) => setEndTime(Number(e.target.value))} /></div>
-            <div className="field full"><label>Model path on worker</label><input value={model} onChange={(e) => setModel(e.target.value)} /></div>
-            <div className="field"><label>Detector confidence</label><input type="number" min="0.01" max="0.95" step="0.01" value={confidence} onChange={(e) => setConfidence(Number(e.target.value))} /></div>
-            <div className="field"><label>Image size</label><select value={imgsz} onChange={(e) => setImgsz(Number(e.target.value))}>{[640, 768, 960, 1280].map((size) => <option key={size} value={size}>{size}</option>)}</select></div>
-            <div className="field"><label>Device</label><select value={device} onChange={(e) => setDevice(e.target.value as "mps" | "cpu" | "cuda")}><option value="mps">MPS</option><option value="cpu">CPU</option><option value="cuda">CUDA</option></select></div>
-            <div className="field"><label>Tracker</label><select value={tracker} onChange={(e) => setTracker(e.target.value as "botsort.yaml" | "bytetrack.yaml")}><option value="botsort.yaml">BoT-SORT</option><option value="bytetrack.yaml">ByteTrack</option></select></div>
-            <div className="field"><label><input type="checkbox" checked={detectionOnly} onChange={(e) => setDetectionOnly(e.target.checked)} /> Detection-only mode</label><span className="muted">Skips camera/homography and tactical analytics.</span></div>
-            <div className="field"><label><input type="checkbox" checked={enableJersey} onChange={(e) => setEnableJersey(e.target.checked)} /> Jersey recognition</label><span className="muted">Off is the fastest clean benchmark.</span></div>
-            <div className="field"><label>Jersey interval (frames)</label><input type="number" min="1" max="300" value={jerseyInterval} disabled={!enableJersey} onChange={(e) => setJerseyInterval(Number(e.target.value))} /></div>
-            <div className="field"><label><input type="checkbox" checked={persistResults} onChange={(e) => setPersistResults(e.target.checked)} /> Persist SQLite results</label><span className="muted">Writes are batched every 100 frames.</span></div>
+            <div className="field full">
+              <label htmlFor="video-source">YouTube URL / worker-local video path</label>
+              <input id="video-source" value={videoSource} onChange={(e) => setVideoSource(e.target.value)} />
+            </div>
+            <div className="field">
+              <label htmlFor="start-time">Start (seconds)</label>
+              <input id="start-time" type="number" min="0" step="1" value={startTime} onChange={(e) => setStartTime(Number(e.target.value))} />
+            </div>
+            <div className="field">
+              <label htmlFor="end-time">End (seconds)</label>
+              <input id="end-time" type="number" min="1" step="1" value={endTime} onChange={(e) => setEndTime(Number(e.target.value))} />
+            </div>
+            <div className="field full">
+              <label htmlFor="model-path">Model path on worker</label>
+              <input id="model-path" value={model} onChange={(e) => setModel(e.target.value)} />
+            </div>
+            <div className="field">
+              <label htmlFor="detector-confidence">Detector confidence</label>
+              <input id="detector-confidence" type="number" min="0.01" max="0.95" step="0.01" value={confidence} onChange={(e) => setConfidence(Number(e.target.value))} />
+            </div>
+            <div className="field">
+              <label htmlFor="image-size">Image size</label>
+              <select id="image-size" value={imgsz} onChange={(e) => setImgsz(Number(e.target.value))}>
+                {[640, 768, 960, 1280].map((size) => <option key={size} value={size}>{size}</option>)}
+              </select>
+            </div>
+            <div className="field">
+              <label htmlFor="device">Device</label>
+              <select id="device" value={device} onChange={(e) => setDevice(e.target.value as "mps" | "cpu" | "cuda")}>
+                <option value="mps">MPS</option>
+                <option value="cpu">CPU</option>
+                <option value="cuda">CUDA</option>
+              </select>
+            </div>
+            <div className="field">
+              <label htmlFor="tracker">Tracker</label>
+              <select id="tracker" value={tracker} onChange={(e) => setTracker(e.target.value as "botsort.yaml" | "bytetrack.yaml")}>
+                <option value="botsort.yaml">BoT-SORT</option>
+                <option value="bytetrack.yaml">ByteTrack</option>
+              </select>
+            </div>
+            <div className="field">
+              <label htmlFor="detection-only"><input id="detection-only" type="checkbox" checked={detectionOnly} onChange={(e) => setDetectionOnly(e.target.checked)} aria-describedby="detection-only-help" /> Detection-only mode</label>
+              <span id="detection-only-help" className="muted">Skips camera/homography and tactical analytics.</span>
+            </div>
+            <div className="field">
+              <label htmlFor="enable-jersey"><input id="enable-jersey" type="checkbox" checked={enableJersey} onChange={(e) => setEnableJersey(e.target.checked)} aria-describedby="jersey-help" /> Jersey recognition</label>
+              <span id="jersey-help" className="muted">Off is the fastest clean benchmark.</span>
+            </div>
+            <div className="field">
+              <label htmlFor="jersey-interval">Jersey interval (frames)</label>
+              <input id="jersey-interval" type="number" min="1" max="300" value={jerseyInterval} disabled={!enableJersey} onChange={(e) => setJerseyInterval(Number(e.target.value))} />
+            </div>
+            <div className="field">
+              <label htmlFor="persist-results"><input id="persist-results" type="checkbox" checked={persistResults} onChange={(e) => setPersistResults(e.target.checked)} aria-describedby="persist-help" /> Persist SQLite results</label>
+              <span id="persist-help" className="muted">Writes are batched every 100 frames.</span>
+            </div>
           </div>
 
           <div className="actions">
-            <button className="primary" type="button" onClick={() => void submitJob()} disabled={submitting || health.status !== "ok" || ["queued", "running"].includes(job?.status ?? "")}>
-              {submitting ? "Submitting…" : ["queued", "running"].includes(job?.status ?? "") ? "Analysis running…" : "Run analysis"}
+            <button
+              className="primary"
+              type="button"
+              onClick={() => void submitJob()}
+              disabled={submitting || health.status !== "ok" || analysisActive}
+              aria-busy={submitting || analysisActive}
+            >
+              {submitting ? "Submitting…" : analysisActive ? "Analysis running…" : "Run analysis"}
             </button>
             <span className="muted">For performance comparisons, keep the same 60 seconds and change one setting at a time.</span>
           </div>
-          {formError ? <div className="error-box" style={{ marginTop: 14 }}>{formError}</div> : null}
+          {formError ? <div className="error-box" role="alert" style={{ marginTop: 14 }}>{formError}</div> : null}
         </section>
 
-        <section className="panel span-4">
-          <h2>match_config.json</h2>
-          <p className="muted">Sent with every job for team and player distinction.</p>
-          <textarea value={matchConfigText} onChange={(e) => setMatchConfigText(e.target.value)} spellCheck={false} />
-          {parsedMatchConfig.error ? <div className="error-box">{parsedMatchConfig.error}</div> : <div className="muted">JSON valid</div>}
+        <section className="panel span-4" aria-labelledby="match-config-title">
+          <h2 id="match-config-title">match_config.json</h2>
+          <p id="match-config-help" className="muted">Sent with every job for team and player distinction.</p>
+          <textarea
+            id="match-config"
+            value={matchConfigText}
+            onChange={(e) => setMatchConfigText(e.target.value)}
+            spellCheck={false}
+            aria-label="Match configuration JSON"
+            aria-describedby="match-config-help match-config-status"
+            aria-invalid={Boolean(parsedMatchConfig.error)}
+          />
+          {parsedMatchConfig.error ? (
+            <div id="match-config-status" className="error-box" role="alert">{parsedMatchConfig.error}</div>
+          ) : (
+            <div id="match-config-status" className="muted" role="status">JSON valid</div>
+          )}
         </section>
 
-        <section className="panel span-12">
+        <section className="panel span-12" aria-labelledby="results-title" aria-busy={analysisActive}>
           <div className="status-line">
-            <h2 style={{ margin: 0 }}>Results</h2>
-            {job?.status ? <span className={`status ${job.status}`}>{job.status}</span> : <span className="muted">No remote run submitted yet.</span>}
+            <h2 id="results-title" style={{ margin: 0 }}>Results</h2>
+            <span role="status" aria-live="polite" aria-atomic="true">
+              {job?.status ? <span className={`status ${job.status}`}>{job.status}</span> : <span className="muted">No remote run submitted yet.</span>}
+            </span>
             {job?.job_id ? <span className="muted">Job {job.job_id}</span> : null}
           </div>
-          {job?.error ? <div className="error-box" style={{ marginTop: 14 }}>{job.error}</div> : null}
+          {job?.error ? <div className="error-box" role="alert" style={{ marginTop: 14 }}>{job.error}</div> : null}
 
           {summary ? <>
             <div className="metrics" style={{ marginTop: 18 }}>
@@ -254,7 +340,10 @@ export default function LabPage() {
           </> : null}
         </section>
 
-        <section className="panel span-12"><h2>Worker log</h2><pre>{logs.length ? logs.join("\n") : "Logs will appear here while the worker processes the job."}</pre></section>
+        <section className="panel span-12" aria-labelledby="worker-log-title">
+          <h2 id="worker-log-title">Worker log</h2>
+          <pre aria-label="Worker processing log">{logs.length ? logs.join("\n") : "Logs will appear here while the worker processes the job."}</pre>
+        </section>
       </div>
     </main>
   );
