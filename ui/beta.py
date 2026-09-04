@@ -11,8 +11,8 @@ BRAND_DIR = ROOT / "web" / "public" / "brand"
 APP_ICON = BRAND_DIR / "courtflux_app_icon_128px.png"
 HORIZONTAL_LOGO = BRAND_DIR / "horizontal_logo_safe_crop.png"
 
-# Public marketing page and internal benchmark intentionally share one entrypoint.
-# The existing benchmark remains isolated in beta_app.py and is not restructured.
+# Public marketing page, customer account shell and internal benchmark share one
+# entrypoint. The existing benchmark remains isolated in beta_app.py.
 _original_set_page_config = st.set_page_config
 _original_title = st.title
 
@@ -56,10 +56,20 @@ def _current_view() -> str:
             return "site"
 
 
-if _current_view() == "lab":
+view = _current_view()
+
+if view == "lab":
     st.set_page_config = _courtflux_page_config
     st.title = _courtflux_title
     runpy.run_path(str(Path(__file__).with_name("beta_app.py")), run_name="__main__")
+elif view in {"login", "signup"}:
+    _original_set_page_config(
+        page_title="CourtFlux — Sign in" if view == "login" else "CourtFlux — Join the Beta",
+        page_icon=_page_icon(),
+        layout="wide",
+        initial_sidebar_state="collapsed",
+    )
+    runpy.run_path(str(Path(__file__).with_name("auth.py")), run_name="__main__")
 else:
     _original_set_page_config(
         page_title="CourtFlux — Basketball Intelligence from Video",
