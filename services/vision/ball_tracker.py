@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+import os
 from math import exp, log
 from typing import Any
 
@@ -49,10 +50,10 @@ class TemporalBallTracker:
     Association weights and the high-confidence gate extension are configurable so they
     can be benchmarked offline without changing the production defaults.
 
-    Controlled reacquisition provides an escape hatch when the active trajectory is no
-    longer supported. It never widens the normal gate. Instead, an out-of-gate challenger
-    must be sufficiently confident and persist consistently across multiple frames before
-    it is allowed to replace the active trajectory.
+    Optional controlled reacquisition provides an escape hatch when the active trajectory
+    is no longer supported. It never widens the normal gate. Instead, an out-of-gate
+    challenger must be sufficiently confident and persist consistently across multiple
+    frames before it is allowed to replace the active trajectory.
     """
 
     def __init__(
@@ -68,12 +69,12 @@ class TemporalBallTracker:
         score_size_weight: float = 0.10,
         high_confidence_gate_threshold: float = 0.85,
         high_confidence_gate_multiplier: float = 1.35,
-        reacquire_enabled: bool = True,
-        reacquire_min_confidence: float = 0.45,
-        reacquire_confidence_margin: float = 0.15,
-        reacquire_confirm_frames: int = 2,
-        reacquire_radius_norm: float = 0.04,
-        reacquire_min_size_similarity: float = 0.25,
+        reacquire_enabled: bool | None = None,
+        reacquire_min_confidence: float | None = None,
+        reacquire_confidence_margin: float | None = None,
+        reacquire_confirm_frames: int | None = None,
+        reacquire_radius_norm: float | None = None,
+        reacquire_min_size_similarity: float | None = None,
     ) -> None:
         self.max_hold_frames = max(0, int(max_hold_frames))
         self.reset_after_frames = max(self.max_hold_frames + 1, int(reset_after_frames))
@@ -102,7 +103,37 @@ class TemporalBallTracker:
             1.0, float(high_confidence_gate_multiplier)
         )
 
-        self.reacquire_enabled = bool(reacquire_enabled)
+        self.reacquire_enabled = (
+            self._env_bool("BASKETBALL_BALL_REACQUIRE", False)
+            if reacquire_enabled is None
+            else bool(reacquire_enabled)
+        )
+        reacquire_min_confidence = (
+            self._env_float("BASKETBALL_BALL_REACQUIRE_MIN_CONF", 0.45)
+            if reacquire_min_confidence is None
+            else float(reacquire_min_confidence)
+        )
+        reacquire_confidence_margin = (
+            self._env_float("BASKETBALL_BALL_REACQUIRE_CONF_MARGIN", 0.15)
+            if reacquire_confidence_margin is None
+            else float(reacquire_confidence_margin)
+        )
+        reacquire_confirm_frames = (
+            self._env_int("BASKETBALL_BALL_REACQUIRE_CONFIRM_FRAMES", 2)
+            if reacquire_confirm_frames is None
+            else int(reacquire_confirm_frames)
+        )
+        reacquire_radius_norm = (
+            self._env_float("BASKETBALL_BALL_REACQUIRE_RADIUS_NORM", 0.04)
+            if reacquire_radius_norm is None
+            else float(reacquire_radius_norm)
+        )
+        reacquire_min_size_similarity = (
+            self._env_float("BASKETBALL_BALL_REACQUIRE_MIN_SIZE_SIM", 0.25)
+            if reacquire_min_size_similarity is None
+            else float(reacquire_min_size_similarity)
+        )
+
         self.reacquire_min_confidence = max(
             0.0, min(float(reacquire_min_confidence), 1.0)
         )
@@ -114,6 +145,18 @@ class TemporalBallTracker:
         self.reacquire_min_size_similarity = max(
             0.0, min(float(reacquire_min_size_similarity), 1.0)
         )
+
+        if os.getenv("BASKETBALL_BALL_REACQUIRE") is not None:
+            print(
+                "🏀 Ball controlled reacquisition: "
+                f"{'on' if self.reacquire_enabled else 'off'} "
+                f"min_conf={self.reacquire_min_confidence:.2f} "
+                f"margin={self.reacquire_confidence_margin:.2f} "
+                f"confirm={self.reacquire_confirm_frames}f "
+                f"radius={self.reacquire_radius_norm:.3f}diag "
+                f"min_size_sim={self.reacquire_min_size_similarity:.2f}",
+                flush=True,
+            )
 
         self.last_center: np.ndarray | None = None
         self.last_box: list[int] | None = None
@@ -128,6 +171,35 @@ class TemporalBallTracker:
         self._challenger_last_frame_id: int | None = None
         self._challenger_streak = 0
         self._challenger_confidence: float | None = None
+
+    @staticmethod
+    def _env_bool(name: str, fallback: bool) -> bool:
+        raw = os.getenv(name)
+        if raw is None or not raw.strip():
+            return bool(fallback)
+        return raw.strip().lower() not in {"0", "false", "no", "off"}
+
+    @staticmethod
+    def _env_float(name: str, fallback: float) -> float:
+        raw = os.getenv(name)
+        if raw is None or not raw.strip():
+            return float(fallback)
+        try:
+            return float(raw)
+        except ValueError:
+            print(f"⚠️ Invalid {name}={raw!r}; using {fallback:.3f}.", flush=True)
+            return float(fallback)
+
+    @staticmethod
+    def _env_int(name: str, fallback: int) -> int:
+        raw = os.getenv(name)
+        if raw is None or not raw.strip():
+            return int(fallback)
+        try:
+            return int(raw)
+        except ValueError:
+            print(f"⚠️ Invalid {name}={raw!r}; using {fallback}.", flush=True)
+            return int(fallback)
 
     @staticmethod
     def _frame_diagonal(frame_shape: tuple[int, ...]) -> float:
@@ -507,8 +579,12 @@ class TemporalBallTracker:
                 gate_norm=None,
                 rejected_candidates=0,
                 reset_velocity=True,
-                reacquired=True,
-                source="detector_reacquired",
+                reacquired=self.reacquire_enabled,
+                source=(
+                    "detector_reacquired"
+                    if self.reacquire_enabled
+                    else "detector_associated"
+                ),
             )
 
         predicted_center = self._predict_center(frame_id)
