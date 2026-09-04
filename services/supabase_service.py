@@ -1,0 +1,152 @@
+from __future__ import annotations
+
+import os
+from datetime import datetime, timezone
+from typing import Any
+
+try:
+    from supabase import Client, create_client
+except Exception:  # pragma: no cover - optional until dependencies are installed
+    Client = Any  # type: ignore[misc,assignment]
+    create_client = None
+
+
+def utc_now() -> str:
+    return datetime.now(timezone.utc).isoformat()
+
+
+def _flatten_numeric_metrics(value: Any, prefix: str = "") -> list[tuple[str, float]]:
+    rows: list[tuple[str, float]] = []
+    if isinstance(value, dict):
+        for key, child in value.items():
+            child_prefix = f"{prefix}.{key}" if prefix else str(key)
+            rows.extend(_flatten_numeric_metrics(child, child_prefix))
+    elif isinstance(value, (int, float)) and not isinstance(value, bool) and prefix:
+        rows.append((prefix, float(value)))
+    return rows
+
+
+class SupabaseRunStore:
+    """Best-effort platform persistence; inference must not depend on network writes."""
+
+    def __init__(self) -> None:
+        url = (os.getenv("SUPABASE_URL") or os.getenv("NEXT_PUBLIC_SUPABASE_URL") or "").strip()
+        key = os.getenv("SUPABASE_SERVICE_ROLE_KEY", "").strip()
+        self.client: Client | None = None
+        self.enabled = bool(url and key and create_client is not None)
+
+        if self.enabled:
+            try:
+                self.client = create_client(url, key)
+                print("☁️ CourtFlux Supabase persistence: on")
+            except Exception as exc:
+                self.enabled = False
+                print(f"⚠️ CourtFlux Supabase persistence disabled: {exc}")
+        else:
+            print("☁️ CourtFlux Supabase persistence: off (configure SUPABASE_URL + SUPABASE_SERVICE_ROLE_KEY)")
+
+    def _warn(self, action: str, exc: Exception) -> None:
+        print(f"⚠️ Supabase {action} failed: {type(exc).__name__}: {exc}")
+
+    def update_job(self, job_id: str | None, values: dict[str, Any]) -> None:
+        if not self.client or not job_id:
+            return
+        try:
+            self.client.table("analysis_jobs").update(values).eq("id", job_id).execute()
+        except Exception as exc:
+            self._warn("job update", exc)
+
+    def update_run(self, run_id: str | None, values: dict[str, Any]) -> None:
+        if not self.client or not run_id:
+            return
+        try:
+            self.client.table("analysis_runs").update(values).eq("id", run_id).execute()
+        except Exception as exc:
+            self._warn("run update", exc)
+
+    def mark_running(self, job_id: str | None, run_id: str | None) -> None:
+        started_at = utc_now()
+        self.update_job(job_id, {"status": "running", "started_at": started_at})
+        self.update_run(run_id, {"status": "running", "started_at": started_at})
+
+    def mark_failed(
+        self,
+        job_id: str | None,
+        run_id: str | None,
+        error: str,
+        log_tail: str | None = None,
+    ) -> None:
+        completed_at = utc_now()
+        job_values: dict[str, Any] = {
+            "status": "failed",
+            "completed_at": completed_at,
+            "error": error,
+        }
+        if log_tail:
+            job_values["log_tail"] = log_tail[-12000:]
+        self.update_job(job_id, job_values)
+        self.update_run(run_id, {"status": "failed", "completed_at": completed_at})
+
+    def mark_completed(
+        self,
+        job_id: str | None,
+        run_id: str | None,
+        summary: dict[str, Any] | None,
+        request_data: dict[str, Any],
+    ) -> None:
+        completed_at = utc_now()
+        summary = summary or {}
+        self.update_job(job_id, {"status": "completed", "completed_at": completed_at, "error": None})
+        self.update_run(
+            run_id,
+            {
+                "status": "completed",
+                "completed_at": completed_at,
+                "summary": summary,
+            },
+        )
+
+        if not self.client or not run_id:
+            return
+
+        try:
+            metric_rows = [
+                {
+                    "run_id": run_id,
+                    "scope": "run",
+                    "metric_key": key,
+                    "metric_value": value,
+                }
+                for key, value in _flatten_numeric_metrics(summary)
+            ]
+            if metric_rows:
+                self.client.table("analysis_metrics").upsert(
+                    metric_rows,
+                    on_conflict="run_id,scope,metric_key",
+                ).execute()
+        except Exception as exc:
+            self._warn("metric upsert", exc)
+
+        workspace_id = request_data.get("workspace_id")
+        user_id = request_data.get("user_id")
+        start = request_data.get("start_time_sec")
+        end = request_data.get("end_time_sec")
+        try:
+            if workspace_id and start is not None and end is not None:
+                duration_minutes = max(0.0, float(end) - float(start)) / 60.0
+                self.client.table("usage_events").insert(
+                    {
+                        "workspace_id": workspace_id,
+                        "user_id": user_id,
+                        "analysis_run_id": run_id,
+                        "metric_code": "analysis_minutes",
+                        "quantity": duration_minutes,
+                        "metadata": {
+                            "device": request_data.get("device"),
+                            "imgsz": request_data.get("imgsz"),
+                            "subscription_plan": request_data.get("subscription_plan"),
+                        },
+                    }
+                ).execute()
+        except Exception as exc:
+            self._warn("usage insert", exc)
