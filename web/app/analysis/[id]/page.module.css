@@ -1,0 +1,603 @@
+.shell {
+  width: min(1180px, calc(100% - 40px));
+  margin: 0 auto;
+  padding: 24px 0 72px;
+}
+
+.topbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 20px;
+  padding: 10px 0 20px;
+  margin-bottom: 30px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+.brand {
+  display: inline-flex;
+  align-items: center;
+}
+
+.brand img {
+  display: block;
+  width: 210px;
+  height: auto;
+}
+
+.topActions {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+  flex-wrap: wrap;
+}
+
+.topActions a,
+.secondaryButton,
+.exportButton {
+  min-height: 40px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 10px;
+  padding: 9px 13px;
+  background: rgba(10, 24, 39, 0.82);
+  color: #eef3f8;
+  text-decoration: none;
+  font: inherit;
+  font-weight: 750;
+  cursor: pointer;
+}
+
+.topActions a:hover,
+.secondaryButton:hover,
+.exportButton:hover {
+  border-color: rgba(255, 116, 23, 0.58);
+  background: rgba(15, 32, 49, 0.95);
+}
+
+.hero {
+  display: grid;
+  grid-template-columns: minmax(0, 1.3fr) minmax(280px, 0.7fr);
+  gap: 28px;
+  align-items: end;
+  margin-bottom: 18px;
+}
+
+.eyebrow {
+  margin-bottom: 9px;
+  color: #ff8c43;
+  font-size: 0.76rem;
+  font-weight: 850;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+}
+
+.hero h1 {
+  width: auto;
+  aspect-ratio: auto;
+  margin: 0;
+  overflow: visible;
+  text-indent: 0;
+  background: none;
+  font-size: clamp(2rem, 4vw, 3.5rem);
+  line-height: 1.02;
+  letter-spacing: -0.045em;
+}
+
+.hero p {
+  max-width: 760px;
+  margin: 14px 0 0;
+  line-height: 1.65;
+}
+
+.statusCard,
+.panel,
+.metricCard,
+.videoCard {
+  border: 1px solid rgba(125, 151, 178, 0.22);
+  background: linear-gradient(180deg, rgba(16, 31, 48, 0.96), rgba(7, 18, 30, 0.96));
+  box-shadow: 0 18px 50px rgba(0, 0, 0, 0.14), inset 0 1px rgba(255, 255, 255, 0.025);
+}
+
+.statusCard {
+  border-radius: 18px;
+  padding: 20px;
+}
+
+.statusLine {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 10px;
+}
+
+.statusPill {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 84px;
+  padding: 7px 10px;
+  border-radius: 999px;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  font-size: 0.7rem;
+  font-weight: 850;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+}
+
+.statusQueued,
+.statusRunning {
+  color: #ffd0af;
+  border-color: rgba(255, 116, 23, 0.34);
+  background: rgba(255, 116, 23, 0.08);
+}
+
+.statusCompleted {
+  color: #bdf3d2;
+  border-color: rgba(53, 208, 127, 0.34);
+  background: rgba(53, 208, 127, 0.08);
+}
+
+.statusFailed {
+  color: #ffd0d2;
+  border-color: rgba(239, 90, 97, 0.34);
+  background: rgba(239, 90, 97, 0.08);
+}
+
+.statusCard strong {
+  display: block;
+  color: #fff;
+  font-size: 1.2rem;
+}
+
+.statusCard small {
+  display: block;
+  margin-top: 6px;
+  color: #93a2b2;
+  line-height: 1.45;
+}
+
+.errorBox,
+.infoBox,
+.betaBox {
+  margin: 16px 0;
+  padding: 14px 15px;
+  border-radius: 12px;
+  line-height: 1.55;
+}
+
+.errorBox {
+  border: 1px solid rgba(239, 90, 97, 0.32);
+  background: rgba(239, 90, 97, 0.08);
+  color: #ffd2d4;
+}
+
+.infoBox,
+.betaBox {
+  border: 1px solid rgba(255, 116, 23, 0.28);
+  background: rgba(255, 116, 23, 0.055);
+  color: #bdc8d2;
+}
+
+.progressPanel {
+  margin-bottom: 18px;
+  border: 1px solid rgba(125, 151, 178, 0.2);
+  border-radius: 18px;
+  padding: 22px;
+  background: rgba(7, 18, 30, 0.84);
+}
+
+.progressHeader {
+  display: flex;
+  justify-content: space-between;
+  gap: 16px;
+  align-items: flex-start;
+  margin-bottom: 20px;
+}
+
+.progressHeader h2,
+.panel h2,
+.videoCard h2 {
+  margin: 0;
+  font-size: 1.08rem;
+}
+
+.progressHeader p,
+.panelHeader p {
+  margin: 5px 0 0;
+  color: #93a2b2;
+  font-size: 0.82rem;
+  line-height: 1.5;
+}
+
+.timeline {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.step {
+  position: relative;
+  min-height: 104px;
+  padding: 15px;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 14px;
+  background: rgba(255, 255, 255, 0.025);
+}
+
+.stepIndex {
+  width: 28px;
+  height: 28px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  margin-bottom: 12px;
+  border-radius: 50%;
+  border: 1px solid rgba(255, 255, 255, 0.16);
+  color: #8fa0b1;
+  font-size: 0.72rem;
+  font-weight: 850;
+}
+
+.step strong {
+  display: block;
+  color: #eef3f8;
+  font-size: 0.84rem;
+}
+
+.step small {
+  display: block;
+  margin-top: 5px;
+  color: #8595a5;
+  line-height: 1.4;
+}
+
+.stepActive {
+  border-color: rgba(255, 116, 23, 0.42);
+  background: rgba(255, 116, 23, 0.06);
+}
+
+.stepActive .stepIndex {
+  border-color: #ff8b3b;
+  color: #ffb27f;
+  box-shadow: 0 0 0 5px rgba(255, 116, 23, 0.07);
+}
+
+.stepDone {
+  border-color: rgba(53, 208, 127, 0.22);
+}
+
+.stepDone .stepIndex {
+  color: #bdf3d2;
+  border-color: rgba(53, 208, 127, 0.42);
+}
+
+.metaGrid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 12px;
+  margin-bottom: 18px;
+}
+
+.metricCard {
+  border-radius: 16px;
+  padding: 17px;
+}
+
+.metricLabel {
+  color: #91a1b2;
+  font-size: 0.74rem;
+  font-weight: 750;
+}
+
+.metricValue {
+  margin-top: 8px;
+  color: #fff;
+  font-size: clamp(1.35rem, 2.5vw, 2rem);
+  font-weight: 850;
+  letter-spacing: -0.035em;
+}
+
+.metricNote {
+  margin-top: 5px;
+  color: #8494a4;
+  font-size: 0.74rem;
+  line-height: 1.4;
+}
+
+.contentGrid {
+  display: grid;
+  grid-template-columns: minmax(0, 1.35fr) minmax(300px, 0.65fr);
+  gap: 18px;
+  align-items: start;
+}
+
+.stack {
+  display: grid;
+  gap: 18px;
+}
+
+.panel,
+.videoCard {
+  border-radius: 18px;
+  padding: 22px;
+}
+
+.panelHeader {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+  margin-bottom: 18px;
+}
+
+.tabs {
+  display: flex;
+  gap: 7px;
+  flex-wrap: wrap;
+  margin-bottom: 18px;
+}
+
+.tab {
+  min-height: 38px;
+  padding: 8px 12px;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.025);
+  color: #aeb9c5;
+  font: inherit;
+  font-size: 0.78rem;
+  font-weight: 800;
+  cursor: pointer;
+}
+
+.tabActive {
+  border-color: rgba(255, 116, 23, 0.44);
+  background: rgba(255, 116, 23, 0.09);
+  color: #ffc39b;
+}
+
+.coverageRow {
+  display: grid;
+  gap: 7px;
+  margin: 15px 0;
+}
+
+.coverageLabel {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+  color: #aeb9c5;
+  font-size: 0.8rem;
+}
+
+.coverageLabel strong {
+  color: #f7f9fb;
+  font-size: 0.9rem;
+}
+
+.barTrack {
+  height: 9px;
+  overflow: hidden;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.075);
+}
+
+.barFill {
+  height: 100%;
+  border-radius: inherit;
+  background: linear-gradient(90deg, #ff7417, #ff9a52);
+}
+
+.dataList {
+  display: grid;
+  gap: 0;
+}
+
+.dataRow {
+  display: flex;
+  justify-content: space-between;
+  gap: 18px;
+  padding: 11px 0;
+  border-top: 1px solid rgba(255, 255, 255, 0.07);
+  color: #98a7b6;
+  font-size: 0.82rem;
+}
+
+.dataRow:first-child {
+  border-top: 0;
+}
+
+.dataRow strong {
+  color: #eef3f8;
+  text-align: right;
+}
+
+.videoFrame {
+  width: 100%;
+  aspect-ratio: 16 / 9;
+  overflow: hidden;
+  border-radius: 13px;
+  background: #030a11;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+.videoFrame video {
+  width: 100%;
+  height: 100%;
+  display: block;
+  object-fit: contain;
+}
+
+.videoPlaceholder {
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  align-items: center;
+  gap: 9px;
+  padding: 24px;
+  text-align: center;
+  color: #97a6b4;
+}
+
+.videoPlaceholder strong {
+  color: #eef3f8;
+}
+
+.externalLink {
+  display: inline-flex;
+  margin-top: 14px;
+  color: #ff9a52;
+  font-weight: 800;
+  text-decoration: none;
+}
+
+.windowBar {
+  margin-top: 18px;
+  padding-top: 16px;
+  border-top: 1px solid rgba(255, 255, 255, 0.07);
+}
+
+.windowTrack {
+  position: relative;
+  height: 7px;
+  margin: 10px 0 7px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.08);
+}
+
+.windowFill {
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  background: linear-gradient(90deg, rgba(73, 155, 255, 0.7), rgba(255, 116, 23, 0.9));
+}
+
+.windowMeta {
+  display: flex;
+  justify-content: space-between;
+  gap: 10px;
+  color: #8494a4;
+  font-size: 0.72rem;
+}
+
+.exportActions {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.betaList {
+  display: grid;
+  gap: 10px;
+  margin: 14px 0 0;
+  padding: 0;
+  list-style: none;
+}
+
+.betaList li {
+  position: relative;
+  padding-left: 17px;
+  color: #9baab9;
+  font-size: 0.8rem;
+  line-height: 1.5;
+}
+
+.betaList li::before {
+  content: "";
+  position: absolute;
+  left: 0;
+  top: 0.55em;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: #ff8332;
+}
+
+.loading {
+  min-height: 360px;
+  display: grid;
+  place-items: center;
+  text-align: center;
+  color: #9caab8;
+}
+
+.loading strong {
+  display: block;
+  margin-bottom: 8px;
+  color: #f4f7fa;
+  font-size: 1.1rem;
+}
+
+@media (max-width: 900px) {
+  .shell {
+    width: min(100% - 28px, 760px);
+    padding-top: 16px;
+  }
+
+  .hero,
+  .contentGrid {
+    grid-template-columns: 1fr;
+  }
+
+  .metaGrid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .timeline {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 560px) {
+  .shell {
+    width: min(100% - 22px, 520px);
+  }
+
+  .topbar {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+
+  .brand img {
+    width: 188px;
+  }
+
+  .topActions {
+    width: 100%;
+  }
+
+  .topActions a {
+    flex: 1 1 auto;
+  }
+
+  .metaGrid,
+  .timeline {
+    grid-template-columns: 1fr;
+  }
+
+  .panel,
+  .videoCard,
+  .progressPanel,
+  .statusCard,
+  .metricCard {
+    padding: 17px;
+  }
+
+  .panelHeader,
+  .progressHeader,
+  .dataRow,
+  .windowMeta {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+
+  .dataRow strong {
+    text-align: left;
+  }
+}
