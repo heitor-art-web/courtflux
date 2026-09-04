@@ -81,8 +81,6 @@ def point_matches_box(pred: list[float], point: list[float], base_margin_px: flo
     x1, y1, x2, y2 = pred
     width = max(0.0, x2 - x1)
     height = max(0.0, y2 - y1)
-    # Tiny broadcast balls are very sensitive to a 1-3 px human click error.
-    # Expand only modestly so a nearby false object is not treated as the ball.
     margin = max(float(base_margin_px), 0.25 * max(width, height))
     x, y = float(point[0]), float(point[1])
     return (x1 - margin) <= x <= (x2 + margin) and (y1 - margin) <= y <= (y2 + margin)
@@ -322,7 +320,7 @@ def confidence_calibration(
         values = [
             item
             for item in labeled_predictions
-            if lower <= item[0] < upper or (upper == 1.0 and item[0] <= 1.0)
+            if lower <= item[0] < upper or (upper == 1.0 and lower <= item[0] <= 1.0)
         ]
         if not values:
             continue
