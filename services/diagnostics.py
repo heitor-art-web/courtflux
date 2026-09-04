@@ -54,12 +54,14 @@ class RunDiagnostics:
         self.predicted_ball_frames = 0
         self.missing_ball_frames = 0
         self.ball_rejected_outside_court = 0
-        self.homography_frames = 0
+        self.valid_homography_frames = 0
+        self.keypoint_model_frames = 0
         self.selected_ball_confidences = []
 
     def log_frame(self, frame_state: Any) -> None:
         detector: Dict[str, Any] = frame_state.diagnostics.get("detector", {})
         analytics: Dict[str, Any] = frame_state.diagnostics.get("analytics", {})
+        camera: Dict[str, Any] = frame_state.diagnostics.get("camera", {})
 
         valid_gameplay = bool(getattr(frame_state, "valid_gameplay", False))
         raw_ball_candidates = int(detector.get("raw_ball_candidates", 0) or 0)
@@ -72,6 +74,10 @@ class RunDiagnostics:
             for name, count in rejected_by_class.items()
             if "ball" in str(name).lower()
         )
+
+        homography_is_identity = bool(camera.get("homography_is_identity", True))
+        homography_valid = bool(analytics.get("homography_active", False)) and not homography_is_identity
+        keypoint_model_active = bool(camera.get("keypoint_model_active", False))
 
         record = {
             "frame_id": int(getattr(frame_state, "frame_id", 0)),
@@ -88,7 +94,9 @@ class RunDiagnostics:
             "selected_ball_conf": selected_conf,
             "ball_source": ball_source,
             "players_final": int(analytics.get("players_final", len(getattr(frame_state, "players", []))) or 0),
-            "homography_active": bool(analytics.get("homography_active", False)),
+            "keypoint_model_active": keypoint_model_active,
+            "homography_is_identity": homography_is_identity,
+            "homography_valid": homography_valid,
             "events": list(getattr(frame_state, "events", []) or []),
         }
 
@@ -110,8 +118,10 @@ class RunDiagnostics:
                 self.predicted_ball_frames += 1
             elif ball_source == "missing":
                 self.missing_ball_frames += 1
-            if record["homography_active"]:
-                self.homography_frames += 1
+            if homography_valid:
+                self.valid_homography_frames += 1
+            if keypoint_model_active:
+                self.keypoint_model_frames += 1
             if selected_conf is not None:
                 self.selected_ball_confidences.append(float(selected_conf))
 
@@ -147,7 +157,11 @@ class RunDiagnostics:
                 "selected_conf_mean": mean_conf,
                 "selected_conf_median": median_conf,
             },
-            "homography_active_rate": self._rate(self.homography_frames, self.gameplay_frames),
+            "court": {
+                "keypoint_model_active_rate": self._rate(self.keypoint_model_frames, self.gameplay_frames),
+                "valid_homography_rate": self._rate(self.valid_homography_frames, self.gameplay_frames),
+            },
+            "homography_active_rate": self._rate(self.valid_homography_frames, self.gameplay_frames),
             "frames_file": str(self.frames_path),
         }
         if extra:
