@@ -13,6 +13,8 @@ class Pipeline:
         engine,
         backboard_roi,
         db_conn=None,
+        detection_only: bool = False,
+        persist_results: bool = True,
     ):
         self.gameplay_filter = gameplay_filter
         self.camera_tracker = camera_tracker
@@ -23,11 +25,11 @@ class Pipeline:
         self.engine = engine
         self.backboard_roi = backboard_roi
         self.db_conn = db_conn
-
+        self.detection_only = bool(detection_only)
+        self.persist_results = bool(persist_results)
         self._camera_tracker_initialized = False
 
     def _ensure_camera_tracker(self, frame: np.ndarray):
-        """Lazy-initialize CameraTracker on the first frame if passed as a factory."""
         if not self._camera_tracker_initialized and self.camera_tracker is not None:
             if callable(self.camera_tracker) and not hasattr(self.camera_tracker, "process"):
                 self.camera_tracker = self.camera_tracker(
@@ -40,9 +42,6 @@ class Pipeline:
     def process(self, frame_state):
         self.profiler.start("Total")
 
-        # -------------------------------------------------
-        # 1. Gameplay Filter
-        # -------------------------------------------------
         self.profiler.start("Gameplay Filter")
         is_gameplay = self.gameplay_filter.is_gameplay(frame_state.frame)
         frame_state.valid_gameplay = is_gameplay
@@ -53,53 +52,66 @@ class Pipeline:
         self.profiler.stop("Gameplay Filter")
 
         if not is_gameplay:
-            if self.camera_tracker is not None and hasattr(self.camera_tracker, "reset_flow"):
+            if not self.detection_only and self.camera_tracker is not None and hasattr(self.camera_tracker, "reset_flow"):
                 self.camera_tracker.reset_flow()
-
+            self.profiler.frame_skipped()
             self.profiler.stop("Total")
             return frame_state
 
-        # -------------------------------------------------
-        # 2. Camera Tracking (Homography / Court Matrix)
-        # -------------------------------------------------
-        self.profiler.start("Camera Tracker")
-        if self.camera_tracker is not None:
+        # Detection-only beta deliberately avoids camera/homography work.
+        if not self.detection_only and self.camera_tracker is not None:
+            self.profiler.start("Camera Tracker")
             self._ensure_camera_tracker(frame_state.frame)
             frame_state = self.camera_tracker.process(frame_state)
-        self.profiler.stop("Camera Tracker")
+            self.profiler.stop("Camera Tracker")
 
-        # -------------------------------------------------
-        # 3. Detection (Players & Ball)
-        # -------------------------------------------------
         self.profiler.start("Detector")
         frame_state = self.detector.process(frame_state)
         self.profiler.stop("Detector")
 
-        # -------------------------------------------------
-        # 4. Analytics
-        # -------------------------------------------------
-        self.profiler.start("Analytics")
-        frame_state = self.engine.process(frame_state)
-        self.profiler.stop("Analytics")
+        # Import detector sub-stage timings into the shared profiler.
+        detector_diag = frame_state.diagnostics.get("detector", {}) or {}
+        for name, milliseconds in (detector_diag.get("timing_ms", {}) or {}).items():
+            self.profiler.add(f"Detector/{name}", float(milliseconds) / 1000.0)
 
-        # -------------------------------------------------
-        # 5. Database Logging
-        # -------------------------------------------------
-        self.profiler.start("Database")
-        self.database.save(frame_state)
-        self.database.save_events(frame_state)
-        self.profiler.stop("Database")
+        if not self.detection_only and self.engine is not None:
+            self.profiler.start("Analytics")
+            frame_state = self.engine.process(frame_state)
+            self.profiler.stop("Analytics")
+        else:
+            frame_state.diagnostics.setdefault("analytics", {})
+            frame_state.diagnostics["analytics"].update(
+                {
+                    "ball_source": "detector" if getattr(frame_state, "ball", None) is not None else "missing",
+                    "players_final": len(getattr(frame_state, "players", []) or []),
+                    "homography_active": False,
+                    "detection_only": True,
+                }
+            )
 
-        # -------------------------------------------------
-        # 6. Optional rendering
-        # -------------------------------------------------
-        # The beta path is intentionally results-first. No radar / 2D court is
-        # rendered. A renderer can still be supplied by other entry points when
-        # annotated media is explicitly needed.
+        if self.persist_results and self.database is not None:
+            self.profiler.start("Database Buffer")
+            self.database.save(frame_state)
+            self.profiler.stop("Database Buffer")
+
+            # Full analytics mode may still save event images, but event DB rows are
+            # already handled by save() and are never inserted twice.
+            if not self.detection_only:
+                self.profiler.start("Event Snapshots")
+                self.database.save_events(frame_state)
+                self.profiler.stop("Event Snapshots")
+
         if self.renderer is not None:
             self.profiler.start("Renderer")
             frame_state = self.renderer.draw(frame_state)
             self.profiler.stop("Renderer")
 
+        self.profiler.frame_processed()
         self.profiler.stop("Total")
         return frame_state
+
+    def flush(self):
+        if self.database is not None and hasattr(self.database, "flush"):
+            self.profiler.start("Database Flush")
+            self.database.flush()
+            self.profiler.stop("Database Flush")
