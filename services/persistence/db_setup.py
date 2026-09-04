@@ -1,17 +1,17 @@
 import os
 import sqlite3
 
-# 1. Ensure data directory exists first
-os.makedirs('data', exist_ok=True)
-os.makedirs('data/debug_frames', exist_ok=True)
+os.makedirs("data", exist_ok=True)
+os.makedirs("data/debug_frames", exist_ok=True)
 
-# 2. Initialize SQLite Database and Tables IMMEDIATELY
+
 def initialize_database():
+    """Create a clean local beta database for one analysis run."""
     os.makedirs("data", exist_ok=True)
     db_path = os.path.abspath("data/tracking.db")
     print(f"--> Initializing database at: {db_path}")
-  
-    conn = sqlite3.connect('data/tracking.db')
+
+    conn = sqlite3.connect(db_path)
     cursor = conn.cursor()
 
     cursor.execute("DROP TABLE IF EXISTS player_detections")
@@ -19,8 +19,10 @@ def initialize_database():
     cursor.execute("DROP TABLE IF EXISTS game_events")
     cursor.execute("DROP TABLE IF EXISTS passing_networks")
     cursor.execute("DROP TABLE IF EXISTS shot_events")
+    cursor.execute("DROP TABLE IF EXISTS frame_metrics")
 
-    cursor.execute('''
+    cursor.execute(
+        """
         CREATE TABLE player_detections (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             frame_id INTEGER,
@@ -33,9 +35,11 @@ def initialize_database():
             speed_mps REAL,
             closest_defender_dist REAL
         )
-    ''')
+        """
+    )
 
-    cursor.execute('''
+    cursor.execute(
+        """
         CREATE TABLE team_metrics (
             frame_id INTEGER,
             team TEXT,
@@ -45,29 +49,33 @@ def initialize_database():
             avg_speed_mps REAL,
             has_possession BOOLEAN
         )
-    ''')
+        """
+    )
 
-    cursor.execute('''
+    cursor.execute(
+        """
         CREATE TABLE game_events (
             frame_id INTEGER,
             event_type TEXT,
             description TEXT
         )
-    ''')
+        """
+    )
 
-    # Create passing_networks table
-    cursor.execute('''
-        CREATE TABLE IF NOT EXISTS passing_networks (
+    cursor.execute(
+        """
+        CREATE TABLE passing_networks (
             passer_id INTEGER,
             receiver_id INTEGER,
             team TEXT,
             pass_count INTEGER
         )
-    ''')
+        """
+    )
 
-    # Create shot_events table
-    cursor.execute('''
-        CREATE TABLE IF NOT EXISTS shot_events (
+    cursor.execute(
+        """
+        CREATE TABLE shot_events (
             frame_id INTEGER,
             track_id INTEGER,
             team TEXT,
@@ -76,23 +84,26 @@ def initialize_database():
             defender_distance REAL,
             shot_outcome TEXT
         )
-    ''')
+        """
+    )
 
-    # 2. NEW: Pro Tactical Frame Metrics Table
-    cursor.execute("""
-            CREATE TABLE IF NOT EXISTS frame_metrics (
-                frame_id INTEGER PRIMARY KEY,
-                offensive_team TEXT,
-                corner_occupied BOOLEAN,
-                in_paint BOOLEAN,
-                spacing_area_m2 REAL,
-                is_pnr BOOLEAN,
-                transition_lag_sec REAL
-            )
-    """)
+    cursor.execute(
+        """
+        CREATE TABLE frame_metrics (
+            frame_id INTEGER PRIMARY KEY,
+            offensive_team TEXT,
+            corner_occupied BOOLEAN,
+            in_paint BOOLEAN,
+            spacing_area_m2 REAL,
+            is_pnr BOOLEAN,
+            transition_lag_sec REAL
+        )
+        """
+    )
 
     conn.commit()
     conn.close()
 
+
 if __name__ == "__main__":
-  initialize_database()
+    initialize_database()
