@@ -16,6 +16,7 @@ from core.config import settings
 
 
 RUNS_DIR = ROOT / "evaluation" / "runs"
+MATCH_CONFIG_PATH = ROOT / "data" / "match_config.json"
 DEFAULT_VIDEO = "https://www.youtube.com/watch?v=OwiQgAMqyUs"
 
 configured_model = ROOT / settings.model
@@ -41,6 +42,81 @@ def load_summary(path: Path) -> dict:
         return {}
 
 
+def load_match_config() -> dict:
+    try:
+        return json.loads(MATCH_CONFIG_PATH.read_text(encoding="utf-8"))
+    except Exception:
+        return {}
+
+
+def validate_match_config(config: dict) -> list[str]:
+    errors: list[str] = []
+    if not isinstance(config, dict):
+        return ["The match config must be a JSON object."]
+
+    teams = config.get("teams")
+    if not isinstance(teams, dict) or len(teams) < 2:
+        errors.append("'teams' must contain at least two teams.")
+        return errors
+
+    metadata = config.get("metadata", {}) or {}
+    for key in ("home_team", "away_team"):
+        team_name = metadata.get(key)
+        if team_name and team_name not in teams:
+            errors.append(f"metadata.{key}='{team_name}' is not present in teams.")
+
+    for team_name, team_data in teams.items():
+        if not isinstance(team_data, dict):
+            errors.append(f"Team '{team_name}' must be a JSON object.")
+            continue
+
+        kits = team_data.get("kits")
+        if not isinstance(kits, dict) or not kits:
+            errors.append(f"Team '{team_name}' needs at least one kit in 'kits'.")
+
+        roster = team_data.get("roster")
+        if not isinstance(roster, dict) or not roster:
+            errors.append(f"Team '{team_name}' needs a non-empty 'roster'.")
+
+    return errors
+
+
+def render_match_summary(config: dict) -> None:
+    teams = config.get("teams", {}) or {}
+    metadata = config.get("metadata", {}) or {}
+
+    home = metadata.get("home_team") or (list(teams.keys())[0] if teams else "Home")
+    away = metadata.get("away_team") or (list(teams.keys())[1] if len(teams) > 1 else "Away")
+
+    st.subheader("Match configuration")
+    st.caption(
+        "This file is used by the player distinction pipeline for team colours and roster-constrained jersey recognition."
+    )
+
+    cols = st.columns(2)
+    for col, team_name in zip(cols, [home, away]):
+        team_data = teams.get(team_name, {}) or {}
+        roster = team_data.get("roster", {}) or {}
+        kits = team_data.get("kits", {}) or {}
+
+        with col:
+            st.markdown(f"**{team_name}**")
+            st.caption(f"{len(roster)} roster entries · kits: {', '.join(kits.keys()) or 'none'}")
+
+            rows = []
+            for number, player in roster.items():
+                player = player if isinstance(player, dict) else {}
+                rows.append(
+                    {
+                        "#": number,
+                        "Player": player.get("name", ""),
+                        "Position": player.get("position", ""),
+                    }
+                )
+            if rows:
+                st.dataframe(pd.DataFrame(rows), width="stretch", hide_index=True, height=220)
+
+
 def latest_summary_path() -> Path | None:
     if not RUNS_DIR.exists():
         return None
@@ -51,22 +127,22 @@ def latest_summary_path() -> Path | None:
 def flatten_summary(summary: dict) -> dict:
     ball = summary.get("ball", {})
     players = summary.get("players", {})
+    match = summary.get("match_config", {}) or {}
     return {
         "run_id": summary.get("run_id"),
+        "match": f"{match.get('home_team') or '?'} vs {match.get('away_team') or '?'}",
         "model": summary.get("model"),
         "conf": summary.get("detector_conf"),
         "imgsz": summary.get("imgsz"),
-        "device": summary.get("device"),
         "frames": summary.get("gameplay_frames"),
         "raw players/frame": players.get("raw_per_gameplay_frame"),
-        "parsed players/frame": players.get("parsed_per_gameplay_frame"),
+        "final players/frame": players.get("final_per_gameplay_frame"),
+        "team classified %": players.get("team_classification_rate"),
+        "jersey identified %": players.get("jersey_identification_rate"),
         "raw ball candidate %": ball.get("raw_candidate_frame_rate"),
         "selected ball %": ball.get("selected_detection_frame_rate"),
-        "predicted ball %": ball.get("predicted_hold_frame_rate"),
         "missing ball %": ball.get("missing_frame_rate"),
-        "ball rejected by court": ball.get("rejected_outside_court"),
         "ball mean conf": ball.get("selected_conf_mean"),
-        "homography %": summary.get("homography_active_rate"),
         "elapsed s": summary.get("elapsed_sec"),
         "status": summary.get("extra", {}).get("status"),
     }
@@ -77,7 +153,7 @@ def render_summary(summary_path: Path) -> None:
     if not summary:
         return
 
-    st.subheader("Latest diagnostic summary")
+    st.subheader("Latest results")
     st.caption(f"Run: {summary.get('run_id')} · {summary_path.parent}")
 
     if summary.get("extra", {}).get("status") == "failed":
@@ -86,44 +162,76 @@ def render_summary(summary_path: Path) -> None:
     ball = summary.get("ball", {})
     players = summary.get("players", {})
 
-    a, b, c, d, e = st.columns(5)
-    a.metric("Gameplay frames", summary.get("gameplay_frames", 0))
-    b.metric("Raw players/frame", players.get("raw_per_gameplay_frame", 0))
-    c.metric("Raw ball candidate", f"{float(ball.get('raw_candidate_frame_rate') or 0):.1f}%")
-    d.metric("Selected ball", f"{float(ball.get('selected_detection_frame_rate') or 0):.1f}%")
-    e.metric("Ball rejected by court", ball.get("rejected_outside_court", 0))
-
+    st.markdown("**Players**")
     a, b, c, d = st.columns(4)
-    a.metric("Predicted/held ball", f"{float(ball.get('predicted_hold_frame_rate') or 0):.1f}%")
-    b.metric("Missing ball", f"{float(ball.get('missing_frame_rate') or 0):.1f}%")
-    c.metric("Mean ball confidence", ball.get("selected_conf_mean") or 0)
-    d.metric("Homography active", f"{float(summary.get('homography_active_rate') or 0):.1f}%")
+    a.metric("Raw players / frame", players.get("raw_per_gameplay_frame", 0))
+    b.metric("Final players / frame", players.get("final_per_gameplay_frame", 0))
+    c.metric("Team classified", f"{float(players.get('team_classification_rate') or 0):.1f}%")
+    d.metric("Jersey identified", f"{float(players.get('jersey_identification_rate') or 0):.1f}%")
+
+    team_counts = players.get("team_counts", {}) or {}
+    if team_counts:
+        st.caption(
+            "Classified player detections: "
+            + " · ".join(f"{team}: {count}" for team, count in team_counts.items())
+        )
+
+    st.markdown("**Ball**")
+    a, b, c, d = st.columns(4)
+    a.metric("Raw candidate frames", f"{float(ball.get('raw_candidate_frame_rate') or 0):.1f}%")
+    b.metric("Selected detection", f"{float(ball.get('selected_detection_frame_rate') or 0):.1f}%")
+    c.metric("Missing", f"{float(ball.get('missing_frame_rate') or 0):.1f}%")
+    d.metric("Mean confidence", ball.get("selected_conf_mean") or 0)
+
+    st.caption(
+        f"Gameplay frames: {summary.get('gameplay_frames', 0)} · "
+        f"Predicted/held ball: {float(ball.get('predicted_hold_frame_rate') or 0):.1f}% · "
+        f"Ball rejected by court filter: {ball.get('rejected_outside_court', 0)}"
+    )
 
     run_dir = summary_path.parent
-    st.download_button(
-        "Download summary.json",
-        data=summary_path.read_bytes(),
-        file_name=f"{summary.get('run_id', 'run')}_summary.json",
-        mime="application/json",
-    )
+    download_cols = st.columns(4)
+    with download_cols[0]:
+        st.download_button(
+            "summary.json",
+            data=summary_path.read_bytes(),
+            file_name=f"{summary.get('run_id', 'run')}_summary.json",
+            mime="application/json",
+            width="stretch",
+        )
 
     frames_path = run_dir / "frames.jsonl"
     if frames_path.exists():
-        st.download_button(
-            "Download frame diagnostics JSONL",
-            data=frames_path.read_bytes(),
-            file_name=f"{summary.get('run_id', 'run')}_frames.jsonl",
-            mime="application/x-ndjson",
-        )
+        with download_cols[1]:
+            st.download_button(
+                "frames.jsonl",
+                data=frames_path.read_bytes(),
+                file_name=f"{summary.get('run_id', 'run')}_frames.jsonl",
+                mime="application/x-ndjson",
+                width="stretch",
+            )
 
     console_path = run_dir / "console.log"
     if console_path.exists():
-        st.download_button(
-            "Download console.log",
-            data=console_path.read_bytes(),
-            file_name=f"{summary.get('run_id', 'run')}_console.log",
-            mime="text/plain",
-        )
+        with download_cols[2]:
+            st.download_button(
+                "console.log",
+                data=console_path.read_bytes(),
+                file_name=f"{summary.get('run_id', 'run')}_console.log",
+                mime="text/plain",
+                width="stretch",
+            )
+
+    match_snapshot = run_dir / "match_config.json"
+    if match_snapshot.exists():
+        with download_cols[3]:
+            st.download_button(
+                "match_config.json",
+                data=match_snapshot.read_bytes(),
+                file_name=f"{summary.get('run_id', 'run')}_match_config.json",
+                mime="application/json",
+                width="stretch",
+            )
 
 
 def render_comparison() -> None:
@@ -137,14 +245,63 @@ def render_comparison() -> None:
         return
 
     st.subheader("Run comparison")
-    st.caption("Use the same video interval and change one detector parameter at a time.")
+    st.caption("Keep the same video interval and match config, then change one detector parameter at a time.")
     st.dataframe(pd.DataFrame(rows), width="stretch", hide_index=True)
 
 
 st.title("🏀 Basketball AI Analytics — Beta Lab")
-st.write(
-    "Local test bench for one repeatable workflow: YouTube → pipeline → frame-level diagnostics → comparison."
-)
+st.write("YouTube → detection/tracking → measurable results → run comparison.")
+
+# ----------------------------------------------------------------------
+# Match configuration is part of the experiment, so show it before runs.
+# ----------------------------------------------------------------------
+if "match_config_editor" not in st.session_state:
+    if MATCH_CONFIG_PATH.exists():
+        st.session_state["match_config_editor"] = MATCH_CONFIG_PATH.read_text(encoding="utf-8")
+    else:
+        st.session_state["match_config_editor"] = "{}"
+
+try:
+    current_match_config = json.loads(st.session_state["match_config_editor"])
+    config_parse_error = None
+except Exception as exc:
+    current_match_config = {}
+    config_parse_error = str(exc)
+
+config_errors = validate_match_config(current_match_config) if config_parse_error is None else [config_parse_error]
+config_ready = not config_errors
+
+if config_ready:
+    render_match_summary(current_match_config)
+else:
+    st.error("match_config.json is not ready: " + " | ".join(config_errors))
+
+with st.expander("Edit match_config.json", expanded=False):
+    st.text_area(
+        "JSON",
+        key="match_config_editor",
+        height=420,
+        help="This file controls team colour matching and the roster used to validate jersey numbers.",
+    )
+
+    save_config = st.button("Save match_config.json")
+    if save_config:
+        try:
+            candidate = json.loads(st.session_state["match_config_editor"])
+            errors = validate_match_config(candidate)
+            if errors:
+                st.error("Cannot save: " + " | ".join(errors))
+            else:
+                formatted = json.dumps(candidate, indent=2, ensure_ascii=False) + "\n"
+                MATCH_CONFIG_PATH.parent.mkdir(parents=True, exist_ok=True)
+                MATCH_CONFIG_PATH.write_text(formatted, encoding="utf-8")
+                st.session_state["match_config_editor"] = formatted
+                st.success("match_config.json saved. The next run will use this configuration.")
+                st.rerun()
+        except Exception as exc:
+            st.error(f"Invalid JSON: {exc}")
+
+st.divider()
 
 with st.sidebar:
     st.header("Beta run")
@@ -168,7 +325,15 @@ with st.sidebar:
     device = st.selectbox("Device", device_options, index=device_options.index(default_device))
     tracker = st.selectbox("Tracker", ["botsort.yaml", "bytetrack.yaml"], index=0)
 
-    run_clicked = st.button("🚀 Run beta analysis", type="primary", width="stretch")
+    if not config_ready:
+        st.warning("Fix match_config.json before running the analysis.")
+
+    run_clicked = st.button(
+        "🚀 Run beta analysis",
+        type="primary",
+        width="stretch",
+        disabled=not config_ready,
+    )
 
 if run_clicked:
     analyzer = ROOT / "services" / "analytics" / "analyzer.py"
@@ -194,10 +359,8 @@ if run_clicked:
         "--reset-db",
     ]
 
-    st.code(" ".join(command), language="bash")
     status = st.status("Running analysis...", expanded=True)
     log_box = st.empty()
-    preview_box = st.empty()
 
     process = subprocess.Popen(
         command,
@@ -223,14 +386,8 @@ if run_clicked:
 
         if text.startswith("[RUN_DIR]"):
             run_dir = Path(text.replace("[RUN_DIR]", "", 1).strip())
-
         elif text.startswith("[SUMMARY]"):
             summary_path = Path(text.replace("[SUMMARY]", "", 1).strip())
-
-        elif text.startswith("[PREVIEW]"):
-            preview_path = Path(text.replace("[PREVIEW]", "", 1).strip())
-            if preview_path.exists():
-                preview_box.image(str(preview_path), caption="Latest analysed frame", width="stretch")
 
     process.wait()
 
@@ -243,10 +400,10 @@ if run_clicked:
 
     if process.returncode == 0:
         status.update(label="Analysis completed", state="complete", expanded=False)
-        st.success("Run completed. Diagnostic files were saved for comparison.")
+        st.success("Run completed. Results and diagnostic logs were saved for comparison.")
     else:
         status.update(label=f"Analysis failed (exit {process.returncode})", state="error", expanded=True)
-        st.error("The run failed. Its summary and console log are still useful beta evidence.")
+        st.error("The run failed. Its summary and console log are still useful diagnostic evidence.")
 
 st.divider()
 
@@ -261,7 +418,7 @@ if selected_summary is None:
 if selected_summary is not None:
     render_summary(selected_summary)
 else:
-    st.info("No beta diagnostic runs found yet. Start with a short 60-second baseline run.")
+    st.info("No beta diagnostic runs found yet. Start with a short baseline run.")
 
 st.divider()
 render_comparison()
