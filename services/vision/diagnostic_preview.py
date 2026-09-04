@@ -26,7 +26,7 @@ class DiagnosticPreview:
     def __init__(
         self,
         output_path: Path,
-        match_config_path: Path,
+        match_config_path: Path | None = None,
         interval_frames: int = 15,
         max_width: int = 1100,
         jpeg_quality: int = 78,
@@ -36,7 +36,7 @@ class DiagnosticPreview:
         self.interval_frames = max(1, int(interval_frames))
         self.max_width = max(320, int(max_width))
         self.jpeg_quality = max(40, min(95, int(jpeg_quality)))
-        self.team_colors = self._load_team_colors(Path(match_config_path))
+        self.team_colors = self._load_team_colors(Path(match_config_path)) if match_config_path else {}
 
     def _load_team_colors(self, path: Path) -> dict[str, tuple[int, int, int]]:
         try:
@@ -48,6 +48,15 @@ class DiagnosticPreview:
             team: self._PALETTE[index % len(self._PALETTE)]
             for index, team in enumerate(teams)
         }
+
+    def _color_for_team(self, team: str) -> tuple[int, int, int]:
+        if team in self.team_colors:
+            return self.team_colors[team]
+        if team and team != "Unknown":
+            color = self._PALETTE[len(self.team_colors) % len(self._PALETTE)]
+            self.team_colors[team] = color
+            return color
+        return (180, 180, 180)
 
     def should_render(self, frame_id: int) -> bool:
         return frame_id == 0 or frame_id % self.interval_frames == 0
@@ -64,6 +73,10 @@ class DiagnosticPreview:
         return (x1, y1, x2, y2) if x2 > x1 and y2 > y1 else None
 
     def render(self, frame_state: Any) -> Path | None:
+        frame_id = int(getattr(frame_state, "frame_id", 0))
+        if not self.should_render(frame_id):
+            return None
+
         frame = getattr(frame_state, "frame", None)
         if frame is None or not isinstance(frame, np.ndarray) or frame.size == 0:
             return None
@@ -83,7 +96,7 @@ class DiagnosticPreview:
             jersey = player.get("shirt_num") or player.get("shirt_number")
             track_id = player.get("track_id", -1)
             confidence = player.get("confidence")
-            color = self.team_colors.get(team, (180, 180, 180))
+            color = self._color_for_team(team)
 
             cv2.rectangle(canvas, (x1, y1), (x2, y2), color, 2)
             label_parts = [f"T{track_id}", team]
@@ -127,7 +140,6 @@ class DiagnosticPreview:
                     cv2.LINE_AA,
                 )
 
-        frame_id = int(getattr(frame_state, "frame_id", 0))
         timestamp = float(getattr(frame_state, "timestamp", 0.0) or 0.0)
         team_counts: dict[str, int] = {}
         for player in players:
@@ -154,3 +166,15 @@ class DiagnosticPreview:
             return None
         temp_path.replace(self.output_path)
         return self.output_path
+
+    def draw(self, frame_state: Any):
+        path = self.render(frame_state)
+        if path is not None:
+            frame_state.diagnostics.setdefault("preview", {})
+            frame_state.diagnostics["preview"].update(
+                {
+                    "path": str(path),
+                    "frame_id": int(getattr(frame_state, "frame_id", 0)),
+                }
+            )
+        return frame_state
