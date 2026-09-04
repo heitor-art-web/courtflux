@@ -7,9 +7,9 @@ import { getSiteUrl } from "@/lib/site";
 const siteUrl = getSiteUrl();
 
 export const metadata: Metadata = {
-  title: "Basketball Video Analysis for Coaches, Teams & Academies",
+  title: "Basketball Video Analysis Software for Coaches",
   description:
-    "Turn basketball game film into structured player, ball and spatial intelligence. CourtFlux helps coaches, teams and academies reach useful evidence faster.",
+    "AI basketball video analysis for coaches, teams and academies. Track players, teams and the ball from ordinary game film and review useful evidence faster.",
   alternates: {
     canonical: "/",
   },
@@ -17,9 +17,9 @@ export const metadata: Metadata = {
     type: "website",
     url: "/",
     siteName: "CourtFlux",
-    title: "CourtFlux — Basketball Video Analysis & Intelligence",
+    title: "Basketball Video Analysis for Coaches, Teams & Academies | CourtFlux",
     description:
-      "Turn basketball game film into structured player, ball and spatial intelligence for coaches, teams and academies.",
+      "Turn ordinary basketball game film into structured player, ball and spatial intelligence for faster coaching review.",
     images: [
       {
         url: "/brand/CourtFlux_Full_Analyst_Workspace.png",
@@ -31,9 +31,9 @@ export const metadata: Metadata = {
   },
   twitter: {
     card: "summary_large_image",
-    title: "CourtFlux — Basketball Video Analysis & Intelligence",
+    title: "Basketball Video Analysis for Coaches | CourtFlux",
     description:
-      "Turn basketball game film into structured player, ball and spatial intelligence.",
+      "Track players, teams and the ball from ordinary basketball game film and turn video into structured coaching evidence.",
     images: ["/brand/CourtFlux_Full_Analyst_Workspace.png"],
   },
   robots: {
@@ -43,8 +43,8 @@ export const metadata: Metadata = {
 };
 
 const capabilities = [
-  ["Computer Vision", "Player Tracking", "Detect and persist players across game footage.", "Beta"],
-  ["Core Priority", "Ball Intelligence", "Detect, associate and maintain the ball state across time.", "Beta"],
+  ["Computer Vision", "Player Tracking", "Track player movement across basketball game footage.", "Beta"],
+  ["Core Priority", "Ball Intelligence", "Detect and follow the ball across time to support reliable game context.", "Beta"],
   ["Classification", "Team Identification", "Separate teams consistently from visual appearance.", "Beta"],
   ["Spatial Layer", "Court Mapping", "Translate image positions into meaningful court coordinates.", "In development"],
   ["Game Structure", "Possession Analysis", "Segment continuous footage into basketball possessions.", "In development"],
@@ -52,6 +52,10 @@ const capabilities = [
 ] as const;
 
 const faq = [
+  [
+    "Who is CourtFlux for?",
+    "CourtFlux is being built for basketball coaches, teams, academies and performance analysts who want to get more useful information from the game film they already record.",
+  ],
   [
     "What kind of video can CourtFlux analyse?",
     "CourtFlux is being developed around basketball game footage where the court and players are sufficiently visible. Camera position, resolution, occlusion and motion blur can affect analysis quality.",
@@ -102,6 +106,14 @@ export default function HomePage() {
         description: "Basketball video analysis and intelligence for coaches, teams and academies.",
       },
       {
+        "@type": "WebSite",
+        "@id": `${siteUrl}/#website`,
+        name: "CourtFlux",
+        url: siteUrl,
+        publisher: { "@id": `${siteUrl}/#organization` },
+        inLanguage: "en",
+      },
+      {
         "@type": "SoftwareApplication",
         "@id": `${siteUrl}/#software`,
         name: "CourtFlux",
@@ -109,8 +121,41 @@ export default function HomePage() {
         applicationCategory: "SportsApplication",
         operatingSystem: "Web",
         description:
-          "CourtFlux turns basketball game film into structured player, ball, spatial and coaching intelligence.",
+          "CourtFlux is basketball video analysis software that turns game film into structured player, ball, team and spatial intelligence.",
+        featureList: [
+          "Basketball player tracking",
+          "Team classification",
+          "Ball detection and temporal tracking",
+          "Basketball video processing diagnostics",
+        ],
+        audience: {
+          "@type": "Audience",
+          audienceType: "Basketball coaches, teams, academies and performance analysts",
+        },
         publisher: { "@id": `${siteUrl}/#organization` },
+      },
+      {
+        "@type": "WebPage",
+        "@id": `${siteUrl}/#webpage`,
+        url: siteUrl,
+        name: "Basketball Video Analysis Software for Coaches | CourtFlux",
+        description:
+          "AI basketball video analysis for coaches, teams and academies using ordinary game film.",
+        isPartOf: { "@id": `${siteUrl}/#website` },
+        about: { "@id": `${siteUrl}/#software` },
+        inLanguage: "en",
+      },
+      {
+        "@type": "FAQPage",
+        "@id": `${siteUrl}/#faq`,
+        mainEntity: faq.map(([question, answer]) => ({
+          "@type": "Question",
+          name: question,
+          acceptedAnswer: {
+            "@type": "Answer",
+            text: answer,
+          },
+        })),
       },
     ],
   };
@@ -119,7 +164,7 @@ export default function HomePage() {
     <main className={styles.home}>
       <script
         type="application/ld+json"
-        dangerouslySetInnerHTML={{ __html: JSON.stringify(structuredData) }}
+        dangerouslySetInnerHTML={{ __html: JSON.stringify(structuredData).replace(/</g, "\\u003c") }}
       />
 
       <header className={styles.siteHeader}>
@@ -137,7 +182,7 @@ export default function HomePage() {
           <a href="#product">Product</a>
           <a href="#how">How it works</a>
           <a href="#pricing">Pricing</a>
-          <Link href="/lab">Beta Lab</Link>
+          <a href="#faq">FAQ</a>
           <Link href="/login">Sign in</Link>
           <Link className={styles.navCta} href="/login?mode=signup">Start free beta</Link>
         </nav>
@@ -146,13 +191,13 @@ export default function HomePage() {
       <div className={styles.shell}>
         <section className={styles.hero} aria-labelledby="hero-title">
           <div>
-            <div className={styles.eyebrow}>Basketball intelligence from ordinary game film</div>
+            <div className={styles.eyebrow}>AI basketball video analysis for coaches and teams</div>
             <h1 id="hero-title">
-              From game film to <span>decisions coaches can use.</span>
+              Basketball video analysis that turns game film into <span>coaching evidence.</span>
             </h1>
             <p className={styles.heroCopy}>
-              Upload the footage you already have. CourtFlux follows players and the ball, builds spatial
-              context, and turns movement into structured basketball intelligence.
+              Upload ordinary basketball footage. CourtFlux uses computer vision to track players, teams and
+              the ball, giving coaches a structured foundation for faster video review and performance analysis.
             </p>
             <div className={styles.actions}>
               <Link className={styles.primaryButton} href="/login?mode=signup">Start free beta</Link>
@@ -168,7 +213,7 @@ export default function HomePage() {
           <div className={styles.visualFrame}>
             <Image
               src="/brand/CourtFlux_Full_Analyst_Workspace.png"
-              alt="CourtFlux analyst workspace showing basketball video, tracked players, ball movement and analysis panels"
+              alt="CourtFlux basketball video analysis workspace showing tracked players, ball movement and coaching analysis panels"
               width={1672}
               height={941}
               sizes="(max-width: 900px) 100vw, 58vw"
@@ -178,18 +223,18 @@ export default function HomePage() {
         </section>
 
         <section className={styles.signalGrid} aria-label="CourtFlux workflow">
-          <div className={styles.signal}><strong>Use existing footage</strong><span>Start from normal basketball game video.</span></div>
-          <div className={styles.signal}><strong>Track the game</strong><span>Players, teams and ball over time.</span></div>
-          <div className={styles.signal}><strong>Build spatial context</strong><span>Translate pixels into court movement.</span></div>
-          <div className={styles.signal}><strong>Reach useful evidence</strong><span>Surface moments coaches can review.</span></div>
+          <div className={styles.signal}><strong>Use existing game film</strong><span>Start from normal basketball video.</span></div>
+          <div className={styles.signal}><strong>Track players and ball</strong><span>Follow the game across time.</span></div>
+          <div className={styles.signal}><strong>Build court context</strong><span>Connect movement to basketball space.</span></div>
+          <div className={styles.signal}><strong>Review useful evidence</strong><span>Spend less time searching through footage.</span></div>
         </section>
 
         <section id="how" className={styles.section}>
           <div className={styles.sectionHeader}>
-            <div className={styles.eyebrow}>How it works</div>
-            <h2 className={styles.sectionTitle}>One video. Three layers of <span>understanding.</span></h2>
+            <div className={styles.eyebrow}>How basketball video analysis works</div>
+            <h2 className={styles.sectionTitle}>From basketball video to <span>structured analysis.</span></h2>
             <p className={styles.sectionCopy}>
-              CourtFlux bridges raw game footage and the spatial, temporal and tactical information hidden inside each possession.
+              CourtFlux connects raw game footage to player tracking, ball tracking and spatial context, then builds toward possessions, events and tactical insights as those layers mature.
             </p>
           </div>
 
@@ -197,7 +242,7 @@ export default function HomePage() {
             <div className={styles.visualFrame}>
               <Image
                 src="/brand/CourtFlux_Video_Tracking_Tactical_Insight.png"
-                alt="Basketball video progressing from tracking to tactical insight in CourtFlux"
+                alt="Basketball game video progressing from player and ball tracking to tactical insight in CourtFlux"
                 width={768}
                 height={1024}
                 sizes="(max-width: 900px) 100vw, 52vw"
@@ -205,13 +250,13 @@ export default function HomePage() {
             </div>
             <div>
               <div className={styles.stack}>
-                <article className={styles.step}><div className={styles.kicker}>01 · Video</div><h3>Use the game film you already have.</h3><p>Work from normal basketball footage rather than a proprietary capture system.</p></article>
-                <article className={styles.step}><div className={styles.kicker}>02 · Tracking</div><h3>Computer vision follows the game.</h3><p>Players, teams and ball detections become persistent objects with temporal context.</p></article>
-                <article className={styles.step}><div className={styles.kicker}>03 · Intelligence</div><h3>Movement becomes basketball information.</h3><p>Coordinates, possessions, events and tactical patterns become measurable and searchable as the product develops.</p></article>
+                <article className={styles.step}><div className={styles.kicker}>01 · Video</div><h3>Use the basketball game film you already have.</h3><p>Start with normal basketball footage rather than a proprietary capture system.</p></article>
+                <article className={styles.step}><div className={styles.kicker}>02 · Tracking</div><h3>Computer vision follows players, teams and the ball.</h3><p>Detections become persistent objects with temporal context across the game.</p></article>
+                <article className={styles.step}><div className={styles.kicker}>03 · Analysis</div><h3>Tracking becomes structured basketball information.</h3><p>Court coordinates, possessions, events and tactical patterns become measurable and searchable as the product develops.</p></article>
               </div>
               <div className={styles.contextBox}>
-                <strong>Match context is progressive, not a blocker.</strong>
-                <p>Home and away teams are enough to start. Jersey numbers and player names can be added later when roster-level identity matters.</p>
+                <strong>Start analysing before your roster is perfect.</strong>
+                <p>Home and away teams are enough to begin. Jersey numbers and player names can be added later when roster-level identity matters.</p>
               </div>
             </div>
           </div>
@@ -220,10 +265,10 @@ export default function HomePage() {
         <section id="product" className={styles.section}>
           <div className={styles.splitReverse + " " + styles.split}>
             <div>
-              <div className={styles.eyebrow}>Ball Intelligence</div>
-              <h2 className={styles.sectionTitle}>Follow the object that defines the <span>possession.</span></h2>
+              <div className={styles.eyebrow}>Basketball ball tracking</div>
+              <h2 className={styles.sectionTitle}>Track the ball through the <span>flow of play.</span></h2>
               <p className={styles.sectionCopy}>
-                Ball quality is a foundational dependency for possession, passing, shot, rebound and tactical analysis. CourtFlux combines direct detections with temporal continuity to maintain a more reliable ball state.
+                Reliable ball tracking is the foundation for possession, passing, shot, rebound and later tactical analysis. CourtFlux combines direct detections with temporal continuity to keep the ball connected to the game over time.
               </p>
               <ul className={styles.bulletList}>
                 <li><strong>Direct detection</strong> — frame-level ball candidates</li>
@@ -248,17 +293,17 @@ export default function HomePage() {
             <div className={styles.visualFrame}>
               <Image
                 src="/brand/CourtFlux_Split_Screen_Court_Reconstruction.png"
-                alt="Basketball video and reconstructed court positions shown side by side in CourtFlux"
+                alt="Basketball game video and reconstructed player positions shown side by side in CourtFlux"
                 width={1672}
                 height={941}
                 sizes="(max-width: 900px) 100vw, 54vw"
               />
             </div>
             <div>
-              <div className={styles.eyebrow}>Court Reconstruction</div>
-              <h2 className={styles.sectionTitle}>From broadcast pixels to <span>spatial intelligence.</span></h2>
+              <div className={styles.eyebrow}>Basketball spatial analysis</div>
+              <h2 className={styles.sectionTitle}>Turn video coordinates into <span>court-level context.</span></h2>
               <p className={styles.sectionCopy}>
-                Map tracked objects from video coordinates onto a basketball court so coaches can reason about spacing, coverage, trajectories and team shape instead of isolated boxes.
+                Map tracked objects from video coordinates onto a basketball court so coaches can reason about spacing, coverage, trajectories and team shape instead of isolated detection boxes.
               </p>
               <p className={styles.smallNote}>Court mapping is in development and is not represented as a finished beta capability.</p>
             </div>
@@ -267,10 +312,10 @@ export default function HomePage() {
 
         <section className={styles.section}>
           <div className={styles.sectionHeader}>
-            <div className={styles.eyebrow}>Product capabilities</div>
-            <h2 className={styles.sectionTitle}>Built around the <span>game itself.</span></h2>
+            <div className={styles.eyebrow}>Basketball analysis capabilities</div>
+            <h2 className={styles.sectionTitle}>A basketball analysis platform built around the <span>game itself.</span></h2>
             <p className={styles.sectionCopy}>
-              CourtFlux is not a traditional box-score tracker. The platform is built around objects, movement, possessions and spatial context extracted from video.
+              CourtFlux is not a traditional box-score tracker. It is being built around video, player movement, ball movement, possessions and spatial context so coaches can connect metrics back to what happened on court.
             </p>
           </div>
           <div className={styles.cardGrid}>
@@ -346,8 +391,8 @@ export default function HomePage() {
         <section className={styles.section}>
           <div className={styles.sectionHeader}>
             <div className={styles.eyebrow}>Beta transparency</div>
-            <h2 className={styles.sectionTitle}>Build the foundation before the <span>promise.</span></h2>
-            <p className={styles.sectionCopy}>The public product story separates what is benchmarked from active development and the longer-term coaching vision.</p>
+            <h2 className={styles.sectionTitle}>Know what CourtFlux can do <span>today.</span></h2>
+            <p className={styles.sectionCopy}>The product story separates benchmarked capabilities from active development and the longer-term coaching vision, so beta users know what to expect.</p>
           </div>
           <div className={styles.statusGrid}>
             <article className={styles.statusCard}><div className={styles.kicker}>Available / benchmarked</div><ul><li><span className={styles.now}>●</span> Player detection and tracking</li><li><span className={styles.now}>●</span> Team classification</li><li><span className={styles.now}>●</span> Ball detection</li><li><span className={styles.now}>●</span> Temporal ball tracking</li><li><span className={styles.now}>●</span> Processing diagnostics</li></ul></article>
@@ -365,7 +410,7 @@ export default function HomePage() {
 
         <section className={styles.section} id="faq">
           <div className={styles.sectionHeader}>
-            <div className={styles.eyebrow}>FAQ</div>
+            <div className={styles.eyebrow}>Basketball video analysis FAQ</div>
             <h2 className={styles.sectionTitle}>Questions about <span>CourtFlux.</span></h2>
           </div>
           <div className={styles.faqGrid}>
@@ -379,9 +424,9 @@ export default function HomePage() {
         </section>
 
         <section className={styles.finalCta}>
-          <div className={styles.eyebrow}>CourtFlux</div>
-          <h2 className={styles.sectionTitle}>See more in the same <span>game film.</span></h2>
-          <p className={styles.sectionCopy}>Turn basketball video into a structured foundation for tracking, analysis and better coaching decisions.</p>
+          <div className={styles.eyebrow}>Start with the footage you already have</div>
+          <h2 className={styles.sectionTitle}>Turn basketball game film into a <span>faster review workflow.</span></h2>
+          <p className={styles.sectionCopy}>Start with player, team and ball tracking today, then grow into richer basketball analysis as CourtFlux develops.</p>
           <div className={styles.actions}><Link className={styles.primaryButton} href="/login?mode=signup">Start free beta</Link><a className={styles.secondaryButton} href="#pricing">See pricing</a></div>
         </section>
 
