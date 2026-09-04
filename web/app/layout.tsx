@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
 import "./globals.css";
+import "./accessibility.css";
 import { getSiteUrl } from "@/lib/site";
 
 const siteUrl = getSiteUrl();
