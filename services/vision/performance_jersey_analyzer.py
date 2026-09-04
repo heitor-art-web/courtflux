@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import json
 from pathlib import Path
 from time import perf_counter
 from typing import Dict, List, Optional
@@ -17,11 +16,7 @@ from services.vision.team_only_analyzer import TeamOnlyAnalyzer
 
 
 class TemporalJerseyClassifier(nn.Module):
-    """EfficientNet-B0 + temporal LSTM architecture for jersey recognition.
-
-    The backbone is intentionally created with weights=None. Performance runs use the
-    repository-local checkpoint and must never trigger a torchvision network download.
-    """
+    """EfficientNet-B0 + temporal LSTM architecture for jersey recognition."""
 
     def __init__(self):
         super().__init__()
@@ -52,7 +47,13 @@ class TemporalJerseyClassifier(nn.Module):
 
 
 class PerformanceJerseyAnalyzer(TeamOnlyAnalyzer):
-    """Team classification + throttled jersey recognition for detection benchmarks."""
+    """Team scoring + structured temporal jersey decoding for beta identity runs.
+
+    The model always exposes its raw digit prediction. Roster constraints are applied as
+    a decoder over all valid roster numbers rather than as a binary post-hoc rejection
+    of the top raw number. This makes failures diagnosable and uses roster information
+    in the statistically useful place: candidate selection.
+    """
 
     def __init__(
         self,
@@ -89,36 +90,63 @@ class PerformanceJerseyAnalyzer(TeamOnlyAnalyzer):
             raise FileNotFoundError(f"Jersey checkpoint not found: {checkpoint_path}")
 
         started = perf_counter()
-        print(
-            f"📦 Loading local jersey model from {checkpoint_path} on {self.device.type}...",
-            flush=True,
-        )
-
-        # Load checkpoint on CPU first. This avoids a large device allocation while the
-        # state dict is being deserialized and is more reliable on MPS.
+        print(f"📦 Loading local jersey model from {checkpoint_path} on {self.device.type}...", flush=True)
         checkpoint = torch.load(checkpoint_path, map_location="cpu")
-        model = TemporalJerseyClassifier()
 
         if isinstance(checkpoint, nn.Module):
             model = checkpoint
+            coverage = 1.0
+            missing_count = 0
+            unexpected_count = 0
         else:
+            model = TemporalJerseyClassifier()
             state_dict = checkpoint.get("state_dict", checkpoint) if isinstance(checkpoint, dict) else checkpoint
             if not isinstance(state_dict, dict):
                 raise TypeError("Unsupported jersey checkpoint format")
+            state_dict = self._normalize_state_dict(state_dict, set(model.state_dict().keys()))
             missing, unexpected = model.load_state_dict(state_dict, strict=False)
-            if missing:
-                print(f"⚠️ Jersey checkpoint missing {len(missing)} keys", flush=True)
-            if unexpected:
-                print(f"⚠️ Jersey checkpoint has {len(unexpected)} unexpected keys", flush=True)
+            model_key_count = max(len(model.state_dict()), 1)
+            missing_count = len(missing)
+            unexpected_count = len(unexpected)
+            coverage = 1.0 - (missing_count / model_key_count)
+            if coverage < 0.95:
+                raise RuntimeError(
+                    f"Jersey checkpoint only covers {coverage:.1%} of model keys "
+                    f"({missing_count} missing, {unexpected_count} unexpected)."
+                )
+            if missing_count or unexpected_count:
+                print(
+                    f"⚠️ Jersey checkpoint compatibility: coverage={coverage:.1%}, "
+                    f"missing={missing_count}, unexpected={unexpected_count}",
+                    flush=True,
+                )
 
+        self.checkpoint_diagnostics = {
+            "coverage": round(float(coverage), 4),
+            "missing_keys": int(missing_count),
+            "unexpected_keys": int(unexpected_count),
+        }
         self.number_model = model.to(self.device).eval()
         print(
-            f"✅ Jersey model ready in {perf_counter() - started:.2f}s; no external weights requested.",
+            f"✅ Jersey model ready in {perf_counter() - started:.2f}s; "
+            f"checkpoint coverage={coverage:.1%}.",
             flush=True,
         )
 
+    @staticmethod
+    def _normalize_state_dict(state_dict: dict, model_keys: set[str]) -> dict:
+        if set(state_dict.keys()) & model_keys:
+            return state_dict
+        for prefix in ("module.", "model.", "number_model."):
+            candidate = {
+                (key[len(prefix):] if str(key).startswith(prefix) else str(key)): value
+                for key, value in state_dict.items()
+            }
+            if set(candidate.keys()) & model_keys:
+                return candidate
+        return state_dict
+
     def observe_track(self, crop: np.ndarray, track_id: int) -> None:
-        """Collect one real torso crop per frame without running the neural model."""
         if track_id < 0 or crop is None or crop.size == 0:
             return
         h, w = crop.shape[:2]
@@ -137,22 +165,70 @@ class PerformanceJerseyAnalyzer(TeamOnlyAnalyzer):
             del buf[:-self.sequence_length]
 
         if len(self.track_crop_buffers) > 250:
-            # Track IDs are insertion ordered. Keep the most recently added entries.
             keep = list(self.track_crop_buffers.keys())[-100:]
             self.track_crop_buffers = {key: self.track_crop_buffers[key] for key in keep}
 
     def ready(self, track_id: int) -> bool:
         return len(self.track_crop_buffers.get(track_id, [])) >= self.sequence_length
 
-    def get_shirt_number(
+    def _valid_roster_numbers(self, team_name: str | None) -> list[str]:
+        if not team_name or team_name not in self.rosters:
+            return []
+        roster = (self.rosters.get(team_name, {}) or {}).get("roster", {}) or {}
+        values = []
+        for key in roster:
+            text = str(key).strip()
+            if text.startswith("?") or not text.isdigit():
+                continue
+            number = int(text)
+            if 0 <= number <= 99:
+                values.append(str(number))
+        return sorted(set(values), key=lambda value: int(value))
+
+    @staticmethod
+    def _candidate_probability(number: str, tens_probs: list[float], units_probs: list[float]) -> float:
+        value = int(number)
+        return float(tens_probs[value // 10] * units_probs[value % 10])
+
+    def _decode_roster(
         self,
-        crop: np.ndarray,
-        track_id: int = 0,
-        team_name: Optional[str] = None,
-    ) -> str:
-        """Run one temporal inference only after a real sequence is available."""
+        team_name: str | None,
+        tens_probs: list[float],
+        units_probs: list[float],
+    ) -> dict:
+        valid = self._valid_roster_numbers(team_name)
+        if not valid:
+            return {
+                "candidate_number": None,
+                "candidate_probability": 0.0,
+                "candidate_posterior": 0.0,
+                "candidate_margin": 0.0,
+                "valid_roster_numbers": [],
+                "top_candidates": [],
+            }
+
+        scored = [(number, self._candidate_probability(number, tens_probs, units_probs)) for number in valid]
+        scored.sort(key=lambda item: item[1], reverse=True)
+        total = sum(score for _, score in scored) or 1e-12
+        best_number, best_score = scored[0]
+        second_score = scored[1][1] if len(scored) > 1 else 0.0
+        posterior = best_score / total
+        margin = (best_score - second_score) / total
+        return {
+            "candidate_number": best_number,
+            "candidate_probability": round(best_score, 6),
+            "candidate_posterior": round(posterior, 6),
+            "candidate_margin": round(max(0.0, margin), 6),
+            "valid_roster_numbers": valid,
+            "top_candidates": [
+                {"number": number, "posterior": round(score / total, 6)}
+                for number, score in scored[:3]
+            ],
+        }
+
+    def predict_jersey(self, track_id: int, team_name: Optional[str] = None) -> dict:
         if track_id < 0 or not self.ready(track_id):
-            return ""
+            return {"accepted": False, "rejection_reason": "sequence_not_ready"}
 
         buffered = self.track_crop_buffers[track_id][-self.sequence_length :]
         tensors = []
@@ -163,17 +239,65 @@ class PerformanceJerseyAnalyzer(TeamOnlyAnalyzer):
         input_tensor = torch.stack(tensors).unsqueeze(0).to(self.device)
         with torch.inference_mode():
             tens_logits, units_logits = self.number_model(input_tensor)
-            tens_pred = int(torch.argmax(tens_logits, dim=1).cpu().item())
-            units_pred = int(torch.argmax(units_logits, dim=1).cpu().item())
+            tens_prob_tensor = torch.softmax(tens_logits, dim=1)[0].detach().cpu()
+            units_prob_tensor = torch.softmax(units_logits, dim=1)[0].detach().cpu()
 
+        tens_probs = [float(value) for value in tens_prob_tensor.tolist()]
+        units_probs = [float(value) for value in units_prob_tensor.tolist()]
+        tens_pred = int(np.argmax(tens_probs))
+        units_pred = int(np.argmax(units_probs))
         raw_number = f"{tens_pred}{units_pred}"
-        if team_name and team_name in self.rosters:
-            roster = (self.rosters.get(team_name, {}) or {}).get("roster", {}) or {}
-            valid = {str(key).strip() for key in roster if not str(key).startswith("?")}
-            if valid:
-                variants = [raw_number]
-                if raw_number.isdigit():
-                    variants.append(str(int(raw_number)))
-                return next((value for value in variants if value in valid), "")
+        raw_canonical = str(int(raw_number))
+        raw_probability = float(tens_probs[tens_pred] * units_probs[units_pred])
 
-        return raw_number
+        decoded = self._decode_roster(team_name, tens_probs, units_probs)
+        candidate = decoded.get("candidate_number")
+        posterior = float(decoded.get("candidate_posterior", 0.0) or 0.0)
+        margin = float(decoded.get("candidate_margin", 0.0) or 0.0)
+
+        if candidate is None:
+            accepted = False
+            reason = "no_known_roster_numbers"
+        elif posterior < 0.30:
+            accepted = False
+            reason = "low_roster_posterior"
+        elif margin < 0.05:
+            accepted = False
+            reason = "low_roster_margin"
+        else:
+            accepted = True
+            reason = "accepted"
+
+        cross_team = {}
+        for candidate_team in self.rosters:
+            team_decode = self._decode_roster(str(candidate_team), tens_probs, units_probs)
+            cross_team[str(candidate_team)] = {
+                "candidate_number": team_decode.get("candidate_number"),
+                "candidate_posterior": team_decode.get("candidate_posterior", 0.0),
+                "candidate_margin": team_decode.get("candidate_margin", 0.0),
+            }
+
+        return {
+            "accepted": accepted,
+            "rejection_reason": reason,
+            "team": team_name,
+            "raw_number": raw_number,
+            "raw_canonical": raw_canonical,
+            "raw_probability": round(raw_probability, 6),
+            "tens_digit": tens_pred,
+            "units_digit": units_pred,
+            "tens_confidence": round(tens_probs[tens_pred], 6),
+            "units_confidence": round(units_probs[units_pred], 6),
+            **decoded,
+            "cross_team_best": cross_team,
+            "checkpoint": self.checkpoint_diagnostics,
+        }
+
+    def get_shirt_number(
+        self,
+        crop: np.ndarray,
+        track_id: int = 0,
+        team_name: Optional[str] = None,
+    ) -> str:
+        prediction = self.predict_jersey(track_id=track_id, team_name=team_name)
+        return str(prediction.get("candidate_number") or "") if prediction.get("accepted") else ""
