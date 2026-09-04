@@ -197,6 +197,11 @@ class PerformanceDetector(BasePerformanceDetector):
             }
             return ball, association
 
+        previous_frame_id = self.ball_tracker.last_frame_id
+        reset_reinitialization = (
+            previous_frame_id is not None
+            and frame_id - int(previous_frame_id) > self.ball_tracker.reset_after_frames
+        )
         decision = self.ball_tracker.select(
             candidates=candidates,
             frame_id=frame_id,
@@ -205,11 +210,14 @@ class PerformanceDetector(BasePerformanceDetector):
 
         source = str(decision.source)
         ball = decision.ball
-        # The tracker historically labelled a post-reset highest-confidence choice as
-        # a reacquisition whenever the feature flag was enabled. It was not challenger-
-        # confirmed, so keep the behaviour but correct the diagnostics semantics.
-        if source == "detector_reacquired" and not bool(decision.reacquired):
+        reacquired = bool(decision.reacquired)
+        # The base tracker historically labels a post-reset highest-confidence choice as
+        # a reacquisition whenever the feature flag is enabled. That path has no
+        # challenger confirmation, so keep selection behaviour unchanged while fixing
+        # the persisted semantics.
+        if source == "detector_reacquired" and reset_reinitialization:
             source = "detector_reinitialized"
+            reacquired = False
             if ball is not None:
                 ball = dict(ball)
                 ball["source"] = source
@@ -230,7 +238,7 @@ class PerformanceDetector(BasePerformanceDetector):
             "rejected_candidates": int(decision.rejected_candidates),
             "hold_age_frames": int(decision.hold_age_frames),
             "track_state": str(decision.track_state),
-            "reacquired": bool(decision.reacquired),
+            "reacquired": reacquired,
             "challenger_streak": int(decision.challenger_streak),
             "challenger_confidence": (
                 None
