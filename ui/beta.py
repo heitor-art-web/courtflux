@@ -7,9 +7,9 @@ import streamlit as st
 from PIL import Image, UnidentifiedImageError
 
 ROOT = Path(__file__).resolve().parents[1]
-BRAND_DIR = ROOT / "assets" / "brand"
-APP_ICON = BRAND_DIR / "courtflux-app-icon.webp"
-HORIZONTAL_LOGO = BRAND_DIR / "courtflux-horizontal-dark.webp"
+BRAND_DIR = ROOT / "web" / "public" / "brand"
+APP_ICON = BRAND_DIR / "courtflux_app_icon_128px.png"
+HORIZONTAL_LOGO = BRAND_DIR / "horizontal_logo_safe_crop.png"
 
 # Public marketing page and internal benchmark intentionally share one entrypoint.
 # The existing benchmark remains isolated in beta_app.py and is not restructured.
@@ -35,9 +35,9 @@ def _courtflux_page_config(*args, **kwargs):
 
 def _courtflux_title(body, *args, **kwargs):
     # Keep the benchmark controls/layout intact; only replace the existing title
-    # with the approved CourtFlux horizontal lockup.
+    # with the approved CourtFlux horizontal lockup from web/public/brand.
     if "CourtFlux" in str(body) and HORIZONTAL_LOGO.exists():
-        st.image(str(HORIZONTAL_LOGO), width=600)
+        st.image(str(HORIZONTAL_LOGO), width=560)
         return None
     return _original_title(body, *args, **kwargs)
 
@@ -57,14 +57,10 @@ def _current_view() -> str:
 
 
 if _current_view() == "lab":
-    # This executes the existing test interface unchanged. No marketing navigation,
-    # sections, cards or extra controls are injected into beta_app.py.
     st.set_page_config = _courtflux_page_config
     st.title = _courtflux_title
     runpy.run_path(str(Path(__file__).with_name("beta_app.py")), run_name="__main__")
 else:
-    # Marketing assets are read-only. Never repair, rewrite or delete tracked files
-    # at runtime; doing so makes local Git checkouts dirty and can remove the sprite.
     _original_set_page_config(
         page_title="CourtFlux — Basketball Intelligence from Video",
         page_icon=_page_icon(),
