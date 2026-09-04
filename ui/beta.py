@@ -87,18 +87,23 @@ def latest_summary_path() -> Path | None:
 def flatten_summary(summary: dict) -> dict:
     players = summary.get("players", {}) or {}
     ball = summary.get("ball", {}) or {}
+    continuity = ball.get("continuity", {}) or {}
     perf = summary.get("performance", {}) or {}
     return {
         "run_id": summary.get("run_id"),
         "mode": "detect" if summary.get("detection_only") else "full",
         "jersey": summary.get("jersey_enabled"),
-        "conf": summary.get("detector_conf"),
+        "infer conf": summary.get("inference_conf", summary.get("detector_conf")),
+        "player conf": summary.get("player_conf", summary.get("detector_conf")),
+        "ball conf": summary.get("ball_conf", summary.get("detector_conf")),
         "imgsz": summary.get("imgsz"),
-        "players/frame": players.get("raw_per_gameplay_frame"),
+        "players/frame": players.get("parsed_per_gameplay_frame"),
         "team %": players.get("team_classification_rate"),
         "jersey %": players.get("jersey_identification_rate"),
         "ball %": ball.get("selected_detection_frame_rate"),
-        "missing ball %": ball.get("missing_frame_rate"),
+        "ball cand %": ball.get("raw_candidate_frame_rate"),
+        "gap p90": continuity.get("miss_gap_p90_frames"),
+        "gap max": continuity.get("miss_gap_max_frames"),
         "analysis FPS": perf.get("analysis_fps"),
         "elapsed s": summary.get("elapsed_sec"),
         "status": (summary.get("extra", {}) or {}).get("status"),
@@ -111,11 +116,18 @@ def render_summary(path: Path) -> None:
         return
     players = summary.get("players", {}) or {}
     ball = summary.get("ball", {}) or {}
+    continuity = ball.get("continuity", {}) or {}
     performance = summary.get("performance", {}) or {}
     run_dir = path.parent
 
     st.subheader("Latest results")
-    st.caption(f"Run: {summary.get('run_id')} · mode: {(summary.get('extra', {}) or {}).get('mode', 'unknown')}")
+    st.caption(
+        f"Run: {summary.get('run_id')} · mode: {(summary.get('extra', {}) or {}).get('mode', 'unknown')} · "
+        f"thresholds infer/player/ball: "
+        f"{summary.get('inference_conf', summary.get('detector_conf'))} / "
+        f"{summary.get('player_conf', summary.get('detector_conf'))} / "
+        f"{summary.get('ball_conf', summary.get('detector_conf'))}"
+    )
     if (summary.get("extra", {}) or {}).get("status") == "failed":
         st.error((summary.get("extra", {}) or {}).get("error", "Run failed"))
 
@@ -126,16 +138,30 @@ def render_summary(path: Path) -> None:
         st.image(preview_path.read_bytes(), use_container_width=True)
 
     a, b, c, d = st.columns(4)
-    a.metric("Players / frame", players.get("raw_per_gameplay_frame", 0))
+    a.metric("Players / frame", players.get("parsed_per_gameplay_frame", 0))
     b.metric("Team classified", f"{float(players.get('team_classification_rate') or 0):.1f}%")
-    c.metric("Jersey identified", f"{float(players.get('jersey_identification_rate') or 0):.1f}%")
-    d.metric("Ball detected", f"{float(ball.get('selected_detection_frame_rate') or 0):.1f}%")
+    c.metric("Ball candidate frames", f"{float(ball.get('raw_candidate_frame_rate') or 0):.1f}%")
+    d.metric("Ball selected", f"{float(ball.get('selected_detection_frame_rate') or 0):.1f}%")
 
     a, b, c, d = st.columns(4)
     a.metric("Ball missing", f"{float(ball.get('missing_frame_rate') or 0):.1f}%")
-    b.metric("Analysis FPS", performance.get("analysis_fps", 0))
-    c.metric("Real-time factor", performance.get("realtime_factor", 0))
-    d.metric("Elapsed", f"{float(summary.get('elapsed_sec') or 0):.1f}s")
+    b.metric("Gap p90", continuity.get("miss_gap_p90_frames", "—"))
+    c.metric("Gap max", continuity.get("miss_gap_max_frames", "—"))
+    d.metric("Analysis FPS", performance.get("analysis_fps", 0))
+
+    if continuity:
+        st.markdown("**Ball continuity**")
+        continuity_rows = [
+            {"Metric": "Detection streak median (frames)", "Value": continuity.get("detection_streak_median_frames")},
+            {"Metric": "Detection streak p90 (frames)", "Value": continuity.get("detection_streak_p90_frames")},
+            {"Metric": "Miss gap median (frames)", "Value": continuity.get("miss_gap_median_frames")},
+            {"Metric": "Miss gap p90 (frames)", "Value": continuity.get("miss_gap_p90_frames")},
+            {"Metric": "Longest miss gap (frames)", "Value": continuity.get("miss_gap_max_frames")},
+            {"Metric": "Reacquisitions", "Value": continuity.get("reacquisitions")},
+            {"Metric": "Normalized center-step p90", "Value": continuity.get("center_step_norm_diag_p90")},
+            {"Metric": "Large jump rate > 0.15 diag/frame", "Value": continuity.get("large_jump_rate_gt_0_15_diag_per_frame")},
+        ]
+        st.dataframe(pd.DataFrame(continuity_rows), width="stretch", hide_index=True)
 
     timing = summary.get("detector_timing", {}) or {}
     if timing:
@@ -212,17 +238,36 @@ with st.sidebar:
     start_time = st.text_input("Start", value="00:00")
     end_time = st.text_input("End", value="01:00")
     model_path = st.text_input("Model", value=DEFAULT_MODEL)
-    detector_conf = st.slider("Detector confidence", 0.01, 0.60, 0.10, 0.01)
+    detector_conf = st.slider("Player confidence", 0.01, 0.60, 0.10, 0.01)
     imgsz = st.selectbox("Inference image size", [640, 768, 960, 1280], index=0)
     device_options = ["mps", "cpu", "cuda"]
     default_device = settings.device if settings.device in device_options else "mps"
     device = st.selectbox("Device", device_options, index=device_options.index(default_device))
     tracker = st.selectbox("Tracker", ["botsort.yaml", "bytetrack.yaml"], index=0)
 
+    with st.expander("🏀 Ball detector thresholds — B1", expanded=True):
+        st.caption("B1 preset: lower YOLO threshold for ball candidates while keeping player acceptance at 0.10.")
+        inference_conf = st.slider(
+            "YOLO inference confidence",
+            min_value=0.01,
+            max_value=0.20,
+            value=0.03,
+            step=0.01,
+            help="Model-level threshold. Must be <= both player and ball thresholds or candidates are discarded before parsing.",
+        )
+        ball_conf = st.slider(
+            "Ball acceptance confidence",
+            min_value=0.01,
+            max_value=0.20,
+            value=0.03,
+            step=0.01,
+            help="Ball-specific acceptance threshold after YOLO inference.",
+        )
+
     st.divider()
     detection_only = st.toggle("Detection-only mode", value=True, help="Skips camera/homography and tactical analytics.")
-    enable_jersey = st.toggle("Jersey recognition", value=False, help="Off is the fastest clean detection benchmark.")
-    jersey_interval = st.number_input("Jersey attempt interval (frames)", min_value=1, max_value=300, value=12, step=1, disabled=not enable_jersey)
+    enable_jersey = st.toggle("Jersey recognition", value=False, help="Off is the clean ball/performance benchmark.")
+    jersey_interval = st.number_input("Jersey attempt interval (frames)", min_value=1, max_value=300, value=24, step=1, disabled=not enable_jersey)
     persist_results = st.toggle("Persist SQLite results", value=True, help="Writes are batched; turn off to measure pure processing speed.")
 
     st.divider()
@@ -271,6 +316,8 @@ if run_clicked:
         command.append("--no-persist")
 
     child_env = os.environ.copy()
+    child_env["BASKETBALL_INFERENCE_CONF"] = str(float(inference_conf))
+    child_env["BASKETBALL_BALL_CONF"] = str(float(ball_conf))
     if live_preview and detection_only:
         RUNS_DIR.mkdir(parents=True, exist_ok=True)
         try:
