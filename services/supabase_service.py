@@ -1,7 +1,10 @@
 from __future__ import annotations
 
 import os
+import threading
+import time
 from datetime import datetime, timezone
+from pathlib import Path
 from typing import Any
 
 try:
@@ -34,6 +37,7 @@ class SupabaseRunStore:
         key = os.getenv("SUPABASE_SERVICE_ROLE_KEY", "").strip()
         self.client: Client | None = None
         self.enabled = bool(url and key and create_client is not None)
+        self._retention_stop = threading.Event()
 
         if self.enabled:
             try:
@@ -45,8 +49,28 @@ class SupabaseRunStore:
         else:
             print("☁️ CourtFlux Supabase persistence: off (configure SUPABASE_URL + SUPABASE_SERVICE_ROLE_KEY)")
 
+        if self.enabled and self.client:
+            threading.Thread(
+                target=self._retention_loop,
+                name="courtflux-video-retention",
+                daemon=True,
+            ).start()
+
     def _warn(self, action: str, exc: Exception) -> None:
         print(f"⚠️ Supabase {action} failed: {type(exc).__name__}: {exc}")
+
+    def _retention_loop(self) -> None:
+        interval = max(3600, int(os.getenv("VIDEO_RETENTION_SWEEP_SECONDS", "3600")))
+        # Give the worker time to finish startup before the first storage sweep.
+        if self._retention_stop.wait(10):
+            return
+        while not self._retention_stop.is_set():
+            try:
+                self.purge_expired_analysis_videos()
+                self.purge_expired_local_video_cache()
+            except Exception as exc:  # pragma: no cover - retention must never stop inference
+                self._warn("video retention sweep", exc)
+            self._retention_stop.wait(interval)
 
     def update_job(self, job_id: str | None, values: dict[str, Any]) -> None:
         if not self.client or not job_id:
@@ -63,6 +87,83 @@ class SupabaseRunStore:
             self.client.table("analysis_runs").update(values).eq("id", run_id).execute()
         except Exception as exc:
             self._warn("run update", exc)
+
+    def purge_expired_local_video_cache(self, retention_days: int = 60) -> int:
+        """Remove old worker-local uploaded-video cache files."""
+        cache_dir = Path(os.getenv("COURTFLUX_UPLOAD_CACHE_DIR", "data/uploads"))
+        if not cache_dir.exists():
+            return 0
+
+        cutoff = time.time() - max(1, retention_days) * 24 * 60 * 60
+        removed = 0
+        for path in cache_dir.iterdir():
+            if not path.is_file():
+                continue
+            try:
+                if path.stat().st_mtime <= cutoff:
+                    path.unlink(missing_ok=True)
+                    removed += 1
+            except Exception as exc:
+                self._warn("local video cache delete", exc)
+
+        if removed:
+            print(f"🧹 CourtFlux retention: removed {removed} expired worker cache file(s)")
+        return removed
+
+    def purge_expired_analysis_videos(self, limit: int = 100) -> int:
+        """Delete expired source videos while preserving analysis rows and derived metrics."""
+        if not self.client:
+            return 0
+
+        purged = 0
+        try:
+            result = (
+                self.client.table("analysis_video_uploads")
+                .select("id,bucket,object_path")
+                .is_("deleted_at", "null")
+                .lte("expires_at", utc_now())
+                .order("expires_at")
+                .limit(max(1, min(limit, 500)))
+                .execute()
+            )
+            rows = result.data or []
+        except Exception as exc:
+            self._warn("video retention query", exc)
+            return 0
+
+        for row in rows:
+            row_id = row.get("id")
+            bucket = row.get("bucket")
+            object_path = row.get("object_path")
+            if not row_id or not bucket or not object_path:
+                continue
+
+            attempted_at = utc_now()
+            try:
+                self.client.storage.from_(str(bucket)).remove([str(object_path)])
+                self.client.table("analysis_video_uploads").update(
+                    {
+                        "purge_attempted_at": attempted_at,
+                        "deleted_at": utc_now(),
+                        "deletion_error": None,
+                    }
+                ).eq("id", row_id).execute()
+                purged += 1
+            except Exception as exc:
+                try:
+                    self.client.table("analysis_video_uploads").update(
+                        {
+                            "purge_attempted_at": attempted_at,
+                            "deletion_error": f"{type(exc).__name__}: {exc}"[:1000],
+                        }
+                    ).eq("id", row_id).execute()
+                except Exception as update_exc:
+                    self._warn("video retention failure update", update_exc)
+                self._warn("video retention delete", exc)
+
+        if purged:
+            print(f"🧹 CourtFlux retention: removed {purged} expired source video(s)")
+        return purged
 
     def mark_running(self, job_id: str | None, run_id: str | None) -> None:
         started_at = utc_now()

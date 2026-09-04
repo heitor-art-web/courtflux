@@ -27,6 +27,8 @@ type UploadTicket = {
   path: string;
   token: string;
   source: string;
+  retention_days?: number;
+  expires_at?: string;
   error?: string;
 };
 
@@ -110,6 +112,7 @@ export function NewAnalysisForm({
   const [homeRoster, setHomeRoster] = useState("");
   const [awayRoster, setAwayRoster] = useState("");
   const [enableJersey, setEnableJersey] = useState(false);
+  const [rightsConfirmed, setRightsConfirmed] = useState(false);
   const [busy, setBusy] = useState(false);
   const [stage, setStage] = useState("");
   const [error, setError] = useState("");
@@ -128,7 +131,7 @@ export function NewAnalysisForm({
   const contextReady = homeTeam.trim().length > 0 && awayTeam.trim().length > 0 && homeTeam.trim() !== awayTeam.trim();
   const scopeReady = estimatedMinutes > 0;
   const blocked = !canManage || usageLevel === "exhausted" || wouldExceed;
-  const canSubmit = sourceReady && contextReady && scopeReady && !blocked && !busy;
+  const canSubmit = sourceReady && contextReady && scopeReady && rightsConfirmed && !blocked && !busy;
 
   const teamNames = useMemo(() => teams.map((team) => team.name), [teams]);
 
@@ -328,16 +331,21 @@ export function NewAnalysisForm({
             </div>
 
             {sourceMode === "upload" ? (
-              <label className={styles.uploadBox} htmlFor="video-file">
-                <input id="video-file" type="file" accept="video/mp4,video/quicktime,video/webm,video/x-m4v,.mp4,.mov,.webm,.m4v" onChange={(event) => void chooseFile(event.target.files?.[0] ?? null)} />
-                <strong>{file ? file.name : "Select basketball video"}</strong>
-                <span>{file ? `${(file.size / (1024 * 1024)).toFixed(1)} MB` : "MP4, MOV, WEBM or M4V · up to 2 GB"}</span>
-              </label>
+              <>
+                <label className={styles.uploadBox} htmlFor="video-file">
+                  <input id="video-file" type="file" accept="video/mp4,video/quicktime,video/webm,video/x-m4v,.mp4,.mov,.webm,.m4v" onChange={(event) => void chooseFile(event.target.files?.[0] ?? null)} />
+                  <strong>{file ? file.name : "Select basketball video"}</strong>
+                  <span>{file ? `${(file.size / (1024 * 1024)).toFixed(1)} MB` : "MP4, MOV, WEBM or M4V · up to 2 GB"}</span>
+                </label>
+                <div className={styles.scopeHint}>
+                  <strong>60-day video retention.</strong> CourtFlux automatically deletes the uploaded source video 60 days after upload. Your derived analysis results and statistics remain in the workspace. <Link href="/video-data">How video retention works</Link>.
+                </div>
+              </>
             ) : (
               <div className={styles.field}>
                 <label htmlFor="youtube-url">YouTube URL</label>
                 <input id="youtube-url" type="url" placeholder="https://www.youtube.com/watch?v=…" value={youtubeUrl} onChange={(event) => setYoutubeUrl(event.target.value)} />
-                <small>CourtFlux downloads the video on the private worker before analysis.</small>
+                <small>CourtFlux downloads the video on the private worker before analysis. The original YouTube video remains controlled by YouTube and its uploader.</small>
               </div>
             )}
           </section>
@@ -385,6 +393,12 @@ export function NewAnalysisForm({
             <div><span>Estimated usage</span><strong className={styles.orange}>{formatMinutes(estimatedMinutes)} min</strong></div>
             <div><span>Remaining after</span><strong>{remainingAfter === null ? "—" : `${formatMinutes(Math.max(0, remainingAfter))} min`}</strong></div>
           </div>
+
+          <label className={styles.checkbox}>
+            <input type="checkbox" checked={rightsConfirmed} onChange={(event) => setRightsConfirmed(event.target.checked)} />
+            <span>I confirm I am allowed to submit this footage for analysis and understand that direct uploads are deleted after 60 days while derived analysis results and statistics are retained.</span>
+          </label>
+          <p className={styles.privateNote}>Read the <Link href="/video-data">Video & Data Policy</Link> and <Link href="/terms">private-beta terms</Link>.</p>
 
           {projectedPercent >= 80 && !wouldExceed && usageLevel !== "exhausted" ? <div className={styles.warningBox}>This analysis will take the workspace above 80% of its monthly allowance.</div> : null}
           {wouldExceed ? <div className={styles.errorBox}>This analysis is longer than your remaining allowance. Shorten the analysis window or ask a CourtFlux admin for additional beta minutes.</div> : null}

@@ -80,6 +80,10 @@ type AnalysisData = {
   source: {
     kind: "upload" | "youtube" | "other" | "unknown";
     playable_url: string | null;
+    retention: {
+      expires_at: string | null;
+      deleted_at: string | null;
+    } | null;
   };
   error?: string;
 };
@@ -237,14 +241,15 @@ export function AnalysisView({ runId }: { runId: string }) {
   const isActive = status === "queued" || status === "running";
   const isComplete = status === "completed";
   const isFailed = status === "failed" || status === "canceled";
+  const sourceDeleted = Boolean(data?.source.retention?.deleted_at);
 
   const sourceLabel = useMemo(() => {
     if (!data) return "—";
-    if (data.source.kind === "upload") return "Uploaded video";
+    if (data.source.kind === "upload") return sourceDeleted ? "Uploaded video · removed" : "Uploaded video";
     if (data.source.kind === "youtube") return "YouTube";
     if (data.source.kind === "other") return "Worker video source";
     return "Video source";
-  }, [data]);
+  }, [data, sourceDeleted]);
 
   function exportJson() {
     if (!data || !summary) return;
@@ -400,20 +405,29 @@ export function AnalysisView({ runId }: { runId: string }) {
         <div className={styles.stack}>
           <section className={styles.videoCard} aria-labelledby="video-title">
             <div className={styles.panelHeader}>
-              <div><h2 id="video-title">Source video</h2><p>Use the original footage alongside the measured tracking summary.</p></div>
+              <div><h2 id="video-title">Source video</h2><p>Use the original footage alongside the measured tracking summary while the source is retained.</p></div>
             </div>
             <div className={styles.videoFrame}>
               {data.source.kind === "upload" && data.source.playable_url ? (
                 <video src={data.source.playable_url} controls preload="metadata">Your browser does not support video playback.</video>
               ) : (
                 <div className={styles.videoPlaceholder}>
-                  <strong>{data.source.kind === "youtube" ? "YouTube source" : "Video preview unavailable"}</strong>
-                  <span>{data.source.kind === "youtube" ? "Open the original recording in YouTube while reviewing the CourtFlux evidence." : "The worker source is not exposed as a browser-playable URL."}</span>
+                  <strong>{sourceDeleted ? "Source video removed" : data.source.kind === "youtube" ? "YouTube source" : "Video preview unavailable"}</strong>
+                  <span>{sourceDeleted ? "CourtFlux deleted this uploaded source after its 60-day retention period. The derived analysis results and statistics remain available." : data.source.kind === "youtube" ? "Open the original recording in YouTube while reviewing the CourtFlux evidence." : "The worker source is not exposed as a browser-playable URL."}</span>
                 </div>
               )}
             </div>
             {data.source.kind === "youtube" && data.source.playable_url ? (
               <a className={styles.externalLink} href={data.source.playable_url} target="_blank" rel="noreferrer">Open source video ↗</a>
+            ) : null}
+            {data.source.kind === "upload" && data.source.retention ? (
+              <div className={styles.infoBox}>
+                <strong>Source-video retention.</strong>{" "}
+                {sourceDeleted
+                  ? `The source was deleted on ${formatDateTime(data.source.retention.deleted_at)}. Analysis results are retained.`
+                  : `This uploaded source is scheduled for automatic deletion on ${formatDateTime(data.source.retention.expires_at)}. Analysis results and statistics will remain.`}
+                {" "}<Link href="/video-data">Video & data policy</Link>
+              </div>
             ) : null}
             <div className={styles.windowBar}>
               <strong>Processed window</strong>
@@ -521,6 +535,7 @@ export function AnalysisView({ runId }: { runId: string }) {
               <div className={styles.dataRow}><span>Competition</span><strong>{data.game?.competition || "Not provided"}</strong></div>
               <div className={styles.dataRow}><span>Game date</span><strong>{data.game?.game_date ? formatDateTime(data.game.game_date).split(",")[0] : "Not provided"}</strong></div>
               <div className={styles.dataRow}><span>Source</span><strong>{sourceLabel}</strong></div>
+              {data.source.kind === "upload" && data.source.retention ? <div className={styles.dataRow}><span>Source retention</span><strong>{sourceDeleted ? "Video removed · stats retained" : `Deletes ${formatDateTime(data.source.retention.expires_at)}`}</strong></div> : null}
             </div>
           </section>
 
