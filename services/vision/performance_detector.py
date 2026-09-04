@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import os
 from time import perf_counter
 from typing import Any
 
@@ -29,11 +30,21 @@ class PerformanceDetector:
         self.visual = visual_analyzer
         self.device = device
         self.detector_conf = float(detector_conf)
+        self.player_conf_thresh = self.detector_conf
+        self.inference_conf_thresh = self._env_conf("BASKETBALL_INFERENCE_CONF", self.detector_conf)
+        self.ball_conf_thresh = self._env_conf(
+            "BASKETBALL_BALL_CONF",
+            max(0.01, min(self.detector_conf, 0.10)),
+        )
+        self.inference_conf_thresh = min(
+            self.inference_conf_thresh,
+            self.player_conf_thresh,
+            self.ball_conf_thresh,
+        )
         self.imgsz = int(imgsz)
         self.iou = float(iou)
         self.tracker = tracker
         self.max_det = int(max_det)
-        self.ball_conf_thresh = max(0.01, min(self.detector_conf, 0.10))
         self.enable_jersey = bool(enable_jersey)
         self.jersey_interval_frames = max(1, int(jersey_interval_frames))
         self.player_db: dict[int, dict[str, Any]] = {}
@@ -43,6 +54,25 @@ class PerformanceDetector:
 
         with open(profiling_path, "r", encoding="utf-8") as fh:
             self.match_config = json.load(fh)
+
+        print(
+            "🏀 Detection thresholds: "
+            f"inference={self.inference_conf_thresh:.3f} "
+            f"player={self.player_conf_thresh:.3f} "
+            f"ball={self.ball_conf_thresh:.3f}",
+            flush=True,
+        )
+
+    @staticmethod
+    def _env_conf(name: str, fallback: float) -> float:
+        raw = os.getenv(name)
+        if raw is None or not raw.strip():
+            return float(fallback)
+        try:
+            return max(0.001, min(float(raw), 0.95))
+        except ValueError:
+            print(f"⚠️ Invalid {name}={raw!r}; using {fallback:.3f}.", flush=True)
+            return float(fallback)
 
     @staticmethod
     def _is_player_class(name: str) -> bool:
@@ -78,7 +108,7 @@ class PerformanceDetector:
             frame,
             persist=True,
             tracker=self.tracker,
-            conf=self.detector_conf,
+            conf=self.inference_conf_thresh,
             iou=self.iou,
             imgsz=self.imgsz,
             max_det=self.max_det,
@@ -94,7 +124,10 @@ class PerformanceDetector:
         raw_total = 0
         raw_players = 0
         raw_balls = 0
+        accepted_player_candidates = 0
+        accepted_ball_candidates = 0
         raw_ball_max_conf = None
+        raw_ball_confidences: list[float] = []
 
         if results and results[0].boxes is not None:
             for box in results[0].boxes:
@@ -110,13 +143,15 @@ class PerformanceDetector:
                     raw_players += 1
                 if is_ball:
                     raw_balls += 1
+                    raw_ball_confidences.append(conf)
                     raw_ball_max_conf = conf if raw_ball_max_conf is None else max(raw_ball_max_conf, conf)
 
                 x1, y1, x2, y2 = map(int, box.xyxy[0].tolist())
                 track_id = int(box.id[0]) if box.id is not None else -1
                 center = ((x1 + x2) / 2.0, (y1 + y2) / 2.0)
 
-                if is_player and x2 > x1 and y2 > y1:
+                if is_player and conf >= self.player_conf_thresh and x2 > x1 and y2 > y1:
+                    accepted_player_candidates += 1
                     players.append(
                         {
                             "track_id": track_id,
@@ -128,14 +163,16 @@ class PerformanceDetector:
                             "player_name": None,
                         }
                     )
-                elif is_ball and conf >= self.ball_conf_thresh and conf > best_ball_conf:
-                    best_ball_conf = conf
-                    best_ball = {
-                        "box": [x1, y1, x2, y2],
-                        "center": center,
-                        "confidence": conf,
-                        "interpolated": False,
-                    }
+                elif is_ball and conf >= self.ball_conf_thresh:
+                    accepted_ball_candidates += 1
+                    if conf > best_ball_conf:
+                        best_ball_conf = conf
+                        best_ball = {
+                            "box": [x1, y1, x2, y2],
+                            "center": center,
+                            "confidence": conf,
+                            "interpolated": False,
+                        }
 
         frame_state.players = players
         frame_state.ball = best_ball
@@ -144,12 +181,19 @@ class PerformanceDetector:
             "raw_class_counts": class_counts,
             "raw_player_candidates": raw_players,
             "raw_ball_candidates": raw_balls,
+            "accepted_player_candidates": accepted_player_candidates,
+            "accepted_ball_candidates": accepted_ball_candidates,
             "raw_ball_max_conf": raw_ball_max_conf,
+            "raw_ball_confidences": [round(value, 6) for value in raw_ball_confidences],
             "rejected_outside_court_total": 0,
             "rejected_outside_court_by_class": {},
             "parsed_players": len(players),
             "selected_ball": best_ball is not None,
             "selected_ball_conf": best_ball_conf if best_ball is not None else None,
+            "selected_ball_center": list(best_ball["center"]) if best_ball is not None else None,
+            "inference_conf": self.inference_conf_thresh,
+            "player_conf": self.player_conf_thresh,
+            "ball_conf": self.ball_conf_thresh,
             "detector_conf": self.detector_conf,
             "imgsz": self.imgsz,
             "iou": self.iou,
@@ -195,8 +239,6 @@ class PerformanceDetector:
                     confidence = max(0.0, best_score) / total_score
                     profile["team_confidence"] = confidence
                     profile["team_margin"] = margin
-                    # Do not freeze the first frame. Accumulated evidence can repair an
-                    # early mistake; a locked roster identity later freezes its own team.
                     if best_score >= 0.018 and margin >= 0.004:
                         profile["team"] = best_team
 
@@ -286,8 +328,6 @@ class PerformanceDetector:
                 second_evidence = ordered_votes[1][1] if len(ordered_votes) > 1 else 0.0
                 top_count = int(profile["jersey_vote_counts"].get(top_number, 0))
 
-                # Identity requires repeated temporal agreement. Once locked, expensive
-                # jersey inference stops for that track and the identity persists.
                 if top_count >= 2 and top_evidence >= 0.35 and (top_evidence - second_evidence) >= 0.12:
                     profile["shirt_num"] = top_number
                     profile["identity_team"] = profile.get("team")
