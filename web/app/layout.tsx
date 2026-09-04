@@ -7,6 +7,7 @@ const siteUrl = getSiteUrl();
 export const metadata: Metadata = {
   metadataBase: new URL(siteUrl),
   applicationName: "CourtFlux",
+  manifest: "/manifest.webmanifest",
   title: {
     default: "CourtFlux — Basketball Video Analysis & Intelligence",
     template: "%s | CourtFlux",
@@ -16,6 +17,11 @@ export const metadata: Metadata = {
   authors: [{ name: "CourtFlux" }],
   creator: "CourtFlux",
   publisher: "CourtFlux",
+  formatDetection: {
+    email: false,
+    address: false,
+    telephone: false,
+  },
   icons: {
     icon: [
       { url: "/brand/courtflux_app_icon_32px.png", sizes: "32x32", type: "image/png" },
@@ -28,7 +34,12 @@ export const metadata: Metadata = {
 export default function RootLayout({ children }: Readonly<{ children: React.ReactNode }>) {
   return (
     <html lang="en">
-      <body>{children}</body>
+      <body>
+        <a className="skip-link" href="#main-content">Skip to main content</a>
+        <div id="main-content" tabIndex={-1}>
+          {children}
+        </div>
+      </body>
     </html>
   );
 }
