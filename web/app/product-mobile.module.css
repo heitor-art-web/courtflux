@@ -1,0 +1,251 @@
+.productViewport {
+  min-width: 0;
+}
+
+.productViewport :global(main),
+.productViewport :global(section),
+.productViewport :global(article),
+.productViewport :global(aside),
+.productViewport :global(div) {
+  min-width: 0;
+}
+
+.productViewport :global(img),
+.productViewport :global(video) {
+  max-width: 100%;
+}
+
+.productViewport :global(a),
+.productViewport :global(button),
+.productViewport :global(input),
+.productViewport :global(textarea),
+.productViewport :global(summary) {
+  touch-action: manipulation;
+}
+
+@media (pointer: coarse) {
+  .productViewport :global(a),
+  .productViewport :global(button),
+  .productViewport :global(summary) {
+    min-height: 44px;
+  }
+
+  .productViewport :global(input:not([type="checkbox"]):not([type="radio"])),
+  .productViewport :global(textarea) {
+    min-height: 48px;
+  }
+
+  .productViewport :global(input[type="checkbox"]),
+  .productViewport :global(input[type="radio"]) {
+    width: 20px;
+    height: 20px;
+  }
+}
+
+@media (max-width: 900px) {
+  .productViewport :global(main) {
+    padding-bottom: calc(76px + env(safe-area-inset-bottom));
+  }
+
+  .productViewport :global(main > header > div:last-child) {
+    width: 100%;
+    max-width: 100%;
+    display: flex;
+    flex-wrap: nowrap !important;
+    gap: 8px;
+    overflow-x: auto;
+    overscroll-behavior-inline: contain;
+    scrollbar-width: none;
+    -webkit-overflow-scrolling: touch;
+    padding-bottom: 2px;
+  }
+
+  .productViewport :global(main > header > div:last-child::-webkit-scrollbar),
+  .productViewport :global([role="tablist"]::-webkit-scrollbar),
+  .productViewport :global(section[aria-labelledby="progress-title"] > div:last-child::-webkit-scrollbar) {
+    display: none;
+  }
+
+  .productViewport :global(main > header > div:last-child > *) {
+    flex: 0 0 auto;
+  }
+
+  .productViewport :global(section[aria-label="Workspace overview"] article) {
+    min-height: 118px;
+  }
+
+  .productViewport :global(section[aria-labelledby="recent-analyses-title"] a[href^="/analysis/"]) {
+    display: block;
+    border-radius: 12px;
+    -webkit-tap-highlight-color: rgba(255, 116, 23, 0.14);
+  }
+
+  .productViewport :global(section[aria-labelledby="recent-analyses-title"] a[href^="/analysis/"] article) {
+    min-height: 64px;
+    padding-block: 14px;
+  }
+
+  .productViewport :global(aside[aria-label="Workspace details"] a) {
+    min-height: 48px;
+  }
+
+  .productViewport :global(label[for="video-file"]) {
+    min-height: 170px;
+  }
+
+  .productViewport :global(section[aria-labelledby="source-title"] button),
+  .productViewport :global(aside[aria-labelledby="review-title"] button) {
+    min-height: 48px;
+  }
+
+  .productViewport :global(details summary) {
+    display: flex;
+    align-items: center;
+    padding-block: 8px;
+  }
+
+  .productViewport :global([role="tablist"]) {
+    position: sticky;
+    top: 0;
+    z-index: 15;
+    display: flex;
+    flex-wrap: nowrap !important;
+    gap: 8px;
+    max-width: 100%;
+    overflow-x: auto;
+    overscroll-behavior-inline: contain;
+    scroll-snap-type: x proximity;
+    scrollbar-width: none;
+    -webkit-overflow-scrolling: touch;
+    padding: 9px 2px 10px;
+    background: linear-gradient(180deg, rgba(7, 18, 30, 0.98) 72%, rgba(7, 18, 30, 0));
+  }
+
+  .productViewport :global([role="tab"]) {
+    flex: 0 0 auto;
+    min-height: 44px;
+    scroll-snap-align: start;
+  }
+
+  .productViewport :global(section[aria-labelledby="progress-title"] > div:last-child) {
+    grid-template-columns: none !important;
+    grid-auto-flow: column;
+    grid-auto-columns: minmax(180px, 42%);
+    overflow-x: auto;
+    overscroll-behavior-inline: contain;
+    scroll-snap-type: x proximity;
+    scrollbar-width: none;
+    -webkit-overflow-scrolling: touch;
+    padding-bottom: 5px;
+  }
+
+  .productViewport :global(section[aria-labelledby="progress-title"] > div:last-child > *) {
+    scroll-snap-align: start;
+  }
+
+  .productViewport :global(section[aria-labelledby="video-title"] video) {
+    touch-action: pan-x pan-y;
+  }
+
+  .productViewport :global(section[aria-labelledby="evidence-title"] > div:first-child > div:last-child) {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+  }
+
+  .productViewport :global(section[aria-labelledby="evidence-title"] > div:first-child > div:last-child button) {
+    min-height: 44px;
+  }
+}
+
+@media (max-width: 620px) {
+  .productViewport :global(main) {
+    padding-bottom: calc(64px + env(safe-area-inset-bottom));
+  }
+
+  .productViewport :global(input:not([type="checkbox"]):not([type="radio"])),
+  .productViewport :global(textarea) {
+    font-size: 16px;
+  }
+
+  .productViewport :global(main > header) {
+    gap: 12px;
+    margin-bottom: 22px;
+  }
+
+  .productViewport :global(main > header > div:last-child) {
+    margin-inline: -2px;
+    padding-inline: 2px;
+  }
+
+  .productViewport :global(section[aria-label="Workspace overview"]) {
+    gap: 10px;
+  }
+
+  .productViewport :global(section[aria-labelledby="recent-analyses-title"] a[href^="/analysis/"] article) {
+    min-height: 72px;
+  }
+
+  .productViewport :global(section[aria-labelledby="source-title"]),
+  .productViewport :global(section[aria-labelledby="context-title"]),
+  .productViewport :global(section[aria-labelledby="scope-title"]),
+  .productViewport :global(aside[aria-labelledby="review-title"]) {
+    scroll-margin-top: 10px;
+  }
+
+  .productViewport :global(aside[aria-labelledby="review-title"] button) {
+    width: 100%;
+  }
+
+  .productViewport :global(section[aria-labelledby="progress-title"] > div:last-child) {
+    grid-auto-columns: minmax(180px, 78vw);
+  }
+
+  .productViewport :global([role="tablist"]) {
+    margin-inline: -6px;
+    padding-inline: 6px;
+  }
+
+  .productViewport :global([role="tab"]) {
+    padding-inline: 14px;
+  }
+
+  .productViewport :global(section[aria-labelledby="evidence-title"] > div:first-child > div:last-child) {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    width: 100%;
+  }
+
+  .productViewport :global(section[aria-labelledby="evidence-title"] > div:first-child > div:last-child button) {
+    width: 100%;
+  }
+
+  .productViewport :global([aria-label="Analysis details"] article) {
+    min-height: 104px;
+  }
+}
+
+@media (max-width: 420px) {
+  .productViewport :global(section[aria-labelledby="evidence-title"] > div:first-child > div:last-child) {
+    grid-template-columns: 1fr;
+  }
+
+  .productViewport :global(main > header > div:last-child a),
+  .productViewport :global(main > header > div:last-child button) {
+    padding-inline: 12px;
+  }
+}
+
+@media (max-width: 900px) and (orientation: landscape) and (max-height: 560px) {
+  .productViewport :global(main) {
+    padding-top: 10px;
+  }
+
+  .productViewport :global(section[aria-labelledby="video-title"] video) {
+    max-height: 58vh;
+  }
+
+  .productViewport :global(section[aria-labelledby="progress-title"] > div:last-child) {
+    grid-auto-columns: minmax(170px, 34%);
+  }
+}

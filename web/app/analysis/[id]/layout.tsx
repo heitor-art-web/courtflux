@@ -1,4 +1,5 @@
 import type { Metadata } from "next";
+import mobileStyles from "../../product-mobile.module.css";
 
 export const metadata: Metadata = {
   title: "Analysis | CourtFlux",
@@ -10,5 +11,5 @@ export const metadata: Metadata = {
 };
 
 export default function AnalysisLayout({ children }: Readonly<{ children: React.ReactNode }>) {
-  return children;
+  return <div className={mobileStyles.productViewport}>{children}</div>;
 }
