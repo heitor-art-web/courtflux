@@ -3,7 +3,7 @@ import Link from "next/link";
 import { LegalPage, legalStyles as styles } from "../legal-page";
 
 export const metadata: Metadata = {
-  title: "Terms of Use | CourtFlux",
+  title: "Terms of Use",
   description: "Working private-beta terms for using CourtFlux basketball video analysis.",
   alternates: { canonical: "/terms" },
 };
