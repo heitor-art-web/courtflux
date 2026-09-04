@@ -15,6 +15,7 @@ import torch
 from fastapi import Depends, FastAPI, Header, HTTPException
 from pydantic import BaseModel, Field
 
+from services.ingestion.supabase_video import SupabaseVideoStore
 from services.supabase_service import SupabaseRunStore
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
@@ -31,7 +32,7 @@ _supabase_store = SupabaseRunStore()
 
 app = FastAPI(
     title="CourtFlux Worker",
-    version="0.3.0",
+    version="0.4.0",
     description="Authenticated CourtFlux analysis worker with Supabase run persistence.",
 )
 
@@ -148,33 +149,41 @@ def run_job(job_id: str, request_data: dict[str, Any]) -> None:
     write_state(job_id, {"status": "running", "started_at": utc_now()})
     _supabase_store.mark_running(job_id, platform_run_id)
 
-    command = [
-        sys.executable,
-        str(analyzer),
-        "--video", request_data["video_source"],
-        "--start", str(request_data["start_time_sec"]),
-        "--end", str(request_data["end_time_sec"]),
-        "--model", request_data["model"],
-        "--conf", str(request_data["detector_conf"]),
-        "--imgsz", str(request_data["imgsz"]),
-        "--device", request_data["device"],
-        "--tracker", request_data["tracker"],
-        "--match-config", str(match_config_path),
-        "--jersey-interval", str(request_data["jersey_interval_frames"]),
-        "--db-batch-size", str(request_data["db_batch_size"]),
-        "--diagnostics-batch-size", str(request_data["diagnostics_batch_size"]),
-        "--reset-db",
-    ]
-    if request_data.get("detection_only", True):
-        command.append("--detection-only")
-    if not request_data.get("enable_jersey", False):
-        command.append("--no-jersey")
-    if not request_data.get("persist_results", True):
-        command.append("--no-persist")
-
     summary_path: Path | None = None
     recent_lines: list[str] = []
     try:
+        video_source = str(request_data["video_source"])
+        if video_source.startswith("supabase://"):
+            video_store = SupabaseVideoStore(output_dir=str(PROJECT_ROOT / "data" / "uploads"))
+            video_source = video_store.get_local_video(
+                video_source,
+                expected_workspace_id=request_data.get("workspace_id"),
+            )
+
+        command = [
+            sys.executable,
+            str(analyzer),
+            "--video", video_source,
+            "--start", str(request_data["start_time_sec"]),
+            "--end", str(request_data["end_time_sec"]),
+            "--model", request_data["model"],
+            "--conf", str(request_data["detector_conf"]),
+            "--imgsz", str(request_data["imgsz"]),
+            "--device", request_data["device"],
+            "--tracker", request_data["tracker"],
+            "--match-config", str(match_config_path),
+            "--jersey-interval", str(request_data["jersey_interval_frames"]),
+            "--db-batch-size", str(request_data["db_batch_size"]),
+            "--diagnostics-batch-size", str(request_data["diagnostics_batch_size"]),
+            "--reset-db",
+        ]
+        if request_data.get("detection_only", True):
+            command.append("--detection-only")
+        if not request_data.get("enable_jersey", False):
+            command.append("--no-jersey")
+        if not request_data.get("persist_results", True):
+            command.append("--no-persist")
+
         with log_path.open("w", encoding="utf-8") as log_file:
             process = subprocess.Popen(
                 command,
