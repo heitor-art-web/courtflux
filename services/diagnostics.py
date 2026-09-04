@@ -53,6 +53,7 @@ class RunDiagnostics:
             "jersey_interval_frames": int(jersey_interval_frames),
             "diagnostics_batch_size": self.batch_size,
         }
+        self._thresholds_captured = False
         self._write_meta()
 
         self.total_frames = 0
@@ -63,6 +64,9 @@ class RunDiagnostics:
         self.team_classified_detections = 0
         self.jersey_identified_detections = 0
         self.raw_ball_candidate_frames = 0
+        self.raw_ball_candidates_total = 0
+        self.accepted_ball_candidates_total = 0
+        self.multi_ball_candidate_frames = 0
         self.selected_ball_frames = 0
         self.predicted_ball_frames = 0
         self.missing_ball_frames = 0
@@ -70,6 +74,19 @@ class RunDiagnostics:
         self.valid_homography_frames = 0
         self.keypoint_model_frames = 0
         self.selected_ball_confidences: list[float] = []
+
+        # Direct-detector continuity. These deliberately ignore predicted_hold so that
+        # we can measure whether the detector itself is good enough for passes/shots.
+        self.ball_detection_streaks: list[int] = []
+        self.ball_gap_lengths: list[int] = []
+        self._current_ball_detection_streak = 0
+        self._current_ball_gap = 0
+        self.ball_reacquisitions = 0
+        self.ball_center_step_norm: list[float] = []
+        self.ball_large_jump_count = 0
+        self._last_ball_center: tuple[float, float] | None = None
+        self._last_ball_frame_id: int | None = None
+
         self.team_counts: Dict[str, int] = {}
         self.detector_timing_ms = defaultdict(float)
         self.detector_timing_calls = defaultdict(int)
@@ -134,11 +151,27 @@ class RunDiagnostics:
         analytics: Dict[str, Any] = frame_state.diagnostics.get("analytics", {}) or {}
         camera: Dict[str, Any] = frame_state.diagnostics.get("camera", {}) or {}
 
+        if not self._thresholds_captured and detector:
+            captured = False
+            for target, source in (
+                ("inference_conf", "inference_conf"),
+                ("player_conf", "player_conf"),
+                ("ball_conf", "ball_conf"),
+            ):
+                if detector.get(source) is not None:
+                    self.config[target] = float(detector[source])
+                    captured = True
+            if captured:
+                self._thresholds_captured = True
+                self._write_meta()
+
         valid_gameplay = bool(getattr(frame_state, "valid_gameplay", False))
         raw_ball_candidates = int(detector.get("raw_ball_candidates", 0) or 0)
+        accepted_ball_candidates = int(detector.get("accepted_ball_candidates", 0) or 0)
         selected_ball = bool(detector.get("selected_ball", False))
         ball_source = analytics.get("ball_source", "detector" if selected_ball else "missing")
         selected_conf = detector.get("selected_ball_conf")
+        selected_center = detector.get("selected_ball_center")
         rejected_by_class = detector.get("rejected_outside_court_by_class", {}) or {}
         ball_rejected = sum(int(count) for name, count in rejected_by_class.items() if "ball" in str(name).lower())
 
@@ -211,13 +244,20 @@ class RunDiagnostics:
             "raw_total": int(detector.get("raw_total", 0) or 0),
             "raw_class_counts": detector.get("raw_class_counts", {}) or {},
             "raw_player_candidates": int(detector.get("raw_player_candidates", 0) or 0),
+            "accepted_player_candidates": int(detector.get("accepted_player_candidates", 0) or 0),
             "raw_ball_candidates": raw_ball_candidates,
+            "accepted_ball_candidates": accepted_ball_candidates,
             "raw_ball_max_conf": detector.get("raw_ball_max_conf"),
+            "raw_ball_confidences": detector.get("raw_ball_confidences", []) or [],
             "rejected_outside_court_by_class": rejected_by_class,
             "parsed_players": int(detector.get("parsed_players", 0) or 0),
             "selected_ball": selected_ball,
             "selected_ball_conf": selected_conf,
+            "selected_ball_center": selected_center,
             "ball_source": ball_source,
+            "inference_conf": detector.get("inference_conf"),
+            "player_conf": detector.get("player_conf"),
+            "ball_conf": detector.get("ball_conf"),
             "players_final": int(analytics.get("players_final", len(players)) or 0),
             "players_with_team": players_with_team,
             "players_with_jersey": players_with_jersey,
@@ -250,11 +290,47 @@ class RunDiagnostics:
             self.jersey_identified_detections += players_with_jersey
             for team_name, count in frame_team_counts.items():
                 self.team_counts[team_name] = self.team_counts.get(team_name, 0) + int(count)
+
             self.ball_rejected_outside_court += ball_rejected
+            self.raw_ball_candidates_total += raw_ball_candidates
+            self.accepted_ball_candidates_total += accepted_ball_candidates
             if raw_ball_candidates > 0:
                 self.raw_ball_candidate_frames += 1
+            if raw_ball_candidates > 1:
+                self.multi_ball_candidate_frames += 1
+
             if selected_ball:
                 self.selected_ball_frames += 1
+                if self._current_ball_gap > 0:
+                    self.ball_gap_lengths.append(self._current_ball_gap)
+                    self.ball_reacquisitions += 1
+                    self._current_ball_gap = 0
+                self._current_ball_detection_streak += 1
+
+                if selected_center is not None and len(selected_center) >= 2:
+                    center = (float(selected_center[0]), float(selected_center[1]))
+                    frame_id = int(record["frame_id"])
+                    if self._last_ball_center is not None and self._last_ball_frame_id is not None:
+                        delta_frames = max(frame_id - self._last_ball_frame_id, 1)
+                        dx = center[0] - self._last_ball_center[0]
+                        dy = center[1] - self._last_ball_center[1]
+                        distance = (dx * dx + dy * dy) ** 0.5
+                        frame = getattr(frame_state, "frame", None)
+                        if frame is not None and getattr(frame, "shape", None) is not None:
+                            height, width = frame.shape[:2]
+                            diagonal = max((float(width) ** 2 + float(height) ** 2) ** 0.5, 1.0)
+                            step_norm = distance / diagonal / delta_frames
+                            self.ball_center_step_norm.append(step_norm)
+                            if step_norm > 0.15:
+                                self.ball_large_jump_count += 1
+                    self._last_ball_center = center
+                    self._last_ball_frame_id = frame_id
+            else:
+                if self._current_ball_detection_streak > 0:
+                    self.ball_detection_streaks.append(self._current_ball_detection_streak)
+                    self._current_ball_detection_streak = 0
+                self._current_ball_gap += 1
+
             if ball_source == "predicted_hold":
                 self.predicted_ball_frames += 1
             elif ball_source == "missing":
@@ -271,18 +347,37 @@ class RunDiagnostics:
         return round(100.0 * numerator / max(denominator, 1), 2)
 
     @staticmethod
-    def _average(total: int, denominator: int) -> float:
+    def _average(total: float, denominator: int) -> float:
         return round(total / max(denominator, 1), 3)
 
     @staticmethod
     def _sorted_counts(values: dict[str, int], limit: int = 20) -> dict[str, int]:
         return dict(sorted(values.items(), key=lambda item: item[1], reverse=True)[:limit])
 
+    @staticmethod
+    def _quantile(values: list[float] | list[int], q: float):
+        if not values:
+            return None
+        ordered = sorted(values)
+        index = int(round((len(ordered) - 1) * max(0.0, min(float(q), 1.0))))
+        value = ordered[index]
+        return round(float(value), 6) if isinstance(value, float) else int(value)
+
     def finish(self, extra: Optional[Dict[str, Any]] = None, performance: Optional[Dict[str, Any]] = None) -> Path:
         self._flush_frames()
         confidences = sorted(self.selected_ball_confidences)
         mean_conf = round(sum(confidences) / len(confidences), 4) if confidences else None
-        median_conf = confidences[len(confidences) // 2] if confidences else None
+        median_conf = self._quantile(confidences, 0.50)
+        p10_conf = self._quantile(confidences, 0.10)
+        p90_conf = self._quantile(confidences, 0.90)
+
+        detection_streaks = list(self.ball_detection_streaks)
+        gap_lengths = list(self.ball_gap_lengths)
+        if self._current_ball_detection_streak > 0:
+            detection_streaks.append(self._current_ball_detection_streak)
+        if self._current_ball_gap > 0:
+            gap_lengths.append(self._current_ball_gap)
+
         timing_summary = {}
         for name, total_ms in sorted(self.detector_timing_ms.items(), key=lambda item: item[1], reverse=True):
             calls = self.detector_timing_calls[name]
@@ -302,6 +397,26 @@ class RunDiagnostics:
             "checkpoint": self.checkpoint_diagnostics,
             "avg_team_confidence": round(avg_team_conf, 4),
             "avg_team_margin": round(avg_team_margin, 6),
+        }
+
+        center_steps = self.ball_center_step_norm
+        ball_continuity = {
+            "reacquisitions": self.ball_reacquisitions,
+            "detection_streak_count": len(detection_streaks),
+            "detection_streak_median_frames": self._quantile(detection_streaks, 0.50),
+            "detection_streak_p90_frames": self._quantile(detection_streaks, 0.90),
+            "detection_streak_max_frames": max(detection_streaks) if detection_streaks else None,
+            "miss_gap_count": len(gap_lengths),
+            "miss_gap_median_frames": self._quantile(gap_lengths, 0.50),
+            "miss_gap_p90_frames": self._quantile(gap_lengths, 0.90),
+            "miss_gap_max_frames": max(gap_lengths) if gap_lengths else None,
+            "center_step_norm_diag_median": self._quantile(center_steps, 0.50),
+            "center_step_norm_diag_p90": self._quantile(center_steps, 0.90),
+            "center_step_norm_diag_max": round(max(center_steps), 6) if center_steps else None,
+            "large_jump_rate_gt_0_15_diag_per_frame": self._rate(
+                self.ball_large_jump_count,
+                len(center_steps),
+            ),
         }
 
         summary = {
@@ -325,9 +440,15 @@ class RunDiagnostics:
                 "selected_detection_frame_rate": self._rate(self.selected_ball_frames, self.gameplay_frames),
                 "predicted_hold_frame_rate": self._rate(self.predicted_ball_frames, self.gameplay_frames),
                 "missing_frame_rate": self._rate(self.missing_ball_frames, self.gameplay_frames),
+                "raw_candidates_per_gameplay_frame": self._average(self.raw_ball_candidates_total, self.gameplay_frames),
+                "accepted_candidates_per_gameplay_frame": self._average(self.accepted_ball_candidates_total, self.gameplay_frames),
+                "multi_candidate_frame_rate": self._rate(self.multi_ball_candidate_frames, self.gameplay_frames),
                 "rejected_outside_court": self.ball_rejected_outside_court,
                 "selected_conf_mean": mean_conf,
+                "selected_conf_p10": p10_conf,
                 "selected_conf_median": median_conf,
+                "selected_conf_p90": p90_conf,
+                "continuity": ball_continuity,
             },
             "detector_timing": timing_summary,
             "performance": performance or {},
