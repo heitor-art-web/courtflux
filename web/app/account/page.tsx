@@ -43,7 +43,8 @@ export default async function AccountPage() {
           <p className="muted">Workspace, access and subscription.</p>
         </div>
         <div className="actions">
-          <Link href="/">Back to analysis</Link>
+          <Link href="/">CourtFlux home</Link>
+          <Link href="/lab">Open Beta Lab</Link>
           <SignOutButton />
         </div>
       </header>
@@ -64,7 +65,7 @@ export default async function AccountPage() {
             <div className="metric"><div className="label">Status</div><div className="value" style={{ fontSize: 20 }}>{entitlement?.status ?? "free"}</div></div>
           </div>
           <p className="muted" style={{ marginTop: 16 }}>
-            Free, Base and Premium are represented in the database. Checkout and provider webhooks will attach to this subscription record without changing the account model.
+            Subscription and usage entitlements are read from the workspace record. Public pricing remains indicative until billing is activated.
           </p>
         </section>
 
