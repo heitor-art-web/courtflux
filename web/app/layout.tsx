@@ -1,4 +1,4 @@
-import type { Metadata } from "next";
+import type { Metadata, Viewport } from "next";
 import "./globals.css";
 import "./accessibility.css";
 import { getSiteUrl } from "@/lib/site";
@@ -14,14 +14,27 @@ export const metadata: Metadata = {
     template: "%s | CourtFlux",
   },
   description:
-    "CourtFlux turns basketball game film into structured player, ball, spatial and coaching intelligence for coaches, teams and academies.",
+    "CourtFlux is basketball video analysis software for coaches, teams and academies, turning ordinary game film into structured player, ball and spatial intelligence.",
   authors: [{ name: "CourtFlux" }],
   creator: "CourtFlux",
   publisher: "CourtFlux",
+  category: "Sports technology",
+  referrer: "origin-when-cross-origin",
   formatDetection: {
     email: false,
     address: false,
     telephone: false,
+  },
+  robots: {
+    index: true,
+    follow: true,
+    googleBot: {
+      index: true,
+      follow: true,
+      "max-image-preview": "large",
+      "max-snippet": -1,
+      "max-video-preview": -1,
+    },
   },
   icons: {
     icon: [
@@ -30,6 +43,11 @@ export const metadata: Metadata = {
     ],
     apple: "/brand/courtflux_app_icon_256px.png",
   },
+};
+
+export const viewport: Viewport = {
+  colorScheme: "dark",
+  themeColor: "#06111f",
 };
 
 export default function RootLayout({ children }: Readonly<{ children: React.ReactNode }>) {
