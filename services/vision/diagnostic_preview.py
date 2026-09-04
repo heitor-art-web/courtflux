@@ -9,12 +9,7 @@ import numpy as np
 
 
 class DiagnosticPreview:
-    """Lightweight annotated preview for visual validation during beta runs.
-
-    This renderer is deliberately independent from court/homography analytics. It draws
-    only detector outputs already available on the frame state and writes one rolling
-    JPEG so the Streamlit UI can refresh it without producing an annotated video.
-    """
+    """Lightweight annotated preview for visual validation during beta runs."""
 
     _PALETTE = [
         (255, 120, 40),
@@ -95,18 +90,24 @@ class DiagnosticPreview:
             team = str(player.get("team") or "Unknown")
             jersey = player.get("shirt_num") or player.get("shirt_number")
             track_id = player.get("track_id", -1)
-            confidence = player.get("confidence")
+            detection_conf = player.get("confidence")
+            team_conf = player.get("team_confidence")
+            player_name = str(player.get("player_name") or "").strip()
             color = self._color_for_team(team)
 
             cv2.rectangle(canvas, (x1, y1), (x2, y2), color, 2)
             label_parts = [f"T{track_id}", team]
+            if team_conf is not None:
+                label_parts.append(f"team:{float(team_conf):.2f}")
             if jersey is not None and str(jersey).strip():
                 label_parts.append(f"#{jersey}")
-            if confidence is not None:
-                label_parts.append(f"{float(confidence):.2f}")
+            if player_name:
+                label_parts.append(player_name)
+            if detection_conf is not None:
+                label_parts.append(f"det:{float(detection_conf):.2f}")
             label = " ".join(label_parts)
 
-            (tw, th), baseline = cv2.getTextSize(label, cv2.FONT_HERSHEY_SIMPLEX, 0.48, 1)
+            (tw, th), baseline = cv2.getTextSize(label, cv2.FONT_HERSHEY_SIMPLEX, 0.44, 1)
             top = max(0, y1 - th - baseline - 8)
             cv2.rectangle(canvas, (x1, top), (min(width - 1, x1 + tw + 8), y1), color, -1)
             cv2.putText(
@@ -114,7 +115,7 @@ class DiagnosticPreview:
                 label,
                 (x1 + 4, max(th + 2, y1 - 5)),
                 cv2.FONT_HERSHEY_SIMPLEX,
-                0.48,
+                0.44,
                 (255, 255, 255),
                 1,
                 cv2.LINE_AA,
@@ -142,11 +143,14 @@ class DiagnosticPreview:
 
         timestamp = float(getattr(frame_state, "timestamp", 0.0) or 0.0)
         team_counts: dict[str, int] = {}
+        identified = 0
         for player in players:
             if isinstance(player, dict) and player.get("team"):
                 name = str(player["team"])
                 team_counts[name] = team_counts.get(name, 0) + 1
-        status = f"frame {frame_id} | {timestamp:.2f}s | players {len(players)}"
+            if isinstance(player, dict) and (player.get("shirt_num") or player.get("shirt_number")):
+                identified += 1
+        status = f"frame {frame_id} | {timestamp:.2f}s | players {len(players)} | identified {identified}"
         if team_counts:
             status += " | " + " / ".join(f"{name} {count}" for name, count in team_counts.items())
         cv2.rectangle(canvas, (8, 8), (min(width - 8, 18 + len(status) * 8), 38), (20, 20, 20), -1)
