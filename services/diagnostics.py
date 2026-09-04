@@ -87,6 +87,18 @@ class RunDiagnostics:
         self._last_ball_center: tuple[float, float] | None = None
         self._last_ball_frame_id: int | None = None
 
+        # Effective trajectory continuity includes accepted direct observations and
+        # conservative predicted_hold frames. It is kept separate from direct metrics.
+        self.ball_trajectory_streaks: list[int] = []
+        self.ball_trajectory_gap_lengths: list[int] = []
+        self._current_ball_trajectory_streak = 0
+        self._current_ball_trajectory_gap = 0
+        self.ball_trajectory_reacquisitions = 0
+        self.ball_hold_ages: list[int] = []
+        self.ball_association_rejected_candidates = 0
+        self.ball_association_rejection_frames = 0
+        self.ball_association_decision_frames = 0
+
         self.team_counts: Dict[str, int] = {}
         self.detector_timing_ms = defaultdict(float)
         self.detector_timing_calls = defaultdict(int)
@@ -169,9 +181,13 @@ class RunDiagnostics:
         raw_ball_candidates = int(detector.get("raw_ball_candidates", 0) or 0)
         accepted_ball_candidates = int(detector.get("accepted_ball_candidates", 0) or 0)
         selected_ball = bool(detector.get("selected_ball", False))
-        ball_source = analytics.get("ball_source", "detector" if selected_ball else "missing")
+        ball_source = str(analytics.get("ball_source", "detector" if selected_ball else "missing") or "missing")
         selected_conf = detector.get("selected_ball_conf")
         selected_center = detector.get("selected_ball_center")
+        association = detector.get("ball_association", {}) or {}
+        hold_age_frames = int(association.get("hold_age_frames", 0) or 0)
+        association_rejected = int(association.get("rejected_candidates", 0) or 0)
+        trajectory_available = bool(selected_ball or ball_source == "predicted_hold")
         rejected_by_class = detector.get("rejected_outside_court_by_class", {}) or {}
         ball_rejected = sum(int(count) for name, count in rejected_by_class.items() if "ball" in str(name).lower())
 
@@ -255,6 +271,8 @@ class RunDiagnostics:
             "selected_ball_conf": selected_conf,
             "selected_ball_center": selected_center,
             "ball_source": ball_source,
+            "trajectory_available": trajectory_available,
+            "ball_association": association,
             "inference_conf": detector.get("inference_conf"),
             "player_conf": detector.get("player_conf"),
             "ball_conf": detector.get("ball_conf"),
@@ -299,6 +317,12 @@ class RunDiagnostics:
             if raw_ball_candidates > 1:
                 self.multi_ball_candidate_frames += 1
 
+            if association:
+                self.ball_association_decision_frames += 1
+                self.ball_association_rejected_candidates += association_rejected
+                if association_rejected > 0:
+                    self.ball_association_rejection_frames += 1
+
             if selected_ball:
                 self.selected_ball_frames += 1
                 if self._current_ball_gap > 0:
@@ -331,8 +355,22 @@ class RunDiagnostics:
                     self._current_ball_detection_streak = 0
                 self._current_ball_gap += 1
 
+            if trajectory_available:
+                if self._current_ball_trajectory_gap > 0:
+                    self.ball_trajectory_gap_lengths.append(self._current_ball_trajectory_gap)
+                    self.ball_trajectory_reacquisitions += 1
+                    self._current_ball_trajectory_gap = 0
+                self._current_ball_trajectory_streak += 1
+            else:
+                if self._current_ball_trajectory_streak > 0:
+                    self.ball_trajectory_streaks.append(self._current_ball_trajectory_streak)
+                    self._current_ball_trajectory_streak = 0
+                self._current_ball_trajectory_gap += 1
+
             if ball_source == "predicted_hold":
                 self.predicted_ball_frames += 1
+                if hold_age_frames > 0:
+                    self.ball_hold_ages.append(hold_age_frames)
             elif ball_source == "missing":
                 self.missing_ball_frames += 1
             if homography_valid:
@@ -378,6 +416,13 @@ class RunDiagnostics:
         if self._current_ball_gap > 0:
             gap_lengths.append(self._current_ball_gap)
 
+        trajectory_streaks = list(self.ball_trajectory_streaks)
+        trajectory_gap_lengths = list(self.ball_trajectory_gap_lengths)
+        if self._current_ball_trajectory_streak > 0:
+            trajectory_streaks.append(self._current_ball_trajectory_streak)
+        if self._current_ball_trajectory_gap > 0:
+            trajectory_gap_lengths.append(self._current_ball_trajectory_gap)
+
         timing_summary = {}
         for name, total_ms in sorted(self.detector_timing_ms.items(), key=lambda item: item[1], reverse=True):
             calls = self.detector_timing_calls[name]
@@ -401,6 +446,7 @@ class RunDiagnostics:
 
         center_steps = self.ball_center_step_norm
         ball_continuity = {
+            "scope": "direct_associated_detections_only",
             "reacquisitions": self.ball_reacquisitions,
             "detection_streak_count": len(detection_streaks),
             "detection_streak_median_frames": self._quantile(detection_streaks, 0.50),
@@ -416,6 +462,38 @@ class RunDiagnostics:
             "large_jump_rate_gt_0_15_diag_per_frame": self._rate(
                 self.ball_large_jump_count,
                 len(center_steps),
+            ),
+        }
+
+        effective_frames = self.selected_ball_frames + self.predicted_ball_frames
+        ball_trajectory = {
+            "scope": "direct_associated_plus_predicted_hold",
+            "effective_coverage_frame_rate": self._rate(effective_frames, self.gameplay_frames),
+            "direct_frame_rate": self._rate(self.selected_ball_frames, self.gameplay_frames),
+            "predicted_hold_frame_rate": self._rate(self.predicted_ball_frames, self.gameplay_frames),
+            "missing_frame_rate": self._rate(self.missing_ball_frames, self.gameplay_frames),
+            "reacquisitions": self.ball_trajectory_reacquisitions,
+            "trajectory_streak_count": len(trajectory_streaks),
+            "trajectory_streak_median_frames": self._quantile(trajectory_streaks, 0.50),
+            "trajectory_streak_p90_frames": self._quantile(trajectory_streaks, 0.90),
+            "trajectory_streak_max_frames": max(trajectory_streaks) if trajectory_streaks else None,
+            "trajectory_gap_count": len(trajectory_gap_lengths),
+            "trajectory_gap_median_frames": self._quantile(trajectory_gap_lengths, 0.50),
+            "trajectory_gap_p90_frames": self._quantile(trajectory_gap_lengths, 0.90),
+            "trajectory_gap_max_frames": max(trajectory_gap_lengths) if trajectory_gap_lengths else None,
+            "hold_age_median_frames": self._quantile(self.ball_hold_ages, 0.50),
+            "hold_age_p90_frames": self._quantile(self.ball_hold_ages, 0.90),
+            "hold_age_max_frames": max(self.ball_hold_ages) if self.ball_hold_ages else None,
+            "association_decision_frames": self.ball_association_decision_frames,
+            "association_rejected_candidates_total": self.ball_association_rejected_candidates,
+            "association_frames_with_rejections": self.ball_association_rejection_frames,
+            "association_frame_rejection_rate": self._rate(
+                self.ball_association_rejection_frames,
+                self.ball_association_decision_frames,
+            ),
+            "association_candidate_rejection_rate": self._rate(
+                self.ball_association_rejected_candidates,
+                self.accepted_ball_candidates_total,
             ),
         }
 
@@ -439,6 +517,7 @@ class RunDiagnostics:
                 "raw_candidate_frame_rate": self._rate(self.raw_ball_candidate_frames, self.gameplay_frames),
                 "selected_detection_frame_rate": self._rate(self.selected_ball_frames, self.gameplay_frames),
                 "predicted_hold_frame_rate": self._rate(self.predicted_ball_frames, self.gameplay_frames),
+                "effective_trajectory_frame_rate": self._rate(effective_frames, self.gameplay_frames),
                 "missing_frame_rate": self._rate(self.missing_ball_frames, self.gameplay_frames),
                 "raw_candidates_per_gameplay_frame": self._average(self.raw_ball_candidates_total, self.gameplay_frames),
                 "accepted_candidates_per_gameplay_frame": self._average(self.accepted_ball_candidates_total, self.gameplay_frames),
@@ -449,6 +528,7 @@ class RunDiagnostics:
                 "selected_conf_median": median_conf,
                 "selected_conf_p90": p90_conf,
                 "continuity": ball_continuity,
+                "trajectory": ball_trajectory,
             },
             "detector_timing": timing_summary,
             "performance": performance or {},
