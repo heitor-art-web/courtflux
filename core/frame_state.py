@@ -9,7 +9,7 @@ class FrameState:
     Unified object passed through the entire video processing pipeline.
 
     Single source of truth using standard Python dictionaries for player/ball detections,
-    supporting camera tracking metadata, backboard ROI, and backward-compatible aliases.
+    supporting camera tracking metadata, diagnostics, backboard ROI, and backward-compatible aliases.
     """
 
     # Primary Video Metadata
@@ -39,6 +39,9 @@ class FrameState:
 
     metrics: Dict[str, Any] = field(default_factory=dict)
     events: List[str] = field(default_factory=list)
+
+    # Beta diagnostics: each pipeline stage can append structured observations here.
+    diagnostics: Dict[str, Any] = field(default_factory=dict)
 
     # ------------------------------------------------------------------
     # Property Aliases (Ensures backward compatibility across models)
