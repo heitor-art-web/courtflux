@@ -3,7 +3,7 @@ import Link from "next/link";
 import { LegalPage, legalStyles as styles } from "../legal-page";
 
 export const metadata: Metadata = {
-  title: "Trust & Security | CourtFlux",
+  title: "Trust & Security",
   description: "How CourtFlux handles basketball video, workspace access, retention and beta AI limitations.",
   alternates: { canonical: "/trust" },
 };
