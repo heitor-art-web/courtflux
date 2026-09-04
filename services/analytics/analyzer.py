@@ -20,7 +20,9 @@ from services.database_service import DatabaseService
 from services.persistence import db_setup
 from services.ingestion.youtube_downloader import YouTubeDownloader
 from services.vision.detector import Detector
+from services.vision.performance_detector import PerformanceDetector
 from services.vision.visual_analyzer import VisualAnalyzer
+from services.vision.team_only_analyzer import TeamOnlyAnalyzer
 from services.analytics.engine import Engine
 from services.frame_loader import FrameLoader
 from services.gameplay_filter import GameplayFilter
@@ -41,7 +43,6 @@ def resolve_device(requested: str | None) -> str:
         if requested == "cpu":
             return "cpu"
         print(f"⚠️ Requested device '{requested}' is unavailable; falling back automatically.", flush=True)
-
     if torch.cuda.is_available():
         return "cuda"
     if torch.backends.mps.is_available():
@@ -60,6 +61,12 @@ def main(
     tracker: str = "botsort.yaml",
     reset_db: bool = False,
     match_config_path: str | None = None,
+    detection_only: bool = False,
+    enable_jersey: bool = True,
+    jersey_interval_frames: int = 12,
+    db_batch_size: int = 100,
+    diagnostics_batch_size: int = 100,
+    persist_results: bool = True,
 ):
     resolved_device = resolve_device(device)
     chosen_model = model_path or settings.model
@@ -78,6 +85,10 @@ def main(
         imgsz=imgsz,
         device=resolved_device,
         tracker=tracker,
+        detection_only=detection_only,
+        enable_jersey=enable_jersey,
+        jersey_interval_frames=jersey_interval_frames,
+        batch_size=diagnostics_batch_size,
     )
     diagnostics.capture_match_config(chosen_match_config)
     print(f"[RUN_DIR] {diagnostics.run_dir.resolve()}", flush=True)
@@ -90,90 +101,65 @@ def main(
         if not chosen_match_config.exists():
             raise FileNotFoundError(f"Match config not found: {chosen_match_config}")
 
-        # --------------------------------------------------
-        # Database
-        # --------------------------------------------------
         db_path = PROJECT_ROOT / "data" / "tracking.db"
         db_path.parent.mkdir(parents=True, exist_ok=True)
+        if persist_results:
+            if reset_db or not db_path.exists():
+                db_setup.initialize_database()
+            conn = sqlite3.connect(db_path)
+            db_service = DatabaseService(conn, batch_size=db_batch_size)
+        else:
+            db_service = None
 
-        if reset_db or not db_path.exists():
-            db_setup.initialize_database()
-
-        conn = sqlite3.connect(db_path)
-        db_service = DatabaseService(conn)
-
-        # --------------------------------------------------
-        # Download / Resolve Video
-        # --------------------------------------------------
         print(f"🎬 Initializing video source: {video_source}", flush=True)
-
         if "youtube.com" in video_source or "youtu.be" in video_source:
             downloader = YouTubeDownloader(output_dir="data")
             video_path = downloader.get_local_video(video_source)
         else:
             video_path = video_source
 
-        # --------------------------------------------------
-        # Open video session
-        # --------------------------------------------------
         end_time_val = end_time if end_time is not None else float("inf")
-        session = VideoSession(
-            video_path=video_path,
-            start_time=start_time,
-            end_time=end_time_val,
-        )
+        session = VideoSession(video_path=video_path, start_time=start_time, end_time=end_time_val)
         session.open()
-
         success, first_frame = session.cap.read()
         if not success:
             raise RuntimeError(f"Unable to read frame at {start_time:.1f}s")
-
         session.cap.set(cv2.CAP_PROP_POS_MSEC, start_time * 1000)
 
-        # --------------------------------------------------
-        # Court calibration (data only; no 2D court rendering)
-        # --------------------------------------------------
-        print("📐 Calibrating court...", flush=True)
-        camera_tracker = CameraTracker(first_frame=first_frame)
-        court_polygon = camera_tracker.base_polygon
-        homography = camera_tracker.initial_H
-        camera_tracker = CameraTracker(first_frame, homography, court_polygon)
+        if detection_only:
+            print("⚡ Detection-only mode: camera/homography and analytics engine disabled.", flush=True)
+            camera_tracker = None
+            court_polygon = None
+            engine = None
+        else:
+            print("📐 Calibrating court...", flush=True)
+            camera_tracker = CameraTracker(first_frame=first_frame)
+            court_polygon = camera_tracker.base_polygon
+            homography = camera_tracker.initial_H
+            camera_tracker = CameraTracker(first_frame, homography, court_polygon)
+            engine = Engine(fps=int(round(session.fps or 30.0)))
 
-        # --------------------------------------------------
-        # Visual metadata analysis
-        # --------------------------------------------------
-        visual = VisualAnalyzer(reader=None, profiling_path=str(chosen_match_config))
+        if detection_only and not enable_jersey:
+            print("⚡ Jersey model disabled; using lightweight team-only classifier.", flush=True)
+            visual = TeamOnlyAnalyzer(profiling_path=str(chosen_match_config))
+        else:
+            visual = VisualAnalyzer(reader=None, profiling_path=str(chosen_match_config))
 
-        # --------------------------------------------------
-        # YOLO
-        # --------------------------------------------------
         chosen_model_path = Path(chosen_model)
         if not chosen_model_path.is_absolute():
             chosen_model_path = PROJECT_ROOT / chosen_model_path
         if not chosen_model_path.exists():
-            raise FileNotFoundError(
-                f"Model not found: {chosen_model}. Select a checkpoint available on the worker."
-            )
+            raise FileNotFoundError(f"Model not found: {chosen_model}. Select a checkpoint available on the worker.")
 
         model = YOLO(str(chosen_model_path))
         model.to(resolved_device)
         print(
-            f"🧠 YOLO model={chosen_model} device={resolved_device} "
-            f"conf={detector_conf:.2f} imgsz={imgsz} tracker={tracker}",
-            flush=True,
+            f"🧠 YOLO model={chosen_model} device={resolved_device} conf={detector_conf:.2f} "
+            f"imgsz={imgsz} tracker={tracker}", flush=True,
         )
 
-        # --------------------------------------------------
-        # Pipeline
-        # --------------------------------------------------
-        pipeline = Pipeline(
-            gameplay_filter=GameplayFilter(
-                min_court_ratio=0.15,
-                min_motion_ratio=0.003,
-                max_grace_frames=15,
-                processing_scale=0.5,
-            ),
-            detector=Detector(
+        if detection_only:
+            detector = PerformanceDetector(
                 model=model,
                 visual_analyzer=visual,
                 profiling_path=str(chosen_match_config),
@@ -183,55 +169,89 @@ def main(
                 iou=0.5,
                 tracker=tracker,
                 max_det=40,
+                enable_jersey=enable_jersey,
+                jersey_interval_frames=jersey_interval_frames,
+            )
+        else:
+            detector = Detector(
+                model=model,
+                visual_analyzer=visual,
+                profiling_path=str(chosen_match_config),
+                device=resolved_device,
+                detector_conf=detector_conf,
+                imgsz=imgsz,
+                iou=0.5,
+                tracker=tracker,
+                max_det=40,
+            )
+
+        profiler = PipelineProfiler()
+        pipeline = Pipeline(
+            gameplay_filter=GameplayFilter(
+                min_court_ratio=0.15,
+                min_motion_ratio=0.003,
+                max_grace_frames=15,
+                processing_scale=0.5,
             ),
+            detector=detector,
             camera_tracker=camera_tracker,
             backboard_roi=None,
-            engine=Engine(fps=int(round(session.fps or 30.0))),
+            engine=engine,
             database=db_service,
             renderer=None,
-            profiler=PipelineProfiler(),
+            profiler=profiler,
             db_conn=conn,
+            detection_only=detection_only,
+            persist_results=persist_results,
         )
 
         loader = FrameLoader(session)
-
         print(
             f"\n🚀 Processing video ({start_time:.1f}s → "
-            f"{end_time_val if end_time_val != float('inf') else 'End'}s)",
-            flush=True,
+            f"{end_time_val if end_time_val != float('inf') else 'End'}s)", flush=True,
         )
 
         frame_id = 0
         while True:
             frame_state = loader.next()
-            if frame_state is None:
+            if frame_state is None or frame_state.timestamp > end_time_val:
                 break
-            if frame_state.timestamp > end_time_val:
-                break
-
             frame_state.frame_id = frame_id
-            frame_state.court_polygon = court_polygon
+            if court_polygon is not None:
+                frame_state.court_polygon = court_polygon
             frame_state = pipeline.process(frame_state)
             diagnostics.log_frame(frame_state)
             frame_id += 1
 
-        metrics_path = pipeline.engine.metrics.export()
-        summary_path = diagnostics.finish(
-            extra={
-                "status": "completed",
-                "video_path": str(video_path),
-                "legacy_metrics_file": str(metrics_path),
-            }
-        )
+        pipeline.flush()
+        video_fps = float(session.fps or 30.0)
+        performance = profiler.snapshot(video_fps=video_fps)
+        profiler.report(video_fps=video_fps)
+
+        extra = {
+            "status": "completed",
+            "video_path": str(video_path),
+            "mode": "detection_only" if detection_only else "full",
+            "persist_results": persist_results,
+        }
+        if engine is not None:
+            metrics_path = engine.metrics.export()
+            extra["legacy_metrics_file"] = str(metrics_path)
+
+        summary_path = diagnostics.finish(extra=extra, performance=performance)
         print(f"[SUMMARY] {summary_path.resolve()}", flush=True)
         print("\n✅ Analysis completed successfully.", flush=True)
 
     except Exception as exc:
+        if pipeline is not None:
+            try:
+                pipeline.flush()
+            except Exception:
+                pass
+        performance = pipeline.profiler.snapshot(video_fps=float(getattr(session, "fps", 30.0) or 30.0)) if pipeline else {}
         summary_path = diagnostics.finish(
-            extra={
-                "status": "failed",
-                "error": f"{type(exc).__name__}: {exc}",
-            }
+            extra={"status": "failed", "error": f"{type(exc).__name__}: {exc}"},
+            performance=performance,
         )
         print(f"[SUMMARY] {summary_path.resolve()}", flush=True)
         print(f"❌ Analysis failed: {type(exc).__name__}: {exc}", flush=True)
@@ -240,6 +260,8 @@ def main(
     finally:
         if conn is not None:
             try:
+                if pipeline is not None:
+                    pipeline.flush()
                 conn.commit()
                 conn.close()
             except Exception:
@@ -256,7 +278,6 @@ def parse_time_to_seconds(time_str: str) -> float:
         return 0.0
     if ":" not in time_str:
         return float(time_str)
-
     parts = [float(p) for p in time_str.split(":")]
     if len(parts) == 2:
         return parts[0] * 60 + parts[1]
@@ -276,16 +297,19 @@ if __name__ == "__main__":
     parser.add_argument("--device", type=str, default=settings.device, choices=["mps", "cpu", "cuda"])
     parser.add_argument("--tracker", type=str, default="botsort.yaml", choices=["botsort.yaml", "bytetrack.yaml"])
     parser.add_argument("--match-config", type=str, default=str(DEFAULT_MATCH_CONFIG_PATH), help="Match config JSON path")
-    parser.add_argument("--reset-db", action="store_true", help="Reset the beta SQLite database before the run")
+    parser.add_argument("--reset-db", action="store_true", help="Reset SQLite before the run")
+    parser.add_argument("--detection-only", action="store_true", help="Skip camera/homography and tactical analytics")
+    parser.add_argument("--no-jersey", action="store_true", help="Disable temporal jersey recognition")
+    parser.add_argument("--jersey-interval", type=int, default=12, help="Frames between jersey attempts per tracked player")
+    parser.add_argument("--db-batch-size", type=int, default=100, help="Frames buffered per SQLite commit")
+    parser.add_argument("--diagnostics-batch-size", type=int, default=100, help="Frame records buffered per JSONL write")
+    parser.add_argument("--no-persist", action="store_true", help="Do not write SQLite during the benchmark")
 
     args = parser.parse_args()
-    start_sec = parse_time_to_seconds(args.start)
-    end_sec = parse_time_to_seconds(args.end) if args.end else None
-
     main(
         video_source=args.video,
-        start_time=start_sec,
-        end_time=end_sec,
+        start_time=parse_time_to_seconds(args.start),
+        end_time=parse_time_to_seconds(args.end) if args.end else None,
         model_path=args.model,
         detector_conf=args.conf,
         imgsz=args.imgsz,
@@ -293,4 +317,10 @@ if __name__ == "__main__":
         tracker=args.tracker,
         reset_db=args.reset_db,
         match_config_path=args.match_config,
+        detection_only=args.detection_only,
+        enable_jersey=not args.no_jersey,
+        jersey_interval_frames=args.jersey_interval,
+        db_batch_size=args.db_batch_size,
+        diagnostics_batch_size=args.diagnostics_batch_size,
+        persist_results=not args.no_persist,
     )
