@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import base64
 from io import BytesIO
 from pathlib import Path
 
@@ -13,9 +14,15 @@ SPRITE = ROOT / "assets" / "site" / "courtflux-product-sprite.webp"
 
 
 @st.cache_data(show_spinner=False)
-def visual_panel(index: int) -> bytes | None:
+def panel_data_uri(index: int) -> str:
+    """Return one sprite panel as a self-contained image URI.
+
+    Rendering product visuals as ordinary HTML images avoids Streamlit image
+    wrappers and CSS sizing interactions that were clipping/failing in some
+    deployments.
+    """
     if not SPRITE.exists():
-        return None
+        return ""
     with Image.open(SPRITE) as sprite:
         sprite = sprite.convert("RGB")
         panel_count = 5
@@ -24,15 +31,21 @@ def visual_panel(index: int) -> bytes | None:
         panel = sprite.crop((0, top, sprite.width, top + panel_h))
         out = BytesIO()
         panel.save(out, format="WEBP", quality=92, method=6)
-        return out.getvalue()
+    return "data:image/webp;base64," + base64.b64encode(out.getvalue()).decode("ascii")
 
 
-def show_visual(index: int, caption: str) -> None:
-    panel = visual_panel(index)
-    if panel:
-        st.image(panel, use_container_width=True)
-    else:
-        st.info(caption)
+def file_data_uri(path: Path) -> str:
+    if not path.exists():
+        return ""
+    mime = "image/webp" if path.suffix.lower() == ".webp" else "image/png"
+    return f"data:{mime};base64," + base64.b64encode(path.read_bytes()).decode("ascii")
+
+
+def visual(index: int, alt: str) -> str:
+    uri = panel_data_uri(index)
+    if not uri:
+        return f'<div class="cf-product-fallback">{alt}</div>'
+    return f'<div class="cf-product-visual"><img src="{uri}" alt="{alt}"></div>'
 
 
 def card(kicker: str, title: str, body: str, status: str = "") -> str:
@@ -49,20 +62,23 @@ def render_marketing_page() -> None:
         [data-testid="stHeader"],#MainMenu,footer,[data-testid="stSidebar"]{display:none!important}.block-container{max-width:1360px;padding-top:1rem;padding-bottom:4rem}
         .cf-navlinks{display:flex;justify-content:flex-end;gap:1.2rem;align-items:center;min-height:74px}.cf-navlinks a{color:#aab6c2!important;text-decoration:none!important;font-size:.9rem;font-weight:600;white-space:nowrap}.cf-navlinks .cta{background:var(--orange);color:white!important;padding:.68rem .92rem;border-radius:9px}
         .cf-section{padding:7rem 0 0;scroll-margin-top:80px}.cf-eyebrow,.cf-kicker{color:var(--orange);font-size:.73rem;letter-spacing:.14em;text-transform:uppercase;font-weight:800}.cf-title{font-size:clamp(2.55rem,5vw,5.7rem);line-height:.96;letter-spacing:-.055em;margin:.8rem 0 1.2rem;font-weight:760;max-width:900px}.cf-title span{color:var(--orange)}.cf-copy{color:var(--muted);font-size:clamp(1rem,1.4vw,1.18rem);line-height:1.72;max-width:760px}.cf-actions{display:flex;gap:.7rem;flex-wrap:wrap;margin-top:1.5rem}.cf-btn{display:inline-flex;min-height:45px;align-items:center;padding:0 1.05rem;border-radius:9px;text-decoration:none!important;font-weight:700;font-size:.9rem}.primary{background:var(--orange);color:white!important}.secondary{border:1px solid rgba(255,255,255,.16);color:#eef3f8!important;background:rgba(255,255,255,.025)}.cf-note{color:#738293;font-size:.8rem;margin-top:.85rem}
-        div[data-testid="stImage"] img{border-radius:16px;object-fit:contain!important;object-position:center!important;max-width:100%!important;height:auto!important}.cf-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:.8rem;margin-top:1.5rem}.cf-card{padding:1.25rem;border:1px solid var(--line);border-radius:13px;background:linear-gradient(180deg,rgba(13,23,34,.95),rgba(8,15,23,.94));min-height:178px}.cf-card h3{font-size:1.08rem;margin:.52rem 0 .42rem}.cf-card p{color:#8fa0af;line-height:1.58;font-size:.89rem;margin:0}.cf-badge{display:inline-block;margin-top:1rem;padding:.3rem .52rem;border:1px solid rgba(255,255,255,.1);border-radius:999px;color:#becad4;font-size:.66rem;text-transform:uppercase;letter-spacing:.06em}
+        .cf-brand-logo{background-repeat:no-repeat;background-position:left center;background-size:contain;display:block;overflow:visible}.cf-brand-logo.header{width:300px;height:84px}.cf-brand-logo.footer{width:255px;height:72px}.cf-product-visual{width:100%;overflow:hidden;border:1px solid var(--line);border-radius:16px;background:#03080e;box-shadow:0 30px 70px rgba(0,0,0,.28)}.cf-product-visual img{display:block;width:100%;height:auto;max-width:100%;object-fit:contain}.cf-product-fallback{min-height:320px;display:flex;align-items:center;justify-content:center;border:1px solid var(--line);border-radius:16px;color:#718191;background:#081018}.cf-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:.8rem;margin-top:1.5rem}.cf-card{padding:1.25rem;border:1px solid var(--line);border-radius:13px;background:linear-gradient(180deg,rgba(13,23,34,.95),rgba(8,15,23,.94));min-height:178px}.cf-card h3{font-size:1.08rem;margin:.52rem 0 .42rem}.cf-card p{color:#8fa0af;line-height:1.58;font-size:.89rem;margin:0}.cf-badge{display:inline-block;margin-top:1rem;padding:.3rem .52rem;border:1px solid rgba(255,255,255,.1);border-radius:999px;color:#becad4;font-size:.66rem;text-transform:uppercase;letter-spacing:.06em}
         .cf-strip{display:grid;grid-template-columns:1.4fr repeat(4,1fr);gap:1px;background:var(--line);border:1px solid var(--line);border-radius:12px;overflow:hidden;margin-top:2.5rem}.cf-strip div{background:#081018;padding:1rem;min-height:72px;display:flex;align-items:center;color:#d5dee6;font-size:.86rem;font-weight:650}.cf-strip div:first-child{color:#7f8e9d;text-transform:uppercase;font-size:.72rem;letter-spacing:.07em}
         .cf-lines{margin-top:1.3rem}.cf-line{padding:.72rem 0;border-bottom:1px solid rgba(255,255,255,.06);color:#c5d0da}.cf-line:before{content:'•';color:var(--orange);margin-right:.6rem}.cf-quote{border:1px solid var(--line);background:var(--panel);border-radius:14px;padding:1.6rem;font-size:clamp(1.3rem,2.3vw,2rem);line-height:1.35}.cf-quote span{color:var(--orange)}
         .cf-beta{margin-top:1.8rem;padding:clamp(1.5rem,4vw,3rem);border:1px solid rgba(255,104,31,.27);border-radius:17px;background:radial-gradient(circle at 88% 12%,rgba(255,104,31,.12),transparent 18rem),#09121b}.cf-status{display:grid;grid-template-columns:repeat(3,1fr);gap:.8rem;margin-top:1.2rem}.cf-status .cf-card{min-height:220px}.cf-list{list-style:none;padding:0;margin:.8rem 0 0}.cf-list li{padding:.3rem 0;color:#aebbc7;font-size:.86rem}.now{color:var(--green)}.doing{color:#f5a261}.later{color:#6e7f90}
         div[data-testid="stExpander"]{border:1px solid var(--line)!important;background:#081018!important;border-radius:11px!important;margin-bottom:.55rem!important}div[data-testid="stExpander"] summary{font-weight:650!important}div[data-testid="stExpander"] p{color:#9aa9b8!important;line-height:1.65!important}
         .cf-final{text-align:center;padding:8rem 0 4rem}.cf-final .cf-title,.cf-final .cf-copy{margin-left:auto;margin-right:auto}.cf-final .cf-actions{justify-content:center}.cf-footerlinks{display:flex;justify-content:flex-end;align-items:center;gap:1rem;min-height:82px}.cf-footerlinks a{color:#8898a8!important;text-decoration:none!important}.cf-footer-meta{color:#718191;font-size:.8rem;margin-top:.45rem}
-        @media(max-width:900px){.cf-navlinks a:not(.cta){display:none}.cf-grid,.cf-status{grid-template-columns:1fr}.cf-strip{grid-template-columns:1fr 1fr}.cf-strip div:first-child{grid-column:1/-1}.cf-section{padding-top:5.3rem}}
+        @media(max-width:900px){.cf-brand-logo.header{width:220px;height:62px}.cf-brand-logo.footer{width:210px;height:59px}.cf-navlinks a:not(.cta){display:none}.cf-grid,.cf-status{grid-template-columns:1fr}.cf-strip{grid-template-columns:1fr 1fr}.cf-strip div:first-child{grid-column:1/-1}.cf-section{padding-top:5.3rem}}
         </style>
         ''', unsafe_allow_html=True)
 
+    # Header/footer logos are CSS background images with background-size: contain.
+    # This avoids Streamlit's image wrappers entirely and preserves the full lockup.
+    logo_uri = file_data_uri(LOGO)
     nav_logo, nav_links = st.columns([.34, .66], vertical_alignment="center")
     with nav_logo:
-        if LOGO.exists():
-            st.image(str(LOGO), width=255)
+        if logo_uri:
+            st.markdown(f'<a href="#top" aria-label="CourtFlux"><span class="cf-brand-logo header" style="background-image:url(&quot;{logo_uri}&quot;)"></span></a>', unsafe_allow_html=True)
         else:
             st.markdown("**COURTFLUX**")
     with nav_links:
@@ -73,14 +89,14 @@ def render_marketing_page() -> None:
     with left:
         st.markdown('<div style="padding-top:4.4rem"><div class="cf-eyebrow">AI-powered basketball video analytics</div><h1 class="cf-title">Turn game film into <span>basketball intelligence.</span></h1><div class="cf-copy">CourtFlux tracks players and the ball, reconstructs movement on the court, and turns basketball video into structured information coaches and teams can act on.</div><div class="cf-actions"><a class="cf-btn primary" href="?view=lab">Open Beta Lab</a><a class="cf-btn secondary" href="#how">See how it works</a></div><div class="cf-note">Private beta · Built for coaches, academies, teams and performance analysts</div></div>', unsafe_allow_html=True)
     with right:
-        show_visual(0, "CourtFlux full analyst workspace")
+        st.markdown(visual(0, "CourtFlux full analyst workspace"), unsafe_allow_html=True)
 
     st.markdown('<div class="cf-strip"><div>Designed for serious basketball development</div><div>Basketball Academies</div><div>Clubs & Teams</div><div>Coaches</div><div>Performance Analysts</div></div>', unsafe_allow_html=True)
 
     st.markdown('<section id="how" class="cf-section"><div class="cf-eyebrow">How it works</div><h2 class="cf-title">One video. Three layers of <span>understanding.</span></h2><div class="cf-copy">CourtFlux bridges raw game footage and the spatial, temporal and tactical information hidden inside each possession.</div></section>', unsafe_allow_html=True)
     a, b = st.columns([1.08, .92], gap="large")
     with a:
-        show_visual(1, "Video to tracking to tactical insight")
+        st.markdown(visual(1, "Video to tracking to tactical insight"), unsafe_allow_html=True)
     with b:
         st.markdown('<div class="cf-grid" style="grid-template-columns:1fr"><div class="cf-card"><div class="cf-kicker">01 · Video</div><h3>Use the game film you already have.</h3><p>Work from normal basketball footage rather than a proprietary capture system.</p></div><div class="cf-card"><div class="cf-kicker">02 · Tracking</div><h3>Computer vision follows the game.</h3><p>Players, teams and ball detections become persistent objects with temporal context.</p></div><div class="cf-card"><div class="cf-kicker">03 · Intelligence</div><h3>Movement becomes basketball information.</h3><p>Coordinates, possessions, events and tactical patterns become measurable and searchable.</p></div></div>', unsafe_allow_html=True)
 
@@ -89,12 +105,12 @@ def render_marketing_page() -> None:
     with a:
         st.markdown('<div class="cf-eyebrow">Ball Intelligence</div><h2 class="cf-title">Follow the object that defines the <span>possession.</span></h2><div class="cf-copy">Ball quality is a foundational dependency for possession, passing, shot, rebound and tactical analysis. CourtFlux combines direct detections with temporal continuity to provide a more reliable ball state.</div><div class="cf-lines"><div class="cf-line"><b>Direct detection</b> — frame-level ball candidates</div><div class="cf-line"><b>Temporal tracking</b> — continuity through short gaps</div><div class="cf-line"><b>Reacquisition</b> — recovery when the ball becomes visible again</div></div>', unsafe_allow_html=True)
     with b:
-        show_visual(2, "CourtFlux Ball Intelligence")
+        st.markdown(visual(2, "CourtFlux Ball Intelligence"), unsafe_allow_html=True)
 
     st.markdown('<div class="cf-section">', unsafe_allow_html=True)
     a, b = st.columns([1.12, .88], gap="large")
     with a:
-        show_visual(3, "CourtFlux split-screen court reconstruction")
+        st.markdown(visual(3, "CourtFlux split-screen court reconstruction"), unsafe_allow_html=True)
     with b:
         st.markdown('<div class="cf-eyebrow">Court Reconstruction</div><h2 class="cf-title">From broadcast pixels to <span>spatial intelligence.</span></h2><div class="cf-copy">Map tracked objects from video coordinates onto a basketball court so coaches can reason about spacing, coverage, trajectories and team shape instead of isolated boxes.</div><div class="cf-lines"><div class="cf-line">Player positions and trajectories</div><div class="cf-line">Ball position and movement</div><div class="cf-line">Offensive spacing and defensive structure</div></div>', unsafe_allow_html=True)
     st.markdown('</div>', unsafe_allow_html=True)
@@ -104,7 +120,7 @@ def render_marketing_page() -> None:
     with a:
         st.markdown('<div class="cf-eyebrow">Tactical Intelligence · Vision</div><h2 class="cf-title">Not just what happened. <span>Why it happened.</span></h2><div class="cf-copy">The long-term CourtFlux vision is an AI assistant for coaches that connects tracked movement and events to interpretable tactical context: late rotations, weak-side help, paint penetration, spacing breakdowns and open-corner creation.</div><div class="cf-note">Product direction — not every tactical insight is available in the current beta.</div>', unsafe_allow_html=True)
     with b:
-        show_visual(4, "CourtFlux AI coach insight concept")
+        st.markdown(visual(4, "CourtFlux AI coach insight concept"), unsafe_allow_html=True)
     st.markdown('</div>', unsafe_allow_html=True)
 
     st.markdown('<section class="cf-section"><div class="cf-eyebrow">Product capabilities</div><h2 class="cf-title">Built around the <span>game itself.</span></h2><div class="cf-copy">CourtFlux is not a traditional box-score tracker. The platform is built around objects, movement, possessions and spatial context extracted from video.</div><div class="cf-grid">' + card("Computer Vision", "Player Tracking", "Detect and persist players across game footage.", "Beta") + card("Core Priority", "Ball Intelligence", "Detect, associate and maintain the ball state across time.", "Beta") + card("Classification", "Team Identification", "Separate teams consistently from visual appearance.", "Beta") + card("Spatial Layer", "Court Mapping", "Translate image positions into meaningful court coordinates.", "In development") + card("Game Structure", "Possession Analysis", "Segment continuous footage into basketball possessions.", "In development") + card("Coaching Layer", "Tactical Intelligence", "Explain patterns and moments in coaching language.", "Vision") + '</div></section>', unsafe_allow_html=True)
@@ -144,8 +160,8 @@ def render_marketing_page() -> None:
 
     footer_logo, footer_links = st.columns([.42, .58], vertical_alignment="bottom")
     with footer_logo:
-        if LOGO.exists():
-            st.image(str(LOGO), width=225)
+        if logo_uri:
+            st.markdown(f'<span class="cf-brand-logo footer" style="background-image:url(&quot;{logo_uri}&quot;)"></span>', unsafe_allow_html=True)
         st.markdown('<div class="cf-footer-meta">© 2026 CourtFlux · Basketball Intelligence</div>', unsafe_allow_html=True)
     with footer_links:
         st.markdown('<div class="cf-footerlinks"><a href="#product">Product</a><a href="#about">About</a><a href="#vision">Vision</a><a href="#faq">FAQ</a><a href="?view=lab">Beta Lab</a></div>', unsafe_allow_html=True)
