@@ -25,9 +25,10 @@ from services.analytics.engine import Engine
 from services.frame_loader import FrameLoader
 from services.gameplay_filter import GameplayFilter
 from services.pipeline import Pipeline
-from services.renderer import Renderer
 from services.video_session import VideoSession
 from services.diagnostics import RunDiagnostics
+
+MATCH_CONFIG_PATH = PROJECT_ROOT / "data" / "match_config.json"
 
 
 def resolve_device(requested: str | None) -> str:
@@ -73,6 +74,7 @@ def main(
         device=resolved_device,
         tracker=tracker,
     )
+    diagnostics.capture_match_config(MATCH_CONFIG_PATH)
     print(f"[RUN_DIR] {diagnostics.run_dir.resolve()}", flush=True)
 
     conn = None
@@ -122,7 +124,7 @@ def main(
         session.cap.set(cv2.CAP_PROP_POS_MSEC, start_time * 1000)
 
         # --------------------------------------------------
-        # Court calibration
+        # Court calibration (data only; no 2D court rendering)
         # --------------------------------------------------
         print("📐 Calibrating court...", flush=True)
         camera_tracker = CameraTracker(first_frame=first_frame)
@@ -133,10 +135,8 @@ def main(
         # --------------------------------------------------
         # Visual metadata analysis
         # --------------------------------------------------
-        # EasyOCR is intentionally not initialized in the beta detector benchmark.
-        # The current jersey pipeline uses its local temporal model, while omitting
-        # EasyOCR removes an unrelated startup/per-frame variable from detection tests.
-        visual = VisualAnalyzer(reader=None, profiling_path="data/match_config.json")
+        # The exact match_config.json used here is snapshotted into the run folder.
+        visual = VisualAnalyzer(reader=None, profiling_path=str(MATCH_CONFIG_PATH))
 
         # --------------------------------------------------
         # YOLO
@@ -167,7 +167,7 @@ def main(
             detector=Detector(
                 model=model,
                 visual_analyzer=visual,
-                profiling_path="data/match_config.json",
+                profiling_path=str(MATCH_CONFIG_PATH),
                 device=resolved_device,
                 detector_conf=detector_conf,
                 imgsz=imgsz,
@@ -179,15 +179,12 @@ def main(
             backboard_roi=None,
             engine=Engine(fps=int(round(session.fps or 30.0))),
             database=db_service,
-            renderer=Renderer(save_snapshots=True),
+            renderer=None,
             profiler=PipelineProfiler(),
             db_conn=conn,
         )
 
         loader = FrameLoader(session)
-        preview_dir = PROJECT_ROOT / "data" / "preview"
-        preview_dir.mkdir(parents=True, exist_ok=True)
-        preview_path = preview_dir / "latest_preview.jpg"
 
         print(
             f"\n🚀 Processing video ({start_time:.1f}s → "
@@ -208,21 +205,6 @@ def main(
             frame_state = pipeline.process(frame_state)
 
             diagnostics.log_frame(frame_state)
-
-            frame = (
-                frame_state.annotated_frame
-                if frame_state.annotated_frame is not None
-                else frame_state.frame
-            )
-
-            if frame_id % 30 == 0:
-                h, w, _ = frame.shape
-                preview_w = 640
-                preview_h = int(h * (preview_w / w))
-                resized = cv2.resize(frame, (preview_w, preview_h))
-                cv2.imwrite(str(preview_path), resized)
-                print(f"[PREVIEW] {preview_path.resolve()}", flush=True)
-
             frame_id += 1
 
         # --------------------------------------------------
