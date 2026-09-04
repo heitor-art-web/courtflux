@@ -5,7 +5,7 @@ import runpy
 from pathlib import Path
 
 import streamlit as st
-from PIL import Image
+from PIL import Image, UnidentifiedImageError
 
 ROOT = Path(__file__).resolve().parents[1]
 BRAND_DIR = ROOT / "assets" / "brand"
@@ -22,37 +22,47 @@ _original_title = st.title
 def _page_icon():
     if not APP_ICON.exists():
         return "🏀"
-    with Image.open(APP_ICON) as image:
-        return image.copy()
+    try:
+        with Image.open(APP_ICON) as image:
+            return image.copy()
+    except (UnidentifiedImageError, OSError):
+        return "🏀"
 
 
-def _repair_base64_encoded_webp(path: Path) -> None:
-    """Repair a WebP that was accidentally committed as base64 text.
+def _prepare_product_sprite(path: Path) -> None:
+    """Best-effort repair/validation for the marketing sprite.
 
-    The GitHub contents API used for the marketing asset encoded the binary once
-    too many times, so the file on disk begins with the ASCII WebP base64 prefix
-    ("UklG") instead of the binary RIFF header expected by Pillow. This keeps the
-    app backwards-compatible with that commit while leaving valid binary WebPs
-    untouched.
+    Older checkouts may contain the sprite as base64 text instead of binary WebP.
+    Decode that form when possible. If the file is still not a valid image, remove
+    it for this checkout so the marketing page falls back gracefully instead of
+    crashing during Pillow.Image.open().
     """
     if not path.exists():
         return
 
     raw = path.read_bytes()
-    if raw.startswith(b"RIFF"):
-        return
 
-    compact = b"".join(raw.split())
-    if not compact.startswith(b"UklG"):
-        return
+    # Repair accidental base64-as-text versions.
+    if not raw.startswith(b"RIFF"):
+        compact = b"".join(raw.split())
+        if compact.startswith(b"UklG"):
+            try:
+                decoded = base64.b64decode(compact, validate=True)
+                if decoded.startswith(b"RIFF") and b"WEBP" in decoded[:16]:
+                    path.write_bytes(decoded)
+            except Exception:
+                pass
 
+    # Validate before marketing.py touches it. If invalid, make the asset absent;
+    # marketing.py already has a safe visual fallback for missing assets.
     try:
-        decoded = base64.b64decode(compact, validate=True)
-    except Exception:
-        return
-
-    if decoded.startswith(b"RIFF") and b"WEBP" in decoded[:16]:
-        path.write_bytes(decoded)
+        with Image.open(path) as image:
+            image.verify()
+    except (UnidentifiedImageError, OSError, ValueError):
+        try:
+            path.unlink()
+        except OSError:
+            pass
 
 
 def _courtflux_page_config(*args, **kwargs):
@@ -91,9 +101,7 @@ if _current_view() == "lab":
     st.title = _courtflux_title
     runpy.run_path(str(Path(__file__).with_name("beta_app.py")), run_name="__main__")
 else:
-    # Repair only the known malformed marketing asset. A correctly committed WebP
-    # is detected by its RIFF header and is never rewritten.
-    _repair_base64_encoded_webp(PRODUCT_SPRITE)
+    _prepare_product_sprite(PRODUCT_SPRITE)
 
     _original_set_page_config(
         page_title="CourtFlux — Basketball Intelligence from Video",
