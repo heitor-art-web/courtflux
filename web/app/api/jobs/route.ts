@@ -1,8 +1,22 @@
 import { createAdminClient } from "@/lib/supabase/admin";
 import { createClient } from "@/lib/supabase/server";
+import {
+  canStartAnalysis,
+  normalizePlanCode,
+  resolveMonthlyAllowance,
+} from "@/lib/usage";
 import { workerFetch } from "@/lib/worker";
 
 export const dynamic = "force-dynamic";
+
+function numberFromUnknown(value: unknown): number | null {
+  if (typeof value === "number" && Number.isFinite(value)) return value;
+  if (typeof value === "string" && value.trim()) {
+    const parsed = Number(value);
+    return Number.isFinite(parsed) ? parsed : null;
+  }
+  return null;
+}
 
 export async function POST(request: Request) {
   let runId: string | null = null;
@@ -34,8 +48,6 @@ export async function POST(request: Request) {
 
     const payload = await request.json();
     const workspaceId = membership.workspace_id as string;
-    runId = crypto.randomUUID();
-    jobId = crypto.randomUUID();
     const admin = createAdminClient();
 
     const { data: entitlement } = await admin
@@ -43,6 +55,61 @@ export async function POST(request: Request) {
       .select("plan_code, status, features, limits")
       .eq("workspace_id", workspaceId)
       .maybeSingle();
+
+    const now = new Date();
+    const monthStart = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1));
+    const nextMonth = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth() + 1, 1));
+
+    const [usageResult, grantsResult] = await Promise.all([
+      admin
+        .from("workspace_usage_monthly")
+        .select("quantity")
+        .eq("workspace_id", workspaceId)
+        .eq("metric_code", "analysis_minutes")
+        .gte("usage_month", monthStart.toISOString())
+        .lt("usage_month", nextMonth.toISOString())
+        .maybeSingle(),
+      admin
+        .from("usage_allowance_grants")
+        .select("quantity, valid_from, valid_until")
+        .eq("workspace_id", workspaceId)
+        .eq("metric_code", "analysis_minutes")
+        .limit(100),
+    ]);
+
+    const usedMinutes = numberFromUnknown(usageResult.data?.quantity) ?? 0;
+    const nowMs = now.getTime();
+    const grantedMinutes = grantsResult.error
+      ? 0
+      : (grantsResult.data ?? []).reduce((total, grant) => {
+          const startsAt = new Date(grant.valid_from).getTime();
+          const endsAt = grant.valid_until ? new Date(grant.valid_until).getTime() : null;
+          const active = Number.isFinite(startsAt) && startsAt <= nowMs && (endsAt === null || endsAt > nowMs);
+          return active ? total + (numberFromUnknown(grant.quantity) ?? 0) : total;
+        }, 0);
+
+    const planCode = normalizePlanCode(entitlement?.plan_code);
+    const limits = (entitlement?.limits ?? {}) as Record<string, unknown>;
+    const monthlyAllowance = resolveMonthlyAllowance(planCode, limits, grantedMinutes);
+
+    if (!canStartAnalysis(usedMinutes, monthlyAllowance)) {
+      return Response.json(
+        {
+          error: "Monthly analysis allowance reached",
+          code: "analysis_allowance_exhausted",
+          plan_code: planCode,
+          analysis_minutes_used: usedMinutes,
+          analysis_minutes_allowance: monthlyAllowance,
+          analysis_minutes_remaining: 0,
+          billing_active: false,
+          detail: "New analyses are paused until the monthly allowance resets or a CourtFlux admin grants additional beta minutes.",
+        },
+        { status: 429 },
+      );
+    }
+
+    runId = crypto.randomUUID();
+    jobId = crypto.randomUUID();
 
     const { error: runError } = await admin.from("analysis_runs").insert({
       id: runId,
@@ -73,7 +140,7 @@ export async function POST(request: Request) {
         platform_job_id: jobId,
         workspace_id: workspaceId,
         user_id: user.id,
-        subscription_plan: entitlement?.plan_code ?? "free",
+        subscription_plan: planCode,
       }),
     });
 
