@@ -3,7 +3,7 @@ import Link from "next/link";
 import { LegalPage, legalStyles as styles } from "../legal-page";
 
 export const metadata: Metadata = {
-  title: "Privacy Policy | CourtFlux",
+  title: "Privacy Policy",
   description: "CourtFlux private-beta privacy policy covering accounts, basketball video, analysis data and retention.",
   alternates: { canonical: "/privacy" },
 };
