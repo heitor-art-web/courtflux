@@ -28,8 +28,8 @@ _state_lock = threading.Lock()
 
 app = FastAPI(
     title="Basketball AI Analytics Worker",
-    version="0.1.0",
-    description="Authenticated local/remote worker for the Vercel beta frontend.",
+    version="0.2.0",
+    description="Authenticated worker for Vercel beta and performance runs.",
 )
 
 
@@ -43,6 +43,12 @@ class JobRequest(BaseModel):
     device: Literal["mps", "cpu", "cuda"] = "mps"
     tracker: Literal["botsort.yaml", "bytetrack.yaml"] = "botsort.yaml"
     match_config: dict[str, Any]
+    detection_only: bool = True
+    enable_jersey: bool = False
+    jersey_interval_frames: int = Field(default=12, ge=1, le=300)
+    persist_results: bool = True
+    db_batch_size: int = Field(default=100, ge=1, le=5000)
+    diagnostics_batch_size: int = Field(default=100, ge=1, le=5000)
 
 
 class JobCreated(BaseModel):
@@ -58,11 +64,9 @@ def require_worker_token(authorization: str | None = Header(default=None)) -> No
     expected = os.getenv("WORKER_API_TOKEN", "").strip()
     if not expected:
         raise HTTPException(status_code=503, detail="WORKER_API_TOKEN is not configured on the worker")
-
     prefix = "Bearer "
     if not authorization or not authorization.startswith(prefix):
         raise HTTPException(status_code=401, detail="Missing worker bearer token")
-
     supplied = authorization[len(prefix):]
     if supplied != expected:
         raise HTTPException(status_code=403, detail="Invalid worker bearer token")
@@ -109,7 +113,6 @@ def validate_match_config(config: dict[str, Any]) -> None:
         raise HTTPException(status_code=422, detail="match_config.metadata must be an object")
     if not isinstance(teams, dict) or len(teams) < 2:
         raise HTTPException(status_code=422, detail="match_config.teams must contain at least two teams")
-
     home = metadata.get("home_team")
     away = metadata.get("away_team")
     if not home or not away:
@@ -123,36 +126,34 @@ def run_job(job_id: str, request_data: dict[str, Any]) -> None:
     log_path = directory / "console.log"
     match_config_path = directory / "match_config.json"
     analyzer = PROJECT_ROOT / "services" / "analytics" / "analyzer.py"
-
     write_state(job_id, {"status": "running", "started_at": utc_now()})
 
     command = [
         sys.executable,
         str(analyzer),
-        "--video",
-        request_data["video_source"],
-        "--start",
-        str(request_data["start_time_sec"]),
-        "--end",
-        str(request_data["end_time_sec"]),
-        "--model",
-        request_data["model"],
-        "--conf",
-        str(request_data["detector_conf"]),
-        "--imgsz",
-        str(request_data["imgsz"]),
-        "--device",
-        request_data["device"],
-        "--tracker",
-        request_data["tracker"],
-        "--match-config",
-        str(match_config_path),
+        "--video", request_data["video_source"],
+        "--start", str(request_data["start_time_sec"]),
+        "--end", str(request_data["end_time_sec"]),
+        "--model", request_data["model"],
+        "--conf", str(request_data["detector_conf"]),
+        "--imgsz", str(request_data["imgsz"]),
+        "--device", request_data["device"],
+        "--tracker", request_data["tracker"],
+        "--match-config", str(match_config_path),
+        "--jersey-interval", str(request_data["jersey_interval_frames"]),
+        "--db-batch-size", str(request_data["db_batch_size"]),
+        "--diagnostics-batch-size", str(request_data["diagnostics_batch_size"]),
         "--reset-db",
     ]
+    if request_data.get("detection_only", True):
+        command.append("--detection-only")
+    if not request_data.get("enable_jersey", False):
+        command.append("--no-jersey")
+    if not request_data.get("persist_results", True):
+        command.append("--no-persist")
 
     summary_path: Path | None = None
     recent_lines: list[str] = []
-
     try:
         with log_path.open("w", encoding="utf-8") as log_file:
             process = subprocess.Popen(
@@ -165,7 +166,6 @@ def run_job(job_id: str, request_data: dict[str, Any]) -> None:
                 errors="replace",
                 bufsize=1,
             )
-
             assert process.stdout is not None
             for line in process.stdout:
                 log_file.write(line)
@@ -173,12 +173,10 @@ def run_job(job_id: str, request_data: dict[str, Any]) -> None:
                 text = line.rstrip()
                 recent_lines.append(text)
                 recent_lines = recent_lines[-40:]
-
                 if text.startswith("[SUMMARY]"):
                     candidate = Path(text.replace("[SUMMARY]", "", 1).strip())
                     if candidate.exists():
                         summary_path = candidate
-
             return_code = process.wait()
 
         summary: dict[str, Any] | None = None
@@ -186,36 +184,26 @@ def run_job(job_id: str, request_data: dict[str, Any]) -> None:
             summary = json.loads(summary_path.read_text(encoding="utf-8"))
 
         if return_code == 0:
-            write_state(
-                job_id,
-                {
-                    "status": "completed",
-                    "completed_at": utc_now(),
-                    "return_code": return_code,
-                    "summary": summary,
-                },
-            )
+            write_state(job_id, {
+                "status": "completed",
+                "completed_at": utc_now(),
+                "return_code": return_code,
+                "summary": summary,
+            })
         else:
-            write_state(
-                job_id,
-                {
-                    "status": "failed",
-                    "completed_at": utc_now(),
-                    "return_code": return_code,
-                    "summary": summary,
-                    "error": "\n".join(recent_lines[-12:]),
-                },
-            )
-
-    except Exception as exc:
-        write_state(
-            job_id,
-            {
+            write_state(job_id, {
                 "status": "failed",
                 "completed_at": utc_now(),
-                "error": f"{type(exc).__name__}: {exc}",
-            },
-        )
+                "return_code": return_code,
+                "summary": summary,
+                "error": "\n".join(recent_lines[-12:]),
+            })
+    except Exception as exc:
+        write_state(job_id, {
+            "status": "failed",
+            "completed_at": utc_now(),
+            "error": f"{type(exc).__name__}: {exc}",
+        })
 
 
 @app.get("/health", dependencies=[Depends(require_worker_token)])
@@ -236,37 +224,21 @@ def health() -> dict[str, Any]:
 def create_job(payload: JobRequest) -> JobCreated:
     if payload.end_time_sec <= payload.start_time_sec:
         raise HTTPException(status_code=422, detail="end_time_sec must be greater than start_time_sec")
-
     validate_match_config(payload.match_config)
-
     job_id = str(uuid.uuid4())
     directory = job_dir(job_id)
     directory.mkdir(parents=True, exist_ok=False)
-
     request_data = payload.model_dump()
-    (directory / "request.json").write_text(
-        json.dumps(request_data, indent=2, ensure_ascii=False),
-        encoding="utf-8",
-    )
+    (directory / "request.json").write_text(json.dumps(request_data, indent=2, ensure_ascii=False), encoding="utf-8")
     (directory / "match_config.json").write_text(
-        json.dumps(payload.match_config, indent=2, ensure_ascii=False) + "\n",
-        encoding="utf-8",
+        json.dumps(payload.match_config, indent=2, ensure_ascii=False) + "\n", encoding="utf-8"
     )
-
-    write_state(
-        job_id,
-        {
-            "job_id": job_id,
-            "status": "queued",
-            "created_at": utc_now(),
-            "request": {
-                key: value
-                for key, value in request_data.items()
-                if key != "match_config"
-            },
-        },
-    )
-
+    write_state(job_id, {
+        "job_id": job_id,
+        "status": "queued",
+        "created_at": utc_now(),
+        "request": {key: value for key, value in request_data.items() if key != "match_config"},
+    })
     _executor.submit(run_job, job_id, request_data)
     return JobCreated(job_id=job_id, status="queued")
 
@@ -288,7 +260,6 @@ def get_job_log(job_id: str, tail: int = 120) -> dict[str, Any]:
 
 if __name__ == "__main__":
     import uvicorn
-
     uvicorn.run(
         "services.worker_api:app",
         host=os.getenv("WORKER_HOST", "127.0.0.1"),
