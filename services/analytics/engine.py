@@ -13,7 +13,6 @@ class Engine:
         self.player_class_id = 5
         self.ball_class_id = 3
 
-        # Game Analytics & Event States
         self.rim_coords = rim_pixel_coords
         self.prev_ball_pos = None
         self.last_known_ball = None
@@ -26,14 +25,13 @@ class Engine:
         current_frame_id = getattr(frame_state, "frame_id", 0)
         self.metrics.total_frames += 1
         H = getattr(frame_state, "homography_matrix", None)
+        valid_H = H is not None and not np.allclose(H, np.eye(3), atol=1e-6)
+        analytics_H = H if valid_H else None
 
-        # Capture detector truth BEFORE any prediction/interpolation.
         detector_ball = frame_state.ball is not None
         ball_px = self._extract_ball_center(frame_state)
 
         if detector_ball:
-            # Keep our own copy so marking a future predicted ball does not mutate
-            # the original detector object or historical state.
             self.last_known_ball = dict(frame_state.ball)
             self.last_known_ball["interpolated"] = False
             self.ball_lost_frames = 0
@@ -52,10 +50,9 @@ class Engine:
             print(
                 f"🔍 [DEBUG Frame {current_frame_id}] Detector ball: {detector_ball} | "
                 f"Ball source: {ball_source} | Players: {len(raw_players)} | "
-                f"Homography: {H is not None} | Possession team: {self.current_possession_team}"
+                f"Valid homography: {valid_H} | Possession team: {self.current_possession_team}"
             )
 
-        # Detection metrics now represent actual detector output, not held/predicted balls.
         self.metrics.log_detection(
             players=len(raw_players),
             ball_detected=detector_ball,
@@ -89,9 +86,9 @@ class Engine:
 
             on_court = True
             world_xy = None
-            if H is not None:
-                on_court = self._is_on_court(foot_point, H)
-                world_xy = self._project_to_court(foot_point, H)
+            if analytics_H is not None:
+                on_court = self._is_on_court(foot_point, analytics_H)
+                world_xy = self._project_to_court(foot_point, analytics_H)
 
             if is_jumping and has_ball and on_court:
                 label = f"ID {tracker_id}: JUMP SHOT!"
@@ -100,8 +97,6 @@ class Engine:
             else:
                 label = f"ID {tracker_id}"
 
-            # Enrich the existing detection rather than replacing it. This preserves
-            # team, shirt number, OCR confidence/state, detection confidence, etc.
             if isinstance(p, dict):
                 p_dict = dict(p)
             else:
@@ -115,6 +110,7 @@ class Engine:
                     "center": center_point,
                     "feet": foot_point,
                     "label": label,
+                    "is_jumping": bool(is_jumping),
                     "has_ball": bool(has_ball),
                     "x_m": world_xy[0] if world_xy is not None else None,
                     "y_m": world_xy[1] if world_xy is not None else None,
@@ -131,9 +127,13 @@ class Engine:
             shot_triggered = self.check_rim_interaction(ball_px, self.prev_ball_pos)
 
         if not shot_triggered:
-            shot_triggered = self.check_and_log_shots(current_frame_id, ball_px, H, players_list)
+            shot_triggered = self.check_and_log_shots(
+                current_frame_id,
+                ball_px,
+                analytics_H,
+                players_list,
+            )
 
-        # Turnover logic uses the detector-enriched players before frame_state is replaced.
         turnover_triggered = self.check_turnovers(frame_state, ball_px)
 
         if ball_px is not None:
@@ -164,7 +164,7 @@ class Engine:
                 "detector_ball": bool(detector_ball),
                 "final_ball_present": frame_state.ball is not None,
                 "players_final": len(players_list),
-                "homography_active": H is not None,
+                "homography_active": bool(valid_H),
                 "shot_triggered": bool(shot_triggered or jump_events_count > 0),
                 "turnover_triggered": bool(turnover_triggered),
             }
@@ -233,8 +233,6 @@ class Engine:
         return distance_to_rim < 45 and by > prev_by and prev_by <= ry
 
     def check_and_log_shots(self, frame_count, ball_pos_px, H, players) -> bool:
-        # Kept as a baseline heuristic for the beta. It will be replaced by a temporal
-        # shot state machine after detector/tracker quality has been measured.
         if (frame_count - self.last_shot_frame) < 60:
             return False
         shot_triggered = False
