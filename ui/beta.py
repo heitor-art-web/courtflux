@@ -8,12 +8,24 @@ from pathlib import Path
 import pandas as pd
 import streamlit as st
 
+ROOT = Path(__file__).resolve().parents[1]
+if str(ROOT) not in sys.path:
+    sys.path.insert(0, str(ROOT))
+
 from core.config import settings
 
 
-ROOT = Path(__file__).resolve().parents[1]
 RUNS_DIR = ROOT / "evaluation" / "runs"
 DEFAULT_VIDEO = "https://www.youtube.com/watch?v=OwiQgAMqyUs"
+
+configured_model = ROOT / settings.model
+fallback_model = ROOT / "weights" / "Model_v0.1.pt"
+if configured_model.exists():
+    DEFAULT_MODEL = settings.model
+elif fallback_model.exists():
+    DEFAULT_MODEL = "weights/Model_v0.1.pt"
+else:
+    DEFAULT_MODEL = settings.model
 
 st.set_page_config(
     page_title="Basketball AI Analytics — Beta Lab",
@@ -56,6 +68,7 @@ def flatten_summary(summary: dict) -> dict:
         "ball mean conf": ball.get("selected_conf_mean"),
         "homography %": summary.get("homography_active_rate"),
         "elapsed s": summary.get("elapsed_sec"),
+        "status": summary.get("extra", {}).get("status"),
     }
 
 
@@ -67,27 +80,29 @@ def render_summary(summary_path: Path) -> None:
     st.subheader("Latest diagnostic summary")
     st.caption(f"Run: {summary.get('run_id')} · {summary_path.parent}")
 
+    if summary.get("extra", {}).get("status") == "failed":
+        st.error(summary.get("extra", {}).get("error", "Run failed"))
+
     ball = summary.get("ball", {})
     players = summary.get("players", {})
 
     a, b, c, d, e = st.columns(5)
     a.metric("Gameplay frames", summary.get("gameplay_frames", 0))
     b.metric("Raw players/frame", players.get("raw_per_gameplay_frame", 0))
-    c.metric("Raw ball candidate", f"{ball.get('raw_candidate_frame_rate', 0):.1f}%")
-    d.metric("Selected ball", f"{ball.get('selected_detection_frame_rate', 0):.1f}%")
+    c.metric("Raw ball candidate", f"{float(ball.get('raw_candidate_frame_rate') or 0):.1f}%")
+    d.metric("Selected ball", f"{float(ball.get('selected_detection_frame_rate') or 0):.1f}%")
     e.metric("Ball rejected by court", ball.get("rejected_outside_court", 0))
 
     a, b, c, d = st.columns(4)
-    a.metric("Predicted/held ball", f"{ball.get('predicted_hold_frame_rate', 0):.1f}%")
-    b.metric("Missing ball", f"{ball.get('missing_frame_rate', 0):.1f}%")
+    a.metric("Predicted/held ball", f"{float(ball.get('predicted_hold_frame_rate') or 0):.1f}%")
+    b.metric("Missing ball", f"{float(ball.get('missing_frame_rate') or 0):.1f}%")
     c.metric("Mean ball confidence", ball.get("selected_conf_mean") or 0)
-    d.metric("Homography active", f"{summary.get('homography_active_rate', 0):.1f}%")
+    d.metric("Homography active", f"{float(summary.get('homography_active_rate') or 0):.1f}%")
 
     run_dir = summary_path.parent
-    summary_bytes = summary_path.read_bytes()
     st.download_button(
         "Download summary.json",
-        data=summary_bytes,
+        data=summary_path.read_bytes(),
         file_name=f"{summary.get('run_id', 'run')}_summary.json",
         mime="application/json",
     )
@@ -136,7 +151,7 @@ with st.sidebar:
     video_source = st.text_input("YouTube URL / local video", value=DEFAULT_VIDEO)
     start_time = st.text_input("Start", value="00:00")
     end_time = st.text_input("End", value="01:00")
-    model_path = st.text_input("Model", value=settings.model)
+    model_path = st.text_input("Model", value=DEFAULT_MODEL)
 
     detector_conf = st.slider(
         "Detector confidence",
@@ -223,14 +238,15 @@ if run_clicked:
         run_dir.mkdir(parents=True, exist_ok=True)
         (run_dir / "console.log").write_text("\n".join(captured) + "\n", encoding="utf-8")
 
+    if summary_path is not None and summary_path.exists():
+        st.session_state["last_summary_path"] = str(summary_path)
+
     if process.returncode == 0:
         status.update(label="Analysis completed", state="complete", expanded=False)
         st.success("Run completed. Diagnostic files were saved for comparison.")
-        if summary_path is not None and summary_path.exists():
-            st.session_state["last_summary_path"] = str(summary_path)
     else:
         status.update(label=f"Analysis failed (exit {process.returncode})", state="error", expanded=True)
-        st.error("The run failed. Keep the console.log: the failure itself is useful beta evidence.")
+        st.error("The run failed. Its summary and console log are still useful beta evidence.")
 
 st.divider()
 
