@@ -119,7 +119,8 @@
 }
 
 .primaryButton,
-.secondaryButton {
+.secondaryButton,
+.disabledButton {
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -145,6 +146,13 @@
   border: 1px solid rgba(255, 255, 255, 0.14);
   background: rgba(12, 27, 43, 0.92);
   color: #f3f6fa;
+}
+
+.disabledButton {
+  border: 1px solid rgba(239, 90, 97, 0.32);
+  background: rgba(239, 90, 97, 0.08);
+  color: #ffc8cb !important;
+  cursor: not-allowed;
 }
 
 .metrics {
@@ -278,6 +286,48 @@
   margin-top: 9px;
   color: #91a1b2;
   font-size: 0.76rem;
+}
+
+.usageNotice {
+  display: grid;
+  gap: 4px;
+  margin-top: 16px;
+  padding: 13px 14px;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 12px;
+  font-size: 0.8rem;
+  line-height: 1.5;
+}
+
+.usageNotice strong {
+  color: #fff;
+}
+
+.usageNotice span {
+  color: #c0cad4;
+}
+
+.usageNoticeWarning {
+  border-color: rgba(255, 154, 82, 0.4);
+  background: rgba(255, 116, 23, 0.075);
+}
+
+.usageNoticeExhausted {
+  border-color: rgba(239, 90, 97, 0.42);
+  background: rgba(239, 90, 97, 0.08);
+}
+
+.planActions {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+  margin-top: 14px;
+}
+
+.planActions span {
+  color: #91a1b2;
+  font-size: 0.75rem;
 }
 
 .analysisList {
@@ -420,7 +470,8 @@
   gap: 9px;
 }
 
-.quickActions a {
+.quickActions a,
+.quickActionDisabled {
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -441,6 +492,17 @@
 
 .quickActions span {
   color: #ff9a52;
+}
+
+.quickActionDisabled {
+  border-color: rgba(239, 90, 97, 0.2);
+  color: #9aa7b4;
+  cursor: not-allowed;
+}
+
+.quickActionDisabled span {
+  color: #d78b90;
+  font-size: 0.72rem;
 }
 
 .betaNote {

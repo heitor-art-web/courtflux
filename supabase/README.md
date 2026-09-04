@@ -9,19 +9,32 @@ Supabase is the platform source of truth for identity, workspaces, subscriptions
 - `workspaces`: billing/data isolation boundary. Every new user automatically receives a personal workspace.
 - `workspace_members`: roles are `owner`, `admin`, `analyst`, `viewer`.
 
-The `auth.users` signup trigger creates the profile, personal workspace, owner membership and a current Free subscription in one transaction.
+The `auth.users` signup trigger creates the profile, personal workspace, owner membership and a current Beta subscription in one transaction.
 
-## Billing and subscriptions
+## Plans, usage and subscriptions
 
-- `plans`: Free, Base and Premium product tiers plus feature/limit JSON.
-- `plan_prices`: provider-neutral monthly/yearly prices and external price IDs.
+The public product plans are:
+
+- `beta`: 60 analysis minutes/month.
+- `coach`: 300 analysis minutes/month.
+- `team`: 720 analysis minutes/month.
+- `academy`: 2,400 analysis minutes/month, with the public package positioned for up to five teams.
+
+Plan limits are stored in `plans.limits` under `analysis_minutes_monthly`. The private-beta usage policy warns at 80% and pauses new customer analyses at 100%. Billing and automatic overage charges remain disabled during private beta.
+
+- `plans`: Beta, Coach, Team and Academy product tiers plus feature/limit JSON.
+- `plan_prices`: provider-neutral monthly/yearly prices and external price IDs for later billing activation.
 - `billing_customers`: maps a workspace to a billing provider customer.
 - `subscriptions`: current subscription state and provider subscription ID.
 - `subscription_events`: append-only webhook/audit events.
 - `usage_events`: metered usage such as `analysis_minutes`.
+- `workspace_usage_monthly`: security-invoker monthly usage rollup.
+- `usage_allowance_grants`: trusted-admin top-ups that add temporary analysis minutes without changing the plan or charging an overage.
 - `workspace_entitlements`: security-invoker view exposing the current plan, features and limits to workspace members.
 
-Pricing and quotas are intentionally not hard-coded yet. A payment provider such as Stripe can be attached later without changing the account or analysis schema.
+Authenticated members can read their allowance grants through RLS, but grants have no authenticated insert/update/delete policy. Trusted server/service-role operations are the intended way to award additional private-beta minutes.
+
+A payment provider such as Stripe can be attached later without changing the account, usage or analysis schema. Public prices remain product packaging until billing is explicitly activated.
 
 ## Basketball and analysis data
 
@@ -32,11 +45,11 @@ Pricing and quotas are intentionally not hard-coded yet. A payment provider such
 - `analysis_metrics`: queryable numeric run metrics (`ball.*`, performance metrics, etc.).
 - `analysis_artifacts`: pointers to future Storage objects such as `summary.json`, `frames.jsonl`, logs and previews.
 
-The worker writes lifecycle updates and completed summaries with the Supabase service-role key. Numeric summary fields are flattened into `analysis_metrics`, making cross-video P0 regression queries possible without parsing JSON.
+The worker writes lifecycle updates and completed summaries with the Supabase service-role key. Numeric summary fields are flattened into `analysis_metrics`, making cross-video P0 regression queries possible without parsing JSON. Completed processed-video duration is written to `usage_events` as `analysis_minutes`.
 
 ## RLS model
 
-All application tables use Row Level Security. Users can read only workspaces they belong to. Team/game editing is role-based. Billing writes, run status updates, metrics and usage are server/worker operations using the service-role key. Internal RLS helper and trigger functions live in the non-exposed `private` schema.
+All application tables use Row Level Security. Users can read only workspaces they belong to. Team/game editing is role-based. Billing writes, allowance-grant writes, run status updates, metrics and usage are server/worker operations using the service-role key. Internal RLS helper and trigger functions live in the non-exposed `private` schema.
 
 ## Environment
 
@@ -65,7 +78,9 @@ Never expose or commit the service-role key.
 ```text
 Authenticated browser
   -> Next.js /api/jobs
-  -> Supabase: analysis_runs + analysis_jobs (queued)
+  -> read entitlement + current monthly usage + active top-ups
+  -> if allowance is exhausted: return a soft-stop response (no charge)
+  -> otherwise Supabase: analysis_runs + analysis_jobs (queued)
   -> Python worker using the same platform job UUID
   -> Supabase: running/completed/failed
   -> Supabase: summary + flattened metrics + usage
