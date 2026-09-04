@@ -1,6 +1,6 @@
-# Basketball AI Analytics
+# CourtFlux — Basketball Intelligence from Video
 
-Basketball AI Analytics is a computer-vision system for turning standard basketball broadcast footage into structured, player-level and event-level data.
+**CourtFlux** is a computer-vision system for turning standard basketball broadcast footage into structured, player-level and event-level data.
 
 The core objective is to build a practical analytics pipeline that can identify players, track the ball continuously enough to infer basketball events, and eventually attribute those events to the correct team and player — without requiring wearable sensors or dedicated optical-tracking hardware.
 
@@ -309,7 +309,7 @@ The guiding rule is:
 
 ---
 
-## Running the beta locally
+## Running the CourtFlux beta locally
 
 ### Install
 
@@ -327,7 +327,7 @@ pip install -r requirements.txt
 streamlit run ui/beta.py --server.port 8523
 ```
 
-The beta UI supports:
+The CourtFlux beta UI supports:
 
 - YouTube or local video
 - start / end timestamps
@@ -452,7 +452,7 @@ Only after the perception layer is sufficiently reliable:
 
 ## Development philosophy
 
-This project is being built results-first:
+CourtFlux is being built results-first:
 
 ```text
 measure → diagnose → change → rerun → compare
@@ -466,7 +466,7 @@ A beta feature is considered successful when it improves the final basketball si
 
 ## Status
 
-🚧 **Active development — perception and ball-trajectory beta**
+🚧 **CourtFlux active development — perception and ball-trajectory beta**
 
 Current priority:
 
