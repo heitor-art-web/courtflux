@@ -4,8 +4,23 @@ import { redirect } from "next/navigation";
 import { SignOutButton } from "./signout-button";
 import styles from "./page.module.css";
 import { createClient } from "@/lib/supabase/server";
+import {
+  canStartAnalysis,
+  getUsageLevel,
+  getUsagePercent,
+  normalizePlanCode,
+  resolveMonthlyAllowance,
+  USAGE_WARNING_PERCENT,
+} from "@/lib/usage";
 
 export const dynamic = "force-dynamic";
+
+const PLAN_NAMES: Record<string, string> = {
+  beta: "Beta",
+  coach: "Coach",
+  team: "Team",
+  academy: "Academy",
+};
 
 function formatMinutes(value: number) {
   if (!Number.isFinite(value)) return "0";
@@ -89,7 +104,15 @@ export default async function AccountPage() {
   const monthStart = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1));
   const nextMonth = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth() + 1, 1));
 
-  const [entitlementResult, usageResult, runsResult, activeResult, analysesCountResult, teamsResult] = workspaceId
+  const [
+    entitlementResult,
+    usageResult,
+    grantsResult,
+    runsResult,
+    activeResult,
+    analysesCountResult,
+    teamsResult,
+  ] = workspaceId
     ? await Promise.all([
         supabase
           .from("workspace_entitlements")
@@ -104,6 +127,13 @@ export default async function AccountPage() {
           .gte("usage_month", monthStart.toISOString())
           .lt("usage_month", nextMonth.toISOString())
           .maybeSingle(),
+        supabase
+          .from("usage_allowance_grants")
+          .select("quantity, valid_from, valid_until")
+          .eq("workspace_id", workspaceId)
+          .eq("metric_code", "analysis_minutes")
+          .order("created_at", { ascending: false })
+          .limit(100),
         supabase
           .from("analysis_runs")
           .select("id, status, created_at, completed_at, start_time_sec, end_time_sec, video_source, games(title, game_date)")
@@ -130,6 +160,7 @@ export default async function AccountPage() {
         { data: null },
         { data: null },
         { data: [] },
+        { data: [] },
         { count: 0 },
         { count: 0 },
         { data: [], count: 0 },
@@ -140,18 +171,22 @@ export default async function AccountPage() {
   const teams = teamsResult.data ?? [];
   const usedMinutes = numberFromUnknown(usageResult.data?.quantity) ?? 0;
   const limits = (entitlement?.limits ?? {}) as Record<string, unknown>;
-  const configuredLimit =
-    numberFromUnknown(limits.analysis_minutes_monthly) ??
-    numberFromUnknown(limits.analysis_minutes);
-  const monthlyLimit = configuredLimit ?? (entitlement?.plan_code === "free" ? 60 : null);
-  const remainingMinutes = monthlyLimit === null ? null : Math.max(0, monthlyLimit - usedMinutes);
-  const usagePercent = monthlyLimit && monthlyLimit > 0
-    ? Math.min(100, (usedMinutes / monthlyLimit) * 100)
-    : 0;
+  const nowMs = now.getTime();
+  const grantedMinutes = (grantsResult.data ?? []).reduce((total, grant) => {
+    const startsAt = new Date(grant.valid_from).getTime();
+    const endsAt = grant.valid_until ? new Date(grant.valid_until).getTime() : null;
+    const active = Number.isFinite(startsAt) && startsAt <= nowMs && (endsAt === null || endsAt > nowMs);
+    return active ? total + (numberFromUnknown(grant.quantity) ?? 0) : total;
+  }, 0);
 
-  const planName = entitlement?.plan_code === "free"
-    ? "Beta"
-    : entitlement?.plan_name ?? "Beta";
+  const planCode = normalizePlanCode(entitlement?.plan_code);
+  const planName = PLAN_NAMES[planCode] ?? entitlement?.plan_name ?? "Beta";
+  const baseMonthlyLimit = resolveMonthlyAllowance(planCode, limits, 0);
+  const monthlyLimit = resolveMonthlyAllowance(planCode, limits, grantedMinutes);
+  const remainingMinutes = monthlyLimit === null ? null : Math.max(0, monthlyLimit - usedMinutes);
+  const usagePercent = getUsagePercent(usedMinutes, monthlyLimit);
+  const usageLevel = getUsageLevel(usedMinutes, monthlyLimit);
+  const analysisAllowed = canStartAnalysis(usedMinutes, monthlyLimit);
   const displayName = profile?.full_name?.trim() || user.email?.split("@")[0] || "Coach";
   const firstName = displayName.split(/\s+/)[0];
   const role = membership?.role ?? "member";
@@ -185,9 +220,17 @@ export default async function AccountPage() {
           </p>
         </div>
         <div className={styles.primaryAction}>
-          <strong>Analyse basketball video</strong>
-          <span>Open the private-beta analysis workspace to run a game or clip with the current pipeline.</span>
-          <Link className={styles.primaryButton} href="/lab">Start beta analysis</Link>
+          <strong>{analysisAllowed ? "Analyse basketball video" : "Monthly allowance used"}</strong>
+          <span>
+            {analysisAllowed
+              ? "Open the private-beta analysis workspace to run a game or clip with the current pipeline."
+              : "New customer analyses pause at 100% of the monthly allowance. Ask the CourtFlux team for a beta top-up or compare plans."}
+          </span>
+          {analysisAllowed ? (
+            <Link className={styles.primaryButton} href="/lab">Start beta analysis</Link>
+          ) : (
+            <span className={styles.disabledButton} aria-disabled="true">Analysis paused</span>
+          )}
         </div>
       </section>
 
@@ -250,7 +293,11 @@ export default async function AccountPage() {
               <div className={styles.emptyState}>
                 <strong>No analyses yet</strong>
                 <p>Your completed, queued and running analyses will appear here once you process your first basketball video.</p>
-                <Link className={styles.primaryButton} href="/lab">Run your first beta analysis</Link>
+                {analysisAllowed ? (
+                  <Link className={styles.primaryButton} href="/lab">Run your first beta analysis</Link>
+                ) : (
+                  <span className={styles.disabledButton} aria-disabled="true">Analysis paused</span>
+                )}
               </div>
             )}
           </section>
@@ -279,8 +326,27 @@ export default async function AccountPage() {
                 </div>
               </>
             ) : null}
+
+            {usageLevel === "warning" ? (
+              <div className={`${styles.usageNotice} ${styles.usageNoticeWarning}`} role="status">
+                <strong>{Math.round(usagePercent)}% of this month&apos;s allowance used.</strong>
+                <span>We warn at {USAGE_WARNING_PERCENT}% so you can prioritise the next games or clips. CourtFlux will not add automatic overage charges during private beta.</span>
+              </div>
+            ) : null}
+            {usageLevel === "exhausted" ? (
+              <div className={`${styles.usageNotice} ${styles.usageNoticeExhausted}`} role="status">
+                <strong>Monthly analysis allowance reached.</strong>
+                <span>New customer analyses are paused. A trusted CourtFlux admin can grant additional beta minutes; there is no automatic overage billing.</span>
+              </div>
+            ) : null}
+
             <div className={styles.betaNote}>
-              Billing is not active during the private beta. The 60-minute fallback shown for the Free/Beta plan follows the current public beta allowance when no database quota has been configured yet.
+              Billing is not active during the private beta. {baseMonthlyLimit !== null ? `${planName} includes ${formatMinutes(baseMonthlyLimit)} analysis minutes per month.` : "Your base allowance is managed through the workspace entitlement."}
+              {grantedMinutes > 0 ? ` This workspace currently has ${formatMinutes(grantedMinutes)} additional beta minutes.` : ""}
+            </div>
+            <div className={styles.planActions}>
+              <Link className={styles.secondaryButton} href="/#pricing">Compare plans</Link>
+              <span>No card required and no overage charges during private beta.</span>
             </div>
           </section>
         </div>
@@ -292,6 +358,8 @@ export default async function AccountPage() {
             <div className={styles.detailList}>
               <div className={styles.detailRow}><span>Your role</span><strong>{role}</strong></div>
               <div className={styles.detailRow}><span>Plan</span><strong>{planName}</strong></div>
+              <div className={styles.detailRow}><span>Monthly allowance</span><strong>{monthlyLimit === null ? "—" : `${formatMinutes(monthlyLimit)} min`}</strong></div>
+              {grantedMinutes > 0 ? <div className={styles.detailRow}><span>Beta top-up</span><strong>+{formatMinutes(grantedMinutes)} min</strong></div> : null}
               <div className={styles.detailRow}><span>Teams</span><strong>{teamsResult.count ?? teams.length}</strong></div>
               <div className={styles.detailRow}><span>Account</span><strong>{user.email ?? "Signed in"}</strong></div>
               {entitlement?.current_period_end ? (
@@ -318,7 +386,7 @@ export default async function AccountPage() {
               </div>
             </div>
             <div className={styles.quickActions}>
-              <Link href="/lab">Start beta analysis <span>→</span></Link>
+              {analysisAllowed ? <Link href="/lab">Start beta analysis <span>→</span></Link> : <div className={styles.quickActionDisabled}>Analysis paused <span>Allowance used</span></div>}
               <Link href="/basketball-video-analysis">Basketball video analysis <span>→</span></Link>
               <Link href="/#pricing">Plans and analysis minutes <span>→</span></Link>
               <Link href="/">CourtFlux public site <span>→</span></Link>
