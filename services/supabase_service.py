@@ -64,6 +64,61 @@ class SupabaseRunStore:
         except Exception as exc:
             self._warn("run update", exc)
 
+    def purge_expired_analysis_videos(self, limit: int = 100) -> int:
+        """Delete expired source videos while preserving analysis rows and derived metrics."""
+        if not self.client:
+            return 0
+
+        purged = 0
+        try:
+            result = (
+                self.client.table("analysis_video_uploads")
+                .select("id,bucket,object_path")
+                .is_("deleted_at", "null")
+                .lte("expires_at", utc_now())
+                .order("expires_at")
+                .limit(max(1, min(limit, 500)))
+                .execute()
+            )
+            rows = result.data or []
+        except Exception as exc:
+            self._warn("video retention query", exc)
+            return 0
+
+        for row in rows:
+            row_id = row.get("id")
+            bucket = row.get("bucket")
+            object_path = row.get("object_path")
+            if not row_id or not bucket or not object_path:
+                continue
+
+            attempted_at = utc_now()
+            try:
+                self.client.storage.from_(str(bucket)).remove([str(object_path)])
+                self.client.table("analysis_video_uploads").update(
+                    {
+                        "purge_attempted_at": attempted_at,
+                        "deleted_at": utc_now(),
+                        "deletion_error": None,
+                    }
+                ).eq("id", row_id).execute()
+                purged += 1
+            except Exception as exc:
+                try:
+                    self.client.table("analysis_video_uploads").update(
+                        {
+                            "purge_attempted_at": attempted_at,
+                            "deletion_error": f"{type(exc).__name__}: {exc}"[:1000],
+                        }
+                    ).eq("id", row_id).execute()
+                except Exception as update_exc:
+                    self._warn("video retention failure update", update_exc)
+                self._warn("video retention delete", exc)
+
+        if purged:
+            print(f"🧹 CourtFlux retention: removed {purged} expired source video(s)")
+        return purged
+
     def mark_running(self, job_id: str | None, run_id: str | None) -> None:
         started_at = utc_now()
         self.update_job(job_id, {"status": "running", "started_at": started_at})
