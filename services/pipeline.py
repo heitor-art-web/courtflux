@@ -1,4 +1,9 @@
+import os
+from pathlib import Path
+
 import numpy as np
+
+from services.vision.diagnostic_preview import DiagnosticPreview
 
 
 class Pipeline:
@@ -28,6 +33,19 @@ class Pipeline:
         self.detection_only = bool(detection_only)
         self.persist_results = bool(persist_results)
         self._camera_tracker_initialized = False
+
+        # The local Streamlit beta can request a lightweight rolling preview through
+        # environment variables. Remote workers do not pay this cost unless enabled.
+        if self.renderer is None and self.detection_only:
+            preview_path = os.getenv("BASKETBALL_PREVIEW_PATH", "").strip()
+            if preview_path:
+                match_config = os.getenv("BASKETBALL_PREVIEW_MATCH_CONFIG", "").strip()
+                interval = int(os.getenv("BASKETBALL_PREVIEW_INTERVAL", "15") or "15")
+                self.renderer = DiagnosticPreview(
+                    output_path=Path(preview_path),
+                    match_config_path=Path(match_config) if match_config else None,
+                    interval_frames=interval,
+                )
 
     def _ensure_camera_tracker(self, frame: np.ndarray):
         if not self._camera_tracker_initialized and self.camera_tracker is not None:
@@ -102,9 +120,10 @@ class Pipeline:
                 self.profiler.stop("Event Snapshots")
 
         if self.renderer is not None:
-            self.profiler.start("Renderer")
+            stage_name = "Diagnostic Preview" if isinstance(self.renderer, DiagnosticPreview) else "Renderer"
+            self.profiler.start(stage_name)
             frame_state = self.renderer.draw(frame_state)
-            self.profiler.stop("Renderer")
+            self.profiler.stop(stage_name)
 
         self.profiler.frame_processed()
         self.profiler.stop("Total")
