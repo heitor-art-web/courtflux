@@ -28,7 +28,7 @@ from services.pipeline import Pipeline
 from services.video_session import VideoSession
 from services.diagnostics import RunDiagnostics
 
-MATCH_CONFIG_PATH = PROJECT_ROOT / "data" / "match_config.json"
+DEFAULT_MATCH_CONFIG_PATH = PROJECT_ROOT / "data" / "match_config.json"
 
 
 def resolve_device(requested: str | None) -> str:
@@ -59,9 +59,14 @@ def main(
     device: str | None = None,
     tracker: str = "botsort.yaml",
     reset_db: bool = False,
+    match_config_path: str | None = None,
 ):
     resolved_device = resolve_device(device)
     chosen_model = model_path or settings.model
+    chosen_match_config = Path(match_config_path) if match_config_path else DEFAULT_MATCH_CONFIG_PATH
+    if not chosen_match_config.is_absolute():
+        chosen_match_config = PROJECT_ROOT / chosen_match_config
+    chosen_match_config = chosen_match_config.resolve()
 
     diagnostics = RunDiagnostics(
         root=PROJECT_ROOT,
@@ -74,7 +79,7 @@ def main(
         device=resolved_device,
         tracker=tracker,
     )
-    diagnostics.capture_match_config(MATCH_CONFIG_PATH)
+    diagnostics.capture_match_config(chosen_match_config)
     print(f"[RUN_DIR] {diagnostics.run_dir.resolve()}", flush=True)
 
     conn = None
@@ -82,6 +87,9 @@ def main(
     pipeline = None
 
     try:
+        if not chosen_match_config.exists():
+            raise FileNotFoundError(f"Match config not found: {chosen_match_config}")
+
         # --------------------------------------------------
         # Database
         # --------------------------------------------------
@@ -120,7 +128,6 @@ def main(
         if not success:
             raise RuntimeError(f"Unable to read frame at {start_time:.1f}s")
 
-        # Rewind to requested start so the calibration frame is also analysed.
         session.cap.set(cv2.CAP_PROP_POS_MSEC, start_time * 1000)
 
         # --------------------------------------------------
@@ -135,18 +142,20 @@ def main(
         # --------------------------------------------------
         # Visual metadata analysis
         # --------------------------------------------------
-        # The exact match_config.json used here is snapshotted into the run folder.
-        visual = VisualAnalyzer(reader=None, profiling_path=str(MATCH_CONFIG_PATH))
+        visual = VisualAnalyzer(reader=None, profiling_path=str(chosen_match_config))
 
         # --------------------------------------------------
         # YOLO
         # --------------------------------------------------
-        if not Path(chosen_model).exists():
+        chosen_model_path = Path(chosen_model)
+        if not chosen_model_path.is_absolute():
+            chosen_model_path = PROJECT_ROOT / chosen_model_path
+        if not chosen_model_path.exists():
             raise FileNotFoundError(
-                f"Model not found: {chosen_model}. Select the local checkpoint path in the Beta Lab."
+                f"Model not found: {chosen_model}. Select a checkpoint available on the worker."
             )
 
-        model = YOLO(chosen_model)
+        model = YOLO(str(chosen_model_path))
         model.to(resolved_device)
         print(
             f"🧠 YOLO model={chosen_model} device={resolved_device} "
@@ -167,7 +176,7 @@ def main(
             detector=Detector(
                 model=model,
                 visual_analyzer=visual,
-                profiling_path=str(MATCH_CONFIG_PATH),
+                profiling_path=str(chosen_match_config),
                 device=resolved_device,
                 detector_conf=detector_conf,
                 imgsz=imgsz,
@@ -203,13 +212,9 @@ def main(
             frame_state.frame_id = frame_id
             frame_state.court_polygon = court_polygon
             frame_state = pipeline.process(frame_state)
-
             diagnostics.log_frame(frame_state)
             frame_id += 1
 
-        # --------------------------------------------------
-        # Shutdown / reports
-        # --------------------------------------------------
         metrics_path = pipeline.engine.metrics.export()
         summary_path = diagnostics.finish(
             extra={
@@ -247,7 +252,6 @@ def main(
 
 
 def parse_time_to_seconds(time_str: str) -> float:
-    """Converts HH:MM:SS, MM:SS, or raw second strings to floats."""
     if not time_str:
         return 0.0
     if ":" not in time_str:
@@ -271,6 +275,7 @@ if __name__ == "__main__":
     parser.add_argument("--imgsz", type=int, default=640, help="YOLO inference image size")
     parser.add_argument("--device", type=str, default=settings.device, choices=["mps", "cpu", "cuda"])
     parser.add_argument("--tracker", type=str, default="botsort.yaml", choices=["botsort.yaml", "bytetrack.yaml"])
+    parser.add_argument("--match-config", type=str, default=str(DEFAULT_MATCH_CONFIG_PATH), help="Match config JSON path")
     parser.add_argument("--reset-db", action="store_true", help="Reset the beta SQLite database before the run")
 
     args = parser.parse_args()
@@ -287,4 +292,5 @@ if __name__ == "__main__":
         device=args.device,
         tracker=args.tracker,
         reset_db=args.reset_db,
+        match_config_path=args.match_config,
     )
