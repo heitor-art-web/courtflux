@@ -9,7 +9,7 @@ from typing import Any, Dict, Optional
 
 
 class RunDiagnostics:
-    """Write comparable beta diagnostics with buffered frame I/O and timing summaries."""
+    """Write comparable beta diagnostics with buffered frame I/O and identity summaries."""
 
     def __init__(
         self,
@@ -76,6 +76,16 @@ class RunDiagnostics:
         self.jersey_attempts = 0
         self.jersey_successes = 0
 
+        self.raw_jersey_predictions = defaultdict(int)
+        self.jersey_candidate_predictions = defaultdict(int)
+        self.jersey_rejection_reasons = defaultdict(int)
+        self.identified_track_ids: set[int] = set()
+        self.team_confidence_total = 0.0
+        self.team_confidence_samples = 0
+        self.team_margin_total = 0.0
+        self.team_margin_samples = 0
+        self.checkpoint_diagnostics: dict[str, Any] = {}
+
     def _write_meta(self) -> None:
         self.meta_path.write_text(json.dumps(self.config, indent=2), encoding="utf-8")
 
@@ -106,6 +116,7 @@ class RunDiagnostics:
             "snapshot": str(snapshot_path),
             "home_team": metadata.get("home_team"),
             "away_team": metadata.get("away_team"),
+            "active_kits": metadata.get("active_kits"),
             "teams": list(teams.keys()),
         }
         self._write_meta()
@@ -150,9 +161,21 @@ class RunDiagnostics:
                 team_name = str(team)
                 players_with_team += 1
                 frame_team_counts[team_name] = frame_team_counts.get(team_name, 0) + 1
+            team_conf = player.get("team_confidence")
+            team_margin = player.get("team_margin")
+            if team_conf is not None:
+                self.team_confidence_total += float(team_conf)
+                self.team_confidence_samples += 1
+            if team_margin is not None:
+                self.team_margin_total += float(team_margin)
+                self.team_margin_samples += 1
+
             jersey = player.get("shirt_num") or player.get("shirt_number")
             if jersey is not None and str(jersey).strip():
                 players_with_jersey += 1
+                track_id = player.get("track_id")
+                if isinstance(track_id, int) and track_id >= 0:
+                    self.identified_track_ids.add(track_id)
 
         timings = detector.get("timing_ms", {}) or {}
         for name, ms in timings.items():
@@ -163,6 +186,23 @@ class RunDiagnostics:
                 pass
         self.jersey_attempts += int(detector.get("jersey_attempts", 0) or 0)
         self.jersey_successes += int(detector.get("jersey_successes", 0) or 0)
+
+        team_predictions = list(detector.get("team_predictions", []) or [])
+        jersey_predictions = list(detector.get("jersey_predictions", []) or [])
+        for prediction in jersey_predictions:
+            if not isinstance(prediction, dict):
+                continue
+            raw = prediction.get("raw_canonical") or prediction.get("raw_number")
+            if raw is not None:
+                self.raw_jersey_predictions[str(raw)] += 1
+            candidate = prediction.get("candidate_number")
+            if candidate is not None:
+                self.jersey_candidate_predictions[str(candidate)] += 1
+            reason = str(prediction.get("rejection_reason") or "unknown")
+            self.jersey_rejection_reasons[reason] += 1
+            checkpoint = prediction.get("checkpoint")
+            if isinstance(checkpoint, dict) and checkpoint:
+                self.checkpoint_diagnostics = dict(checkpoint)
 
         record = {
             "frame_id": int(getattr(frame_state, "frame_id", 0)),
@@ -182,6 +222,8 @@ class RunDiagnostics:
             "players_with_team": players_with_team,
             "players_with_jersey": players_with_jersey,
             "team_counts": frame_team_counts,
+            "team_predictions": team_predictions,
+            "jersey_predictions": jersey_predictions,
             "timing_ms": timings,
             "events": [str(event) for event in (getattr(frame_state, "events", []) or [])],
         }
@@ -232,6 +274,10 @@ class RunDiagnostics:
     def _average(total: int, denominator: int) -> float:
         return round(total / max(denominator, 1), 3)
 
+    @staticmethod
+    def _sorted_counts(values: dict[str, int], limit: int = 20) -> dict[str, int]:
+        return dict(sorted(values.items(), key=lambda item: item[1], reverse=True)[:limit])
+
     def finish(self, extra: Optional[Dict[str, Any]] = None, performance: Optional[Dict[str, Any]] = None) -> Path:
         self._flush_frames()
         confidences = sorted(self.selected_ball_confidences)
@@ -245,6 +291,18 @@ class RunDiagnostics:
                 "total_sec": round(total_ms / 1000.0, 3),
                 "avg_ms": round(total_ms / max(calls, 1), 3),
             }
+
+        avg_team_conf = self.team_confidence_total / max(self.team_confidence_samples, 1)
+        avg_team_margin = self.team_margin_total / max(self.team_margin_samples, 1)
+        identity_diagnostics = {
+            "identified_tracks": len(self.identified_track_ids),
+            "raw_prediction_counts": self._sorted_counts(self.raw_jersey_predictions),
+            "roster_candidate_counts": self._sorted_counts(self.jersey_candidate_predictions),
+            "rejection_reasons": self._sorted_counts(self.jersey_rejection_reasons),
+            "checkpoint": self.checkpoint_diagnostics,
+            "avg_team_confidence": round(avg_team_conf, 4),
+            "avg_team_margin": round(avg_team_margin, 6),
+        }
 
         summary = {
             **self.config,
@@ -260,6 +318,7 @@ class RunDiagnostics:
                 "jersey_attempts": self.jersey_attempts,
                 "jersey_successes": self.jersey_successes,
                 "team_counts": self.team_counts,
+                "identity_diagnostics": identity_diagnostics,
             },
             "ball": {
                 "raw_candidate_frame_rate": self._rate(self.raw_ball_candidate_frames, self.gameplay_frames),
