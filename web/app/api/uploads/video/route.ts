@@ -5,6 +5,7 @@ export const dynamic = "force-dynamic";
 
 const VIDEO_BUCKET = "analysis-videos";
 const MAX_FILE_BYTES = 2 * 1024 * 1024 * 1024;
+const VIDEO_RETENTION_DAYS = 60;
 const ALLOWED_EXTENSIONS = new Set(["mp4", "mov", "webm", "m4v"]);
 const ALLOWED_CONTENT_TYPES = new Set([
   "video/mp4",
@@ -71,11 +72,21 @@ export async function POST(request: Request) {
 
     const workspaceId = membership.workspace_id as string;
     const objectPath = `${workspaceId}/${user.id}/${crypto.randomUUID()}.${extension}`;
+    const expiresAt = new Date(Date.now() + VIDEO_RETENTION_DAYS * 24 * 60 * 60 * 1000).toISOString();
     const admin = createAdminClient();
     const { data, error } = await admin.storage.from(VIDEO_BUCKET).createSignedUploadUrl(objectPath);
     if (error || !data?.token) {
       throw error ?? new Error("Could not create video upload token");
     }
+
+    const { error: retentionError } = await admin.from("analysis_video_uploads").insert({
+      workspace_id: workspaceId,
+      created_by: user.id,
+      bucket: VIDEO_BUCKET,
+      object_path: objectPath,
+      expires_at: expiresAt,
+    });
+    if (retentionError) throw retentionError;
 
     return Response.json({
       bucket: VIDEO_BUCKET,
@@ -83,6 +94,8 @@ export async function POST(request: Request) {
       token: data.token,
       source: `supabase://${VIDEO_BUCKET}/${objectPath}`,
       max_file_bytes: MAX_FILE_BYTES,
+      retention_days: VIDEO_RETENTION_DAYS,
+      expires_at: expiresAt,
     });
   } catch (error) {
     return Response.json(
