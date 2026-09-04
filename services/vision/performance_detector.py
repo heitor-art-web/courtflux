@@ -42,6 +42,9 @@ class PerformanceDetector:
         self.enable_jersey = bool(enable_jersey)
         self.jersey_interval_frames = max(1, int(jersey_interval_frames))
         self.player_db: dict[int, dict[str, Any]] = {}
+        self.jersey_attempts_total = 0
+        self.jersey_successes_total = 0
+        self.jersey_time_ms_total = 0.0
 
         # Keep the config load explicit so every benchmark still validates its
         # distinction context even when jersey inference is disabled.
@@ -159,6 +162,8 @@ class PerformanceDetector:
                 if not profile.get("team"):
                     profile["team"] = self.visual.get_team_color(crop)
                 player["team"] = profile.get("team")
+                if self.enable_jersey and hasattr(self.visual, "observe_track"):
+                    self.visual.observe_track(crop, track_id)
             else:
                 player["team"] = self.visual.get_team_color(crop)
 
@@ -180,6 +185,8 @@ class PerformanceDetector:
             )
             player["shirt_num"] = profile.get("shirt_num")
             if profile.get("shirt_num"):
+                continue
+            if hasattr(self.visual, "ready") and not self.visual.ready(track_id):
                 continue
             if frame_id - int(profile.get("last_jersey_attempt", -10**9)) < self.jersey_interval_frames:
                 continue
@@ -214,10 +221,28 @@ class PerformanceDetector:
 
         started = perf_counter()
         attempts, successes = self._jerseys(frame_state)
-        timings["jersey_recognition"] = (perf_counter() - started) * 1000.0
+        jersey_ms = (perf_counter() - started) * 1000.0
+        timings["jersey_recognition"] = jersey_ms
+        self.jersey_attempts_total += attempts
+        self.jersey_successes_total += successes
+        self.jersey_time_ms_total += jersey_ms
 
         diag = frame_state.diagnostics.setdefault("detector", {})
         diag["timing_ms"] = {name: round(ms, 4) for name, ms in timings.items()}
         diag["jersey_attempts"] = attempts
         diag["jersey_successes"] = successes
+        diag["jersey_attempts_total"] = self.jersey_attempts_total
+        diag["jersey_successes_total"] = self.jersey_successes_total
+
+        frame_id = int(getattr(frame_state, "frame_id", 0))
+        if frame_id > 0 and frame_id % 100 == 0:
+            print(
+                f"[PROGRESS] frame={frame_id} players={len(frame_state.players)} "
+                f"ball={'yes' if frame_state.ball is not None else 'no'} "
+                f"jersey_attempts={self.jersey_attempts_total} "
+                f"jersey_hits={self.jersey_successes_total} "
+                f"jersey_time={self.jersey_time_ms_total / 1000.0:.1f}s",
+                flush=True,
+            )
+
         return frame_state
