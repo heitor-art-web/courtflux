@@ -43,12 +43,12 @@ export function AuthForm({ initialMode }: { initialMode: AuthMode }) {
       if (authError) throw authError;
 
       if (data.session) {
-        router.push("/account");
+        router.push("/onboarding");
         router.refresh();
         return;
       }
 
-      setMessage("Account created. Check your email to confirm the account, then sign in.");
+      setMessage("Account created. Check your email to confirm the account, then sign in. CourtFlux will guide you through role and team setup next.");
       setMode("login");
     } catch (authError) {
       setError(authError instanceof Error ? authError.message : String(authError));
@@ -83,6 +83,12 @@ export function AuthForm({ initialMode }: { initialMode: AuthMode }) {
               <input id="password" type="password" minLength={8} value={password} onChange={(event) => setPassword(event.target.value)} autoComplete={mode === "login" ? "current-password" : "new-password"} required />
             </div>
           </div>
+
+          {mode === "signup" ? (
+            <p className="muted" style={{ marginTop: 14, fontSize: 13, lineHeight: 1.55 }}>
+              By creating an account, you agree to the <Link href="/terms">Terms</Link> and acknowledge the <Link href="/privacy">Privacy Policy</Link>. CourtFlux will ask you to set up your role and first team before your first analysis.
+            </p>
+          ) : null}
 
           <div className="actions" style={{ marginTop: 20 }}>
             <button className="primary" type="submit" disabled={busy}>
