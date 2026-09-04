@@ -295,9 +295,7 @@ with st.expander("Edit match_config.json", expanded=False):
                 formatted = json.dumps(candidate, indent=2, ensure_ascii=False) + "\n"
                 MATCH_CONFIG_PATH.parent.mkdir(parents=True, exist_ok=True)
                 MATCH_CONFIG_PATH.write_text(formatted, encoding="utf-8")
-                st.session_state["match_config_editor"] = formatted
                 st.success("match_config.json saved. The next run will use this configuration.")
-                st.rerun()
         except Exception as exc:
             st.error(f"Invalid JSON: {exc}")
 
