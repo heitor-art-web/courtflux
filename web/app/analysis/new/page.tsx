@@ -99,7 +99,6 @@ export default async function NewAnalysisPage() {
     <NewAnalysisForm
       workspaceName={workspace?.name ?? "CourtFlux workspace"}
       role={membership.role ?? "member"}
-      planCode={planCode}
       planName={planName}
       usedMinutes={usedMinutes}
       allowance={allowance}
