@@ -19,6 +19,21 @@ class BallAssociationDecision:
     hold_age_frames: int
 
 
+@dataclass(frozen=True)
+class BallCandidateScore:
+    score: float
+    confidence: float
+    proximity: float
+    size_similarity: float
+    confidence_contribution: float
+    proximity_contribution: float
+    size_contribution: float
+    distance_norm: float
+    gate_norm: float
+    plausible: bool
+    high_confidence_gate_used: bool
+
+
 class TemporalBallTracker:
     """Associate per-frame ball detections into one conservative image-space trajectory.
 
@@ -26,6 +41,9 @@ class TemporalBallTracker:
     most temporally plausible candidate and bridges very short gaps with constant-velocity
     prediction. Predicted points never update the direct-observation state, which prevents
     a prediction error from recursively drifting the trajectory.
+
+    Association weights and the high-confidence gate extension are configurable so they
+    can be benchmarked offline without changing the production defaults.
     """
 
     def __init__(
@@ -36,6 +54,11 @@ class TemporalBallTracker:
         gate_growth_per_frame: float = 0.025,
         max_gate_norm: float = 0.28,
         velocity_alpha: float = 0.40,
+        score_confidence_weight: float = 0.58,
+        score_proximity_weight: float = 0.32,
+        score_size_weight: float = 0.10,
+        high_confidence_gate_threshold: float = 0.85,
+        high_confidence_gate_multiplier: float = 1.35,
     ) -> None:
         self.max_hold_frames = max(0, int(max_hold_frames))
         self.reset_after_frames = max(self.max_hold_frames + 1, int(reset_after_frames))
@@ -43,6 +66,26 @@ class TemporalBallTracker:
         self.gate_growth_per_frame = max(0.0, float(gate_growth_per_frame))
         self.max_gate_norm = max(self.base_gate_norm, float(max_gate_norm))
         self.velocity_alpha = max(0.0, min(float(velocity_alpha), 1.0))
+
+        weights = [
+            max(0.0, float(score_confidence_weight)),
+            max(0.0, float(score_proximity_weight)),
+            max(0.0, float(score_size_weight)),
+        ]
+        weight_sum = sum(weights)
+        if weight_sum <= 0.0:
+            raise ValueError("At least one ball association score weight must be positive.")
+        if abs(weight_sum - 1.0) > 1e-12:
+            weights = [value / weight_sum for value in weights]
+        self.score_confidence_weight = weights[0]
+        self.score_proximity_weight = weights[1]
+        self.score_size_weight = weights[2]
+        self.high_confidence_gate_threshold = max(
+            0.0, min(float(high_confidence_gate_threshold), 1.0)
+        )
+        self.high_confidence_gate_multiplier = max(
+            1.0, float(high_confidence_gate_multiplier)
+        )
 
         self.last_center: np.ndarray | None = None
         self.last_box: list[int] | None = None
@@ -79,6 +122,72 @@ class TemporalBallTracker:
         ratio = max(candidate_area / self.last_area, 1e-6)
         return float(exp(-abs(log(ratio))))
 
+    def _candidate_score_details(
+        self,
+        candidate: dict[str, Any],
+        predicted_center: np.ndarray,
+        diagonal: float,
+        gate_norm: float,
+    ) -> BallCandidateScore:
+        center = np.asarray(candidate["center"], dtype=np.float64)
+        distance_norm = float(np.linalg.norm(center - predicted_center) / diagonal)
+        proximity = max(0.0, 1.0 - distance_norm / max(gate_norm, 1e-6))
+        confidence = max(0.0, min(float(candidate.get("confidence", 0.0)), 1.0))
+        size_similarity = self._size_similarity(self._candidate_area(candidate))
+
+        confidence_contribution = self.score_confidence_weight * confidence
+        proximity_contribution = self.score_proximity_weight * proximity
+        size_contribution = self.score_size_weight * size_similarity
+        score = confidence_contribution + proximity_contribution + size_contribution
+
+        plausible = distance_norm <= gate_norm
+        high_confidence_gate_used = False
+        if not plausible and confidence >= self.high_confidence_gate_threshold:
+            extended_gate = min(
+                gate_norm * self.high_confidence_gate_multiplier,
+                self.max_gate_norm,
+            )
+            plausible = distance_norm <= extended_gate
+            high_confidence_gate_used = plausible and extended_gate > gate_norm
+
+        return BallCandidateScore(
+            score=float(score),
+            confidence=float(confidence),
+            proximity=float(proximity),
+            size_similarity=float(size_similarity),
+            confidence_contribution=float(confidence_contribution),
+            proximity_contribution=float(proximity_contribution),
+            size_contribution=float(size_contribution),
+            distance_norm=float(distance_norm),
+            gate_norm=float(gate_norm),
+            plausible=bool(plausible),
+            high_confidence_gate_used=bool(high_confidence_gate_used),
+        )
+
+    def inspect_candidate(
+        self,
+        candidate: dict[str, Any],
+        frame_id: int,
+        frame_shape: tuple[int, ...],
+    ) -> BallCandidateScore | None:
+        """Return the current association score breakdown without mutating tracker state."""
+        if self.last_center is None or self.last_frame_id is None:
+            return None
+        dt = max(int(frame_id) - int(self.last_frame_id), 1)
+        if dt > self.reset_after_frames:
+            return None
+        predicted_center = self._predict_center(frame_id)
+        if predicted_center is None:
+            return None
+        diagonal = self._frame_diagonal(frame_shape)
+        gate_norm = self._gate(dt)
+        return self._candidate_score_details(
+            candidate,
+            predicted_center,
+            diagonal,
+            gate_norm,
+        )
+
     def _score_candidate(
         self,
         candidate: dict[str, Any],
@@ -86,17 +195,13 @@ class TemporalBallTracker:
         diagonal: float,
         gate_norm: float,
     ) -> tuple[float, float, bool]:
-        center = np.asarray(candidate["center"], dtype=np.float64)
-        distance_norm = float(np.linalg.norm(center - predicted_center) / diagonal)
-        proximity = max(0.0, 1.0 - distance_norm / max(gate_norm, 1e-6))
-        confidence = max(0.0, min(float(candidate.get("confidence", 0.0)), 1.0))
-        size_similarity = self._size_similarity(self._candidate_area(candidate))
-        score = 0.58 * confidence + 0.32 * proximity + 0.10 * size_similarity
-
-        plausible = distance_norm <= gate_norm
-        if not plausible and confidence >= 0.85:
-            plausible = distance_norm <= min(gate_norm * 1.35, self.max_gate_norm)
-        return float(score), distance_norm, plausible
+        details = self._candidate_score_details(
+            candidate,
+            predicted_center,
+            diagonal,
+            gate_norm,
+        )
+        return details.score, details.distance_norm, details.plausible
 
     def _direct_ball(
         self,
