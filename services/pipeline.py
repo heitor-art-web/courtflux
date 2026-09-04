@@ -1,7 +1,4 @@
-import cv2
 import numpy as np
-
-from services.vision.radar_visualizer import RadarVisualizer
 
 
 class Pipeline:
@@ -28,7 +25,6 @@ class Pipeline:
         self.db_conn = db_conn
 
         self._camera_tracker_initialized = False
-        self.radar = RadarVisualizer(scale=25)
 
     def _ensure_camera_tracker(self, frame: np.ndarray):
         """Lazy-initialize CameraTracker on the first frame if passed as a factory."""
@@ -57,8 +53,6 @@ class Pipeline:
         self.profiler.stop("Gameplay Filter")
 
         if not is_gameplay:
-            frame_state.annotated_frame = frame_state.frame.copy()
-
             if self.camera_tracker is not None and hasattr(self.camera_tracker, "reset_flow"):
                 self.camera_tracker.reset_flow()
 
@@ -97,27 +91,15 @@ class Pipeline:
         self.profiler.stop("Database")
 
         # -------------------------------------------------
-        # 6. Rendering & Radar PiP
+        # 6. Optional rendering
         # -------------------------------------------------
-        self.profiler.start("Renderer")
-        frame_state = self.renderer.draw(frame_state)
+        # The beta path is intentionally results-first. No radar / 2D court is
+        # rendered. A renderer can still be supplied by other entry points when
+        # annotated media is explicitly needed.
+        if self.renderer is not None:
+            self.profiler.start("Renderer")
+            frame_state = self.renderer.draw(frame_state)
+            self.profiler.stop("Renderer")
 
-        if self.camera_tracker is not None and frame_state.annotated_frame is not None:
-            radar_frame = self.radar.render(frame_state, self.camera_tracker)
-
-            rh, rw = radar_frame.shape[:2]
-            fh, fw = frame_state.annotated_frame.shape[:2]
-
-            if fh >= rh and fw >= rw:
-                frame_state.annotated_frame[fh-rh:fh, fw-rw:fw] = radar_frame
-                cv2.rectangle(
-                    frame_state.annotated_frame,
-                    (fw-rw, fh-rh),
-                    (fw, fh),
-                    (255, 255, 255),
-                    2,
-                )
-
-        self.profiler.stop("Renderer")
         self.profiler.stop("Total")
         return frame_state
