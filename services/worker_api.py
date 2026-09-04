@@ -15,6 +15,8 @@ import torch
 from fastapi import Depends, FastAPI, Header, HTTPException
 from pydantic import BaseModel, Field
 
+from services.supabase_service import SupabaseRunStore
+
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 JOBS_ROOT = PROJECT_ROOT / "evaluation" / "worker_jobs"
 JOBS_ROOT.mkdir(parents=True, exist_ok=True)
@@ -25,11 +27,12 @@ MAX_WORKERS = max(1, int(os.getenv("WORKER_MAX_JOBS", "1")))
 
 _executor = ThreadPoolExecutor(max_workers=MAX_WORKERS, thread_name_prefix="basketball-worker")
 _state_lock = threading.Lock()
+_supabase_store = SupabaseRunStore()
 
 app = FastAPI(
-    title="Basketball AI Analytics Worker",
-    version="0.2.0",
-    description="Authenticated worker for Vercel beta and performance runs.",
+    title="CourtFlux Worker",
+    version="0.3.0",
+    description="Authenticated CourtFlux analysis worker with Supabase run persistence.",
 )
 
 
@@ -49,6 +52,11 @@ class JobRequest(BaseModel):
     persist_results: bool = True
     db_batch_size: int = Field(default=100, ge=1, le=5000)
     diagnostics_batch_size: int = Field(default=100, ge=1, le=5000)
+    platform_run_id: str | None = Field(default=None, max_length=36)
+    platform_job_id: str | None = Field(default=None, max_length=36)
+    workspace_id: str | None = Field(default=None, max_length=36)
+    user_id: str | None = Field(default=None, max_length=36)
+    subscription_plan: str | None = Field(default=None, max_length=64)
 
 
 class JobCreated(BaseModel):
@@ -58,6 +66,15 @@ class JobCreated(BaseModel):
 
 def utc_now() -> str:
     return datetime.now(timezone.utc).isoformat()
+
+
+def normalize_uuid(value: str | None, field_name: str) -> str | None:
+    if not value:
+        return None
+    try:
+        return str(uuid.UUID(value))
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=f"{field_name} must be a valid UUID") from exc
 
 
 def require_worker_token(authorization: str | None = Header(default=None)) -> None:
@@ -126,7 +143,10 @@ def run_job(job_id: str, request_data: dict[str, Any]) -> None:
     log_path = directory / "console.log"
     match_config_path = directory / "match_config.json"
     analyzer = PROJECT_ROOT / "services" / "analytics" / "analyzer.py"
+    platform_run_id = request_data.get("platform_run_id")
+
     write_state(job_id, {"status": "running", "started_at": utc_now()})
+    _supabase_store.mark_running(job_id, platform_run_id)
 
     command = [
         sys.executable,
@@ -190,28 +210,35 @@ def run_job(job_id: str, request_data: dict[str, Any]) -> None:
                 "return_code": return_code,
                 "summary": summary,
             })
+            _supabase_store.mark_completed(job_id, platform_run_id, summary, request_data)
         else:
+            error_tail = "\n".join(recent_lines[-12:])
             write_state(job_id, {
                 "status": "failed",
                 "completed_at": utc_now(),
                 "return_code": return_code,
                 "summary": summary,
-                "error": "\n".join(recent_lines[-12:]),
+                "error": error_tail,
             })
+            _supabase_store.mark_failed(job_id, platform_run_id, error_tail, error_tail)
     except Exception as exc:
+        error_text = f"{type(exc).__name__}: {exc}"
+        log_tail = "\n".join(recent_lines[-12:]) if recent_lines else None
         write_state(job_id, {
             "status": "failed",
             "completed_at": utc_now(),
-            "error": f"{type(exc).__name__}: {exc}",
+            "error": error_text,
         })
+        _supabase_store.mark_failed(job_id, platform_run_id, error_text, log_tail)
 
 
 @app.get("/health", dependencies=[Depends(require_worker_token)])
 def health() -> dict[str, Any]:
     return {
         "status": "ok",
-        "worker": "basketball-ai-analytics",
+        "worker": "courtflux",
         "max_parallel_jobs": MAX_WORKERS,
+        "supabase_persistence": _supabase_store.enabled,
         "devices": {
             "mps": bool(torch.backends.mps.is_available()),
             "cuda": bool(torch.cuda.is_available()),
@@ -225,9 +252,19 @@ def create_job(payload: JobRequest) -> JobCreated:
     if payload.end_time_sec <= payload.start_time_sec:
         raise HTTPException(status_code=422, detail="end_time_sec must be greater than start_time_sec")
     validate_match_config(payload.match_config)
-    job_id = str(uuid.uuid4())
+
+    platform_job_id = normalize_uuid(payload.platform_job_id, "platform_job_id")
+    normalize_uuid(payload.platform_run_id, "platform_run_id")
+    normalize_uuid(payload.workspace_id, "workspace_id")
+    normalize_uuid(payload.user_id, "user_id")
+
+    job_id = platform_job_id or str(uuid.uuid4())
     directory = job_dir(job_id)
-    directory.mkdir(parents=True, exist_ok=False)
+    try:
+        directory.mkdir(parents=True, exist_ok=False)
+    except FileExistsError as exc:
+        raise HTTPException(status_code=409, detail="Job already exists") from exc
+
     request_data = payload.model_dump()
     (directory / "request.json").write_text(json.dumps(request_data, indent=2, ensure_ascii=False), encoding="utf-8")
     (directory / "match_config.json").write_text(
@@ -235,10 +272,19 @@ def create_job(payload: JobRequest) -> JobCreated:
     )
     write_state(job_id, {
         "job_id": job_id,
+        "platform_run_id": payload.platform_run_id,
+        "workspace_id": payload.workspace_id,
         "status": "queued",
         "created_at": utc_now(),
         "request": {key: value for key, value in request_data.items() if key != "match_config"},
     })
+    _supabase_store.update_job(
+        job_id,
+        {
+            "status": "queued",
+            "worker_id": os.getenv("COURTFLUX_WORKER_ID", os.getenv("HOSTNAME", "local-worker")),
+        },
+    )
     _executor.submit(run_job, job_id, request_data)
     return JobCreated(job_id=job_id, status="queued")
 
