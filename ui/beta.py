@@ -77,4 +77,7 @@ else:
         layout="wide",
         initial_sidebar_state="collapsed",
     )
+    # Streamlit's own footer is hidden by the marketing stylesheet; this higher-
+    # specificity rule keeps the custom CourtFlux footer visible.
+    st.markdown("<style>footer.cf-footer{display:block!important}</style>", unsafe_allow_html=True)
     runpy.run_path(str(Path(__file__).with_name("marketing.py")), run_name="__main__")
