@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import json
+import os
+import shutil
 import subprocess
 import sys
 from pathlib import Path
@@ -16,6 +18,7 @@ from core.config import settings
 
 RUNS_DIR = ROOT / "evaluation" / "runs"
 MATCH_CONFIG_PATH = ROOT / "data" / "match_config.json"
+LIVE_PREVIEW_PATH = RUNS_DIR / "_live_preview.jpg"
 DEFAULT_VIDEO = "https://www.youtube.com/watch?v=OwiQgAMqyUs"
 configured_model = ROOT / settings.model
 fallback_model = ROOT / "weights" / "Model_v0.1.pt"
@@ -109,11 +112,18 @@ def render_summary(path: Path) -> None:
     players = summary.get("players", {}) or {}
     ball = summary.get("ball", {}) or {}
     performance = summary.get("performance", {}) or {}
+    run_dir = path.parent
 
     st.subheader("Latest results")
     st.caption(f"Run: {summary.get('run_id')} · mode: {(summary.get('extra', {}) or {}).get('mode', 'unknown')}")
     if (summary.get("extra", {}) or {}).get("status") == "failed":
         st.error((summary.get("extra", {}) or {}).get("error", "Run failed"))
+
+    preview_path = run_dir / "latest_preview.jpg"
+    if preview_path.exists():
+        st.markdown("**Diagnostic preview**")
+        st.caption("Lightweight detector preview only — player track, predicted team, jersey when available, and ball confidence. No court/homography rendering.")
+        st.image(preview_path.read_bytes(), use_container_width=True)
 
     a, b, c, d = st.columns(4)
     a.metric("Players / frame", players.get("raw_per_gameplay_frame", 0))
@@ -151,7 +161,6 @@ def render_summary(path: Path) -> None:
         ]
         st.dataframe(pd.DataFrame(stage_rows), width="stretch", hide_index=True)
 
-    run_dir = path.parent
     cols = st.columns(4)
     files = [
         (path, "summary.json", "application/json"),
@@ -166,7 +175,7 @@ def render_summary(path: Path) -> None:
 
 
 st.title("🏀 Basketball AI Analytics — Performance Beta")
-st.write("Results-first benchmark for detection, team distinction, ball recall and optional jersey recognition.")
+st.write("Performance benchmark with lightweight visual validation for players, teams, jerseys and ball detection.")
 
 if "match_config_editor" not in st.session_state:
     st.session_state["match_config_editor"] = MATCH_CONFIG_PATH.read_text(encoding="utf-8") if MATCH_CONFIG_PATH.exists() else "{}"
@@ -216,6 +225,23 @@ with st.sidebar:
     jersey_interval = st.number_input("Jersey attempt interval (frames)", min_value=1, max_value=300, value=12, step=1, disabled=not enable_jersey)
     persist_results = st.toggle("Persist SQLite results", value=True, help="Writes are batched; turn off to measure pure processing speed.")
 
+    st.divider()
+    live_preview = st.toggle(
+        "Live diagnostic preview",
+        value=True,
+        disabled=not detection_only,
+        help="Shows player/team/jersey/ball overlays without enabling camera or court analytics.",
+    )
+    preview_interval = st.number_input(
+        "Preview interval (frames)",
+        min_value=5,
+        max_value=120,
+        value=15,
+        step=5,
+        disabled=not live_preview or not detection_only,
+        help="Higher values reduce JPEG/display overhead. 15 is roughly 1.7 updates per second of source video.",
+    )
+
     if not config_ready:
         st.warning("Fix match_config.json before running.")
     run_clicked = st.button("🚀 Run performance beta", type="primary", width="stretch", disabled=not config_ready)
@@ -244,27 +270,80 @@ if run_clicked:
     if not persist_results:
         command.append("--no-persist")
 
+    child_env = os.environ.copy()
+    if live_preview and detection_only:
+        RUNS_DIR.mkdir(parents=True, exist_ok=True)
+        try:
+            LIVE_PREVIEW_PATH.unlink(missing_ok=True)
+        except Exception:
+            pass
+        child_env["BASKETBALL_PREVIEW_PATH"] = str(LIVE_PREVIEW_PATH)
+        child_env["BASKETBALL_PREVIEW_MATCH_CONFIG"] = str(MATCH_CONFIG_PATH)
+        child_env["BASKETBALL_PREVIEW_INTERVAL"] = str(int(preview_interval))
+    else:
+        child_env.pop("BASKETBALL_PREVIEW_PATH", None)
+        child_env.pop("BASKETBALL_PREVIEW_MATCH_CONFIG", None)
+        child_env.pop("BASKETBALL_PREVIEW_INTERVAL", None)
+
     status = st.status("Running analysis...", expanded=True)
-    log_box = st.empty()
-    process = subprocess.Popen(command, cwd=str(ROOT), stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, encoding="utf-8", bufsize=1)
+    run_cols = st.columns([3, 2])
+    with run_cols[0]:
+        preview_box = st.empty()
+        preview_caption = st.empty()
+        if live_preview and detection_only:
+            preview_caption.caption("Live diagnostic preview — refreshes on analyzer progress output; rendering cost is measured separately.")
+        else:
+            preview_caption.caption("Live diagnostic preview disabled for this run.")
+    with run_cols[1]:
+        log_box = st.empty()
+
+    process = subprocess.Popen(
+        command,
+        cwd=str(ROOT),
+        env=child_env,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.STDOUT,
+        text=True,
+        encoding="utf-8",
+        bufsize=1,
+    )
     captured = []
     run_dir = None
     summary_path = None
+    preview_mtime = None
     assert process.stdout is not None
     for line in process.stdout:
         text = line.rstrip()
         if not text:
             continue
         captured.append(text)
-        log_box.code("\n".join(captured[-80:]), language="text")
+        log_box.code("\n".join(captured[-60:]), language="text")
         if text.startswith("[RUN_DIR]"):
             run_dir = Path(text.replace("[RUN_DIR]", "", 1).strip())
         elif text.startswith("[SUMMARY]"):
             summary_path = Path(text.replace("[SUMMARY]", "", 1).strip())
+
+        if live_preview and detection_only and LIVE_PREVIEW_PATH.exists():
+            try:
+                current_mtime = LIVE_PREVIEW_PATH.stat().st_mtime_ns
+                if current_mtime != preview_mtime:
+                    preview_mtime = current_mtime
+                    preview_box.image(LIVE_PREVIEW_PATH.read_bytes(), use_container_width=True)
+            except Exception:
+                pass
+
     process.wait()
     if run_dir:
         run_dir.mkdir(parents=True, exist_ok=True)
         (run_dir / "console.log").write_text("\n".join(captured) + "\n", encoding="utf-8")
+        if live_preview and detection_only and LIVE_PREVIEW_PATH.exists():
+            try:
+                final_preview = run_dir / "latest_preview.jpg"
+                shutil.copy2(LIVE_PREVIEW_PATH, final_preview)
+                preview_box.image(final_preview.read_bytes(), use_container_width=True)
+                preview_caption.caption("Final diagnostic preview saved with this run.")
+            except Exception as exc:
+                preview_caption.caption(f"Preview completed, but the final image could not be copied: {exc}")
     if summary_path and summary_path.exists():
         st.session_state["last_summary_path"] = str(summary_path)
     if process.returncode == 0:
