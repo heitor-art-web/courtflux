@@ -1,25 +1,45 @@
 # CourtFlux Web
 
-This directory contains the Next.js/Vercel web application for CourtFlux.
+This directory contains the canonical Next.js/Vercel web application for CourtFlux.
 
-The web app now has two distinct responsibilities:
+The product now has three clearly separated surfaces:
 
-- `/` is the public, crawlable CourtFlux marketing and SEO surface.
+- `/` and the public landing pages are the crawlable CourtFlux marketing/SEO website.
+- `/account` is the authenticated customer dashboard backed by Supabase workspace, entitlement, usage and analysis data.
 - `/lab` is the internal/private-beta analysis control plane that talks to the Python worker.
 
-Authentication and account routes live alongside them but are explicitly excluded from search indexing.
+Authentication and account routes live alongside the public site but are explicitly excluded from search indexing.
+
+The old Streamlit `ui/beta.py` entrypoint is Beta Lab only. It no longer serves public marketing, signup or account pages. Those customer-facing flows belong to this Next.js app.
 
 ## Route architecture
 
 ```text
-/          Public CourtFlux marketing site
-/login     Sign in / create account (noindex)
-/account   Authenticated workspace and entitlement view (noindex)
-/lab       Beta Lab / engineering analysis interface (noindex)
-/api/*     Server-side worker proxy endpoints
+/                            Public CourtFlux marketing site
+/basketball-video-analysis   Public search landing page
+/login                       Sign in / create account (noindex)
+/account                     Authenticated customer dashboard (noindex)
+/lab                         Beta Lab / engineering analysis interface (noindex)
+/api/*                       Server-side worker proxy endpoints
 ```
 
 The public site is server-rendered with Next.js metadata, canonical URL support, Open Graph metadata, `robots.txt`, `sitemap.xml`, structured data and optimized image delivery.
+
+## Customer dashboard
+
+`/account` reads the signed-in user's Supabase workspace and presents customer-facing operational context rather than raw entitlement JSON:
+
+- current workspace and role,
+- current plan state,
+- monthly `analysis_minutes` usage,
+- configured allowance or the current 60-minute Beta fallback,
+- remaining minutes,
+- total and active analyses,
+- recent analysis states,
+- current team context,
+- links to the Beta Lab while the dedicated customer upload flow is still being built.
+
+Billing remains inactive during private beta. Usage shown in the dashboard comes from the `workspace_usage_monthly` read model, which rolls up worker-written `usage_events`.
 
 ## Analysis architecture
 
@@ -37,7 +57,7 @@ Python worker (`services/worker_api.py`)
 Existing analyzer / YOLO / MPS / yt-dlp
   |
   v
-Run summary + logs
+Supabase run state + summary + usage
 ```
 
 The Python worker can initially run on the development Mac and later move to a GPU server without changing the browser application; only `WORKER_API_URL` changes.
@@ -128,6 +148,8 @@ Recommended project configuration:
 - **Environment Variables:** the values described above
 
 Do not prefix `WORKER_API_URL`, `WORKER_API_TOKEN` or `SUPABASE_SERVICE_ROLE_KEY` with `NEXT_PUBLIC_`.
+
+Development branches prefixed with `assistant-` have automatic Vercel deployments disabled in repository configuration. Completed batches are merged to `main`, which is the deployment point.
 
 ## Search/indexing rules
 
