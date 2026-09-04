@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+import threading
 from datetime import datetime, timezone
 from typing import Any
 
@@ -34,6 +35,7 @@ class SupabaseRunStore:
         key = os.getenv("SUPABASE_SERVICE_ROLE_KEY", "").strip()
         self.client: Client | None = None
         self.enabled = bool(url and key and create_client is not None)
+        self._retention_stop = threading.Event()
 
         if self.enabled:
             try:
@@ -45,8 +47,27 @@ class SupabaseRunStore:
         else:
             print("☁️ CourtFlux Supabase persistence: off (configure SUPABASE_URL + SUPABASE_SERVICE_ROLE_KEY)")
 
+        if self.enabled and self.client:
+            threading.Thread(
+                target=self._retention_loop,
+                name="courtflux-video-retention",
+                daemon=True,
+            ).start()
+
     def _warn(self, action: str, exc: Exception) -> None:
         print(f"⚠️ Supabase {action} failed: {type(exc).__name__}: {exc}")
+
+    def _retention_loop(self) -> None:
+        interval = max(3600, int(os.getenv("VIDEO_RETENTION_SWEEP_SECONDS", "21600")))
+        # Give the worker time to finish startup before the first storage sweep.
+        if self._retention_stop.wait(10):
+            return
+        while not self._retention_stop.is_set():
+            try:
+                self.purge_expired_analysis_videos()
+            except Exception as exc:  # pragma: no cover - retention must never stop inference
+                self._warn("video retention sweep", exc)
+            self._retention_stop.wait(interval)
 
     def update_job(self, job_id: str | None, values: dict[str, Any]) -> None:
         if not self.client or not job_id:
