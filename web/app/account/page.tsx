@@ -203,6 +203,7 @@ export default async function AccountPage() {
           />
         </Link>
         <div className={styles.topActions}>
+          <Link href="/analyses">My analyses</Link>
           <Link href="/basketball-video-analysis">How analysis works</Link>
           <Link href="/">Public site</Link>
           <SignOutButton />
@@ -265,7 +266,7 @@ export default async function AccountPage() {
                 <h2 id="recent-analyses-title">Recent analyses</h2>
                 <p>Latest game and clip processing activity for this workspace. Open any run to follow processing or review its results.</p>
               </div>
-              {canManageAnalysis ? <Link className={styles.secondaryButton} href="/analysis/new">New analysis</Link> : null}
+              <Link className={styles.secondaryButton} href="/analyses">View all analyses</Link>
             </div>
 
             {recentRuns.length ? (
@@ -388,6 +389,7 @@ export default async function AccountPage() {
               </div>
             </div>
             <div className={styles.quickActions}>
+              <Link href="/analyses">My analyses <span>→</span></Link>
               {canManageAnalysis ? <Link href="/analysis/new">Start new analysis <span>→</span></Link> : <div className={styles.quickActionDisabled}>Analysis unavailable <span>{analysisAllowed ? "View-only role" : "Allowance used"}</span></div>}
               <Link href="/basketball-video-analysis">Basketball video analysis <span>→</span></Link>
               <Link href="/#pricing">Plans and analysis minutes <span>→</span></Link>
