@@ -78,6 +78,7 @@ def main() -> None:
                     "timestamp_sec": round(timestamp_sec, 6),
                     "image": f"frames/{file_name}",
                     "visible": None,
+                    "point": None,
                     "bbox": None,
                     "occlusion": None,
                     "court_region": None,
@@ -108,14 +109,15 @@ def main() -> None:
         "sample_every_n_frames": every,
         "frames_extracted": extracted,
         "annotation_file": str(annotations_path),
-        "bbox_format": "xyxy pixels in original source frame",
+        "default_truth_format": "point=[x,y] in original source frame",
+        "optional_bbox_format": "xyxy pixels in original source frame",
     }
     metadata_path.write_text(json.dumps(metadata, indent=2), encoding="utf-8")
 
     print(f"Prepared {extracted} frames in {output_dir}")
-    print(f"Annotate: {annotations_path}")
-    print("Set visible=true + bbox=[x1,y1,x2,y2] when the ball is visible.")
-    print("Set visible=false + bbox=null only when the real ball is genuinely not visible.")
+    print(f"Annotations: {annotations_path}")
+    print("Next: run evaluation/ball_point_annotator.py and click the ball once per visible frame.")
+    print("Press N only when the real ball is genuinely not visible.")
 
 
 if __name__ == "__main__":
