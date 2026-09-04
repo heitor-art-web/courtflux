@@ -2,7 +2,7 @@ import type { Metadata } from "next";
 import { LegalPage, legalStyles as styles } from "../legal-page";
 
 export const metadata: Metadata = {
-  title: "AI Limitations | CourtFlux",
+  title: "AI Limitations",
   description: "Current limitations of CourtFlux basketball tracking and beta analysis output.",
   alternates: { canonical: "/ai-limitations" },
 };
