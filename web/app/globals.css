@@ -39,6 +39,11 @@ body::before {
 button, input, select, textarea { font: inherit; }
 button { cursor: pointer; }
 
+a:focus-visible, button:focus-visible, input:focus-visible, select:focus-visible, textarea:focus-visible, summary:focus-visible {
+  outline: 3px solid rgba(255, 116, 23, .72);
+  outline-offset: 3px;
+}
+
 main { max-width: 1220px; margin: 0 auto; padding: 36px 24px 80px; position: relative; }
 header {
   display: flex;
@@ -56,7 +61,7 @@ header h1 {
   margin: 0 0 6px;
   overflow: hidden;
   text-indent: -9999px;
-  background: url('/brand/courtflux-horizontal-dark.webp') left center / contain no-repeat;
+  background: url('/brand/horizontal_logo_safe_crop.png') left center / contain no-repeat;
 }
 header p {
   margin: 3px 0 0;
@@ -179,4 +184,13 @@ summary { cursor: pointer; }
   header h1 { width: 100%; }
   .form-grid { grid-template-columns: 1fr; }
   .metrics { grid-template-columns: 1fr; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    scroll-behavior: auto !important;
+    transition-duration: 0.01ms !important;
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+  }
 }
