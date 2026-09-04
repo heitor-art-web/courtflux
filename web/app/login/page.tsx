@@ -1,6 +1,7 @@
 "use client";
 
-import { FormEvent, useState } from "react";
+import { FormEvent, useEffect, useState } from "react";
+import Link from "next/link";
 import { createClient } from "@/lib/supabase/client";
 
 export default function LoginPage() {
@@ -11,6 +12,11 @@ export default function LoginPage() {
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState("");
   const [error, setError] = useState("");
+
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    if (params.get("mode") === "signup") setMode("signup");
+  }, []);
 
   async function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -23,7 +29,7 @@ export default function LoginPage() {
       if (mode === "login") {
         const { error: authError } = await supabase.auth.signInWithPassword({ email, password });
         if (authError) throw authError;
-        window.location.assign("/");
+        window.location.assign("/account");
         return;
       }
 
@@ -37,7 +43,7 @@ export default function LoginPage() {
       if (authError) throw authError;
 
       if (data.session) {
-        window.location.assign("/");
+        window.location.assign("/account");
         return;
       }
       setMessage("Account created. Check your email to confirm the account, then sign in.");
@@ -51,10 +57,10 @@ export default function LoginPage() {
 
   return (
     <main style={{ maxWidth: 560, margin: "0 auto", paddingTop: 72 }}>
-      <section className="panel">
+      <section className="panel" aria-labelledby="auth-title">
         <div style={{ marginBottom: 24 }}>
           <div className="muted" style={{ letterSpacing: "0.12em", textTransform: "uppercase" }}>CourtFlux</div>
-          <h1 style={{ marginBottom: 8 }}>{mode === "login" ? "Sign in" : "Create account"}</h1>
+          <h1 id="auth-title" style={{ marginBottom: 8 }}>{mode === "login" ? "Sign in" : "Create account"}</h1>
           <p className="muted">Basketball Intelligence from Video</p>
         </div>
 
@@ -62,17 +68,17 @@ export default function LoginPage() {
           <div className="form-grid">
             {mode === "signup" ? (
               <div className="field full">
-                <label>Full name</label>
-                <input value={fullName} onChange={(event) => setFullName(event.target.value)} autoComplete="name" />
+                <label htmlFor="full-name">Full name</label>
+                <input id="full-name" value={fullName} onChange={(event) => setFullName(event.target.value)} autoComplete="name" />
               </div>
             ) : null}
             <div className="field full">
-              <label>Email</label>
-              <input type="email" value={email} onChange={(event) => setEmail(event.target.value)} autoComplete="email" required />
+              <label htmlFor="email">Email</label>
+              <input id="email" type="email" value={email} onChange={(event) => setEmail(event.target.value)} autoComplete="email" required />
             </div>
             <div className="field full">
-              <label>Password</label>
-              <input type="password" minLength={8} value={password} onChange={(event) => setPassword(event.target.value)} autoComplete={mode === "login" ? "current-password" : "new-password"} required />
+              <label htmlFor="password">Password</label>
+              <input id="password" type="password" minLength={8} value={password} onChange={(event) => setPassword(event.target.value)} autoComplete={mode === "login" ? "current-password" : "new-password"} required />
             </div>
           </div>
 
@@ -86,8 +92,14 @@ export default function LoginPage() {
           </div>
         </form>
 
-        {error ? <div className="error-box" style={{ marginTop: 18 }}>{error}</div> : null}
-        {message ? <div className="muted" style={{ marginTop: 18 }}>{message}</div> : null}
+        <div aria-live="polite" aria-atomic="true">
+          {error ? <div className="error-box" role="alert" style={{ marginTop: 18 }}>{error}</div> : null}
+          {message ? <div className="muted" role="status" style={{ marginTop: 18 }}>{message}</div> : null}
+        </div>
+
+        <div style={{ marginTop: 22 }}>
+          <Link href="/" className="muted">← Back to CourtFlux</Link>
+        </div>
       </section>
     </main>
   );
