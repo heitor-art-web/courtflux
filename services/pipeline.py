@@ -97,10 +97,13 @@ class Pipeline:
             frame_state = self.engine.process(frame_state)
             self.profiler.stop("Analytics")
         else:
+            detector_ball_source = str(detector_diag.get("ball_source") or "").strip()
+            if not detector_ball_source:
+                detector_ball_source = "detector" if getattr(frame_state, "ball", None) is not None else "missing"
             frame_state.diagnostics.setdefault("analytics", {})
             frame_state.diagnostics["analytics"].update(
                 {
-                    "ball_source": "detector" if getattr(frame_state, "ball", None) is not None else "missing",
+                    "ball_source": detector_ball_source,
                     "players_final": len(getattr(frame_state, "players", []) or []),
                     "homography_active": False,
                     "detection_only": True,
