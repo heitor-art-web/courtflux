@@ -39,7 +39,7 @@ export default async function AccountPage() {
       <header>
         <div>
           <div className="muted" style={{ letterSpacing: "0.12em", textTransform: "uppercase" }}>CourtFlux account</div>
-          <h1 style={{ marginBottom: 8 }}>{user.email}</h1>
+          <h1 style={{ marginBottom: 8, width: "auto", aspectRatio: "auto", textIndent: 0, overflow: "visible", background: "none" }}>{user.email}</h1>
           <p className="muted">Workspace, access and subscription.</p>
         </div>
         <div className="actions">
