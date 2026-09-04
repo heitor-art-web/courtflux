@@ -1,240 +1,410 @@
 # CourtFlux — Basketball Intelligence from Video
 
-**CourtFlux** is a computer-vision system for turning standard basketball broadcast footage into structured, player-level and event-level data.
+**CourtFlux** is a computer-vision system for turning standard basketball broadcast footage into structured player, ball, event and eventually tactical intelligence.
 
-The core objective is to build a practical analytics pipeline that can identify players, track the ball continuously enough to infer basketball events, and eventually attribute those events to the correct team and player — without requiring wearable sensors or dedicated optical-tracking hardware.
-
-The project is currently in an active beta/diagnostics phase. The focus is deliberately on getting the perception layer reliable and measurable before adding more tactical analytics.
-
----
-
-## Product objective
-
-The target pipeline is:
+The long-term objective is to reconstruct a basketball game from ordinary video well enough to answer, with measurable confidence:
 
 ```text
-broadcast video
-    ↓
-gameplay / non-game filtering
-    ↓
-player + ball detection
-    ↓
-player tracking
-    ↓
-team classification
-    ↓
-jersey / player identity
-    ↓
-continuous ball trajectory
-    ↓
-ball ↔ player possession association
-    ↓
-shots / passes / turnovers / rebounds
-    ↓
-structured basketball analytics
+Where is the ball?
+Who probably has it?
+What happened?
+Who exactly did it?
+What does it mean tactically?
 ```
 
-The key product principle is simple: event analytics are only useful if the underlying perception is trustworthy.
-
-For that reason, the current development priority is not advanced tactical modelling. It is the reliable reconstruction of **who is on the court, where the ball is, and who the ball belongs to over time**.
+CourtFlux is currently in an active beta/diagnostics phase. Development is deliberately dependency-driven: downstream basketball logic is not treated as reliable until the perception layer it depends on passes explicit quality gates.
 
 ---
 
-## Current status
+## Product hierarchy
 
-### ✅ Working
+The official development hierarchy is:
 
-- YouTube and local-video ingestion
-- Local video caching for repeatable experiments
-- Gameplay / non-game frame filtering before expensive inference
-- Custom basketball YOLO model
-- Player detection
-- Ball detection
-- BoT-SORT / ByteTrack integration
-- Persistent player track IDs
-- Team classification with active-kit aware colour scoring
-- MPS inference on Apple Silicon
-- CUDA / CPU support paths
-- Detection-only high-performance beta pipeline
-- Buffered SQLite persistence
-- Per-stage profiler and benchmark reports
-- Per-frame diagnostics (`frames.jsonl`)
-- Run summaries (`summary.json`)
-- Local Streamlit beta UI with live diagnostic preview
-- Separate confidence thresholds for YOLO inference, players, and ball
-- Temporal ball candidate association
-- Short-gap ball prediction (`predicted_hold`)
-- Direct-vs-predicted ball diagnostics
-- Effective trajectory coverage diagnostics
+```text
+P0 — BALL QUALITY
+     direct detection
+     temporal association / tracking
+     confidence + explicit ball-state model
 
-### 🟡 Working but still under validation
+            ↓
 
-- Jersey-number recognition
-- Persistent player identity resolution
-- Team classification accuracy across referees / non-player humans
-- Ball trajectory correctness during occlusions and fast passes
-- Ball reacquisition after longer gaps
+P1 — POSSESSION + EVENT PRIMITIVES
+     likely possessor
+     possession segments / changes
+     pass / shot / turnover / rebound candidates
 
-### 🔴 Not yet production-ready
+            ↓
 
-- Reliable referee / player separation
-- Reliable possession attribution
-- Shot detection
-- Pass detection
-- Turnover detection
-- Rebound attribution
-- Event-to-player attribution
-- Full-game identity reliability
-- Production real-time performance on all hardware
+P2 — PLAYER IDENTITY + ATTRIBUTION
+     player vs referee / other
+     team
+     jersey
+     persistent player identity
+     event → team / player attribution
+
+            ↓
+
+P3 — STRUCTURED BASKETBALL ANALYTICS
+     possessions
+     shots
+     passes / pass networks
+     turnovers
+     rebounds
+     touches
+     drives
+     paint touches
+     transition metrics
+     lineup / player summaries
+
+            ↓
+
+P4 — TACTICAL INTELLIGENCE
+     spacing
+     defensive shape
+     screens / actions
+     pick-and-roll recognition
+     help / rotations / closeouts
+     offensive sets
+     defensive schemes
+     shot quality
+     coaching interpretation
+```
+
+This order is intentional. Player/team/jersey work can progress in parallel, but **ball quality is the current gating dependency** for possession, events and tactical analytics.
 
 ---
 
-## Ball tracking is currently the main engineering priority
+# P0 — Ball Quality — CURRENT PRIORITY
 
-Ball continuity is a first-class requirement because downstream events depend on it.
+Ball quality is a first-class product requirement. If the ball state is unreliable, possession segmentation, passes, shots, rebounds, turnovers and tactical interpretation become brittle regardless of player-tracking quality.
 
-A system that detects players well but loses the ball cannot reliably infer:
+P0 is split into three separate engineering tracks rather than one generic “ball tracking” task.
 
-- shots
-- passes
-- turnovers
-- rebounds
-- possession changes
-- event attribution
+## P0.1 — Direct ball detection
 
-Recent controlled experiments on the same 30-second segment show that inference resolution has a major effect on direct ball detection:
+Goal: increase direct detector recall while protecting precision.
 
-| Input size | Direct ball candidate frame rate | Analysis FPS on MPS |
+Current work / evaluation focuses on:
+
+- small-ball examples
+- motion blur
+- partial occlusion
+- difficult under-the-rim situations
+- rim / backboard confusion
+- crowd / background ball-like objects
+- low-resolution broadcast frames
+- fast passes
+- distant camera views
+- ball close to a player's body
+- hard negatives
+
+Direct detection must be evaluated with more than frame coverage. Required metrics include:
+
+- precision
+- recall
+- direct detection frame coverage
+- false positives
+- performance by ball size
+- performance by court region
+- camera angle / zoom
+- occlusion state
+- distance to nearest player
+- basketball event context
+
+### Current resolution evidence
+
+Controlled experiments on the same 30-second segment showed a strong resolution effect:
+
+| Input size | Raw ball candidate frame rate | Analysis FPS on MPS |
 | ---: | ---: | ---: |
 | 640 | 26.10% | 18.06 |
 | 768 | 40.43% | 17.36 |
 | 960 | 50.47% | 16.19 |
 | 1280 | 63.19% | 13.09 |
 
-Lowering the inference / ball confidence threshold from `0.10` to `0.03` at 640 produced almost no improvement (`26.10% → 26.24%`), showing that resolution — not threshold suppression — is currently the stronger lever.
+Lowering inference / ball confidence from `0.10` to `0.03` at 640 produced almost no useful gain (`26.10% → 26.24%`), indicating that threshold suppression was not the main bottleneck in that test.
 
-For development, `960` is the current balanced operating point. `1280` provides stronger raw ball coverage but carries a much larger performance cost.
+`960` remains the current balanced development resolution; `1280` is a higher-accuracy / higher-cost operating point under evaluation.
 
----
+## P0.2 — Temporal association / tracking
 
-## Temporal ball association
+Independent per-frame detections are not sufficient. Higher resolution also increases candidate ambiguity, so CourtFlux needs to select the temporally plausible ball rather than simply the highest-confidence candidate.
 
-Independent per-frame ball detections are not enough for basketball events. Multiple ball-like candidates can exist in a frame, especially at higher resolution.
-
-The current temporal ball tracker scores candidates using:
+Current association uses signals such as:
 
 ```text
 detector confidence
-+ proximity to predicted position
++ predicted position
 + short-term velocity
 + trajectory consistency
 + ball-size consistency
 ```
 
-If no plausible direct candidate exists, the tracker can bridge a short gap with a conservative constant-velocity prediction for up to 5 frames.
+The next iterations should progressively include:
 
-The important diagnostic distinction is:
+- acceleration / motion plausibility
+- gap-aware gating
+- court constraints
+- proximity to likely handler / shooter
+- recent ball-state history
+- better reacquisition logic
 
-```text
-raw candidate       YOLO produced a possible ball
+Success is judged by:
 
-direct associated  tracker accepted a real detector observation
+- effective trajectory coverage
+- incorrect-switch / catastrophic-switch rate
+- reacquisition frequency
+- median / P90 / maximum trajectory gaps
+- spatial trajectory error
+- direct-vs-predicted provenance
 
-predicted hold      short temporal prediction, not a detector hit
-
-missing             no usable ball trajectory for that frame
-```
-
-On the current 960 beta run, temporal association changed the behaviour from noisy frame-independent detections to a smoother trajectory:
+A current 960 temporal benchmark produced:
 
 ```text
 raw ball candidate rate        50.47%
 direct associated rate         37.22%
 predicted hold rate            24.77%
-effective trajectory coverage  61.99%
+effective trajectory coverage  61.98%
 large spatial jump rate         0.00%
 ```
 
-The tracker intentionally rejects some raw YOLO candidates to avoid implausible jumps.
+This demonstrated that temporal association can remove implausible jumps and bridge short gaps, but smoothness alone is not proof of correctness. Visual and annotated ground-truth validation are still required.
 
-This is still under visual validation: a mathematically smooth trajectory is not automatically a correct basketball trajectory.
+## P0.3 — Ball confidence + explicit state model
+
+CourtFlux will expose an explicit state and confidence for every ball frame so downstream systems know whether a location is directly observed or inferred.
+
+Target state model:
+
+```text
+DETECTED
+   ↓
+TRACKED
+   ↓
+PREDICTED
+   ↓
+OCCLUDED
+   ↓
+LOST
+   ↓
+REACQUIRING
+```
+
+Each frame should eventually expose information such as:
+
+```json
+{
+  "ball_state": "TRACKED",
+  "source": "detector_associated",
+  "confidence": 0.91,
+  "position_confidence": 0.94,
+  "trajectory_confidence": 0.88,
+  "frames_since_direct_detection": 0
+}
+```
+
+This prevents uncertainty from silently propagating into possession or event inference.
+
+## P0 milestone gate
+
+Before CourtFlux moves serious product effort into P1, the target is approximately:
+
+```text
+direct ball detection coverage      ≥ 70%
+effective trajectory coverage       ≥ 90%
+P90 trajectory gap                  < ~8 frames
+reacquisitions                       materially reduced
+catastrophic ball switches           near zero
+precision / recall                   explicitly measured
+confidence calibration               validated
+```
+
+These gates must hold across multiple games and camera conditions, not only one benchmark clip.
 
 ---
 
-## Player identity
+# P1 — Possession + Event Primitives
 
-The intended player identity chain is:
+P1 converts trusted ball trajectory into basketball semantics.
+
+Target chain:
 
 ```text
-YOLO player detection
+ball trajectory
     ↓
-stable track_id
+likely possessor
     ↓
-team classification
+possession segment
     ↓
-jersey recognition
+possession change / loose ball
     ↓
-roster lookup
+event primitives
+```
+
+Planned capabilities:
+
+- ball-to-player association
+- likely ball carrier
+- handler confidence
+- possession start / end
+- loose-ball state
+- possession changes
+- pass candidates
+- shot-release candidates
+- rebound candidates
+- turnover candidates
+
+P1 should work primarily from stable `track_id` + team information and must not wait for perfect jersey recognition.
+
+---
+
+# P2 — Player Identity + Attribution
+
+P2 answers **who exactly performed the event**.
+
+Target chain:
+
+```text
+human detection
+    ↓
+player / referee / coach / other
+    ↓
+team
+    ↓
+jersey
     ↓
 persistent player identity
+    ↓
+event attribution
 ```
 
-The local jersey checkpoint is now loaded with exact architecture coverage:
+Current status:
 
-```text
-checkpoint keys matched: 364 / 364
-missing keys:             0
-unexpected keys:          0
-architecture:             single-frame EfficientNet-B0 + projection + digit heads
-```
+- persistent player track IDs are working
+- team classification is working but requires accuracy validation
+- jersey checkpoint loads with exact architecture coverage
+- jersey inference runs on MPS
+- roster-constrained decoding still needs hardening
+- referees can currently leak into the player pipeline
 
-Jersey inference runs successfully on MPS, but the current roster-constrained decoding still requires additional validation. The system must prefer `UNKNOWN` over forcing an unsupported jersey number into the known roster.
+The system must prefer `UNKNOWN` over forcing a weak jersey prediction into the roster.
 
-The current roster configuration also contains players whose jersey numbers are still unknown (`?_N` entries), so those players cannot yet be resolved from jersey number to name.
+Player identity can continue improving in parallel with P0/P1, but it is not the current ball-quality gate.
 
 ---
 
-## Known issue: referees and other humans
+# P3 — Structured Basketball Analytics
 
-The current detector treats YOLO `person` / `player` detections as player candidates before team classification.
+Once possession, events and attribution are trustworthy, CourtFlux can derive structured basketball data such as:
 
-That means referees can currently enter the player pipeline and may eventually receive a team label from accumulated colour evidence.
+- shots by player / team
+- passes
+- pass networks
+- turnovers
+- rebounds
+- possession duration
+- touches per player
+- transition possessions
+- drives
+- paint touches
+- usage-like metrics
+- assist / secondary-assist candidates
+- player / lineup summaries
 
-A future classification stage will explicitly separate:
+P3 is intended to represent observable basketball facts and derived event statistics, not higher-level tactical interpretation.
 
-```text
-human
-  ↓
-player / referee / coach / other
-  ↓
-team classification only for players
-```
+---
 
-This is important before possession and event attribution become production features.
+# P4 — Tactical Intelligence
+
+P4 interprets the structured game state tactically.
+
+Potential capabilities include:
+
+- offensive / defensive spacing
+- defensive shape
+- screen and action recognition
+- pick-and-roll recognition
+- help rotations
+- closeouts
+- transition-defense quality
+- offensive-set recognition
+- defensive-scheme classification
+- expected shot quality
+- coaching / tactical insights
+
+This work remains downstream of reliable P0–P3 data.
+
+---
+
+## Current system status
+
+### ✅ Working
+
+- YouTube and local-video ingestion
+- local video caching for repeatable experiments
+- gameplay / non-game frame filtering before expensive inference
+- custom basketball YOLO model
+- player detection
+- ball detection
+- BoT-SORT / ByteTrack integration
+- persistent player track IDs
+- team classification with active-kit aware colour scoring
+- MPS inference on Apple Silicon
+- CUDA / CPU support paths
+- detection-only performance pipeline
+- buffered SQLite persistence
+- per-stage profiler
+- per-frame diagnostics (`frames.jsonl`)
+- run summaries (`summary.json`)
+- Streamlit beta UI + diagnostic preview
+- Next.js / Vercel control-plane beta
+- separate inference / player / ball confidence thresholds
+- temporal ball candidate association
+- conservative short-gap ball prediction (`predicted_hold`)
+- direct-vs-predicted diagnostics
+- effective trajectory diagnostics
+
+### 🟡 Working but under validation
+
+- direct ball quality across varied footage
+- temporal ball correctness during passes / occlusions
+- longer-gap ball reacquisition
+- team-classification accuracy
+- jersey recognition
+- persistent player identity
+
+### 🔴 Not yet production-ready
+
+- explicit ball state / confidence machine
+- annotated ball precision / recall evaluation set
+- reliable player / referee separation
+- possession inference
+- basketball event inference
+- event-to-player attribution
+- structured game analytics
+- tactical intelligence
+- production real-time performance across target hardware
 
 ---
 
 ## Gameplay filtering
 
-The pipeline includes a lightweight gameplay filter before YOLO inference.
-
-It uses court appearance, motion, scene change and edge information to reject obvious non-game frames such as replays, close-ups, graphics and other broadcast interruptions.
+A lightweight gameplay filter runs before YOLO inference and can reject non-game frames such as replays, close-ups, graphics and broadcast interruptions.
 
 ```text
 Frame
   ↓
 Gameplay Filter
   ├── non-game → skip expensive detector work
-  └── gameplay → run YOLO / tracking / analytics
+  └── gameplay → detector / tracking / analytics
 ```
 
-This optimization becomes especially valuable on full-game video and at larger inference resolutions.
+This remains an important compute-saving stage, especially for full games and higher resolutions.
 
 ---
 
 ## Architecture
-
-The project is structured around a shared frame state and modular processing stages:
 
 ```text
 Video Session
@@ -244,33 +414,39 @@ Frame Loader
 Gameplay Filter
     ↓
 Detector / Tracker
-    ├── player detection
+    ├── player detection / tracking
     ├── ball candidates
+    ├── temporal ball association
     ├── team classification
-    ├── jersey / identity
-    └── temporal ball association
+    └── jersey / identity
     ↓
-Analytics Engine
+Ball State / Confidence Layer        ← P0 target
     ↓
-Database Service
+Possession + Event Primitive Layer   ← P1
     ↓
-Renderer / Diagnostics / UI
+Identity / Attribution Layer         ← P2
+    ↓
+Structured Analytics                 ← P3
+    ↓
+Tactical Intelligence                ← P4
+    ↓
+Database / Renderer / UI
 ```
 
-Detection-only beta mode deliberately skips camera calibration, homography and tactical analytics so that detector quality and performance can be measured independently.
+Detection-only beta mode deliberately skips camera calibration, homography and tactical analytics while perception quality and performance are being measured.
 
 ---
 
-## Beta diagnostics workflow
+## Diagnostics workflow
 
-The main development loop is based on controlled experiments:
+CourtFlux development follows controlled experiments:
 
 ```text
 change one variable
     ↓
 run the same video segment
     ↓
-record performance + perception metrics
+record perception + performance metrics
     ↓
 compare against baseline
     ↓
@@ -284,34 +460,18 @@ evaluation/runs/<run_id>/
     run_config.json
     summary.json
     frames.jsonl
-    console.log        # when launched through the Streamlit beta UI
+    console.log
 ```
 
-`summary.json` includes:
+Important principle:
 
-- player counts
-- team classification rates
-- jersey identity diagnostics
-- raw ball candidate rate
-- direct associated ball rate
-- predicted-hold rate
-- effective trajectory coverage
-- ball streak / gap statistics
-- candidate ambiguity
-- spatial-jump diagnostics
-- model / threshold / resolution configuration
-- per-stage timing
-- overall FPS and realtime factor
+> Do not hide weak perception behind downstream heuristics. Measure the layer that failed before deciding what to change.
 
-The guiding rule is:
-
-> Do not retrain a model until diagnostics show that the model itself is the bottleneck.
+Run IDs and full configuration should always accompany benchmark claims so results from different resolutions, thresholds or branches are not mixed.
 
 ---
 
-## Running the CourtFlux beta locally
-
-### Install
+## Running CourtFlux locally
 
 ```bash
 git clone <repository-url>
@@ -319,31 +479,10 @@ cd BasketballAIAnalytics
 python3 -m venv .venv
 source .venv/bin/activate
 pip install -r requirements.txt
-```
-
-### Launch the beta UI
-
-```bash
 streamlit run ui/beta.py --server.port 8523
 ```
 
-The CourtFlux beta UI supports:
-
-- YouTube or local video
-- start / end timestamps
-- model checkpoint selection
-- detector confidence
-- YOLO inference confidence
-- player confidence
-- ball confidence
-- image size
-- MPS / CPU / CUDA
-- BoT-SORT / ByteTrack
-- detection-only mode
-- jersey recognition toggle
-- rolling diagnostic preview
-
-### Current recommended ball-development configuration
+Current ball-development baseline:
 
 ```text
 imgsz              960
@@ -356,97 +495,34 @@ jersey              OFF
 preview             ON
 ```
 
-Jersey is intentionally disabled during isolated ball benchmarks so that recognition cost does not contaminate the comparison.
+Jersey is intentionally disabled in isolated ball benchmarks so identity cost does not contaminate P0 comparisons.
 
 ---
 
 ## Performance notes
 
-On the current Apple Silicon development machine, approximate detection-only performance is:
+Approximate detection-only performance on the current Apple Silicon development machine has been:
 
 ```text
 640   ~18 FPS
 768   ~17 FPS
-960   ~16 FPS
+960   ~15–16 FPS
 1280  ~13 FPS
 ```
 
-The main runtime cost remains YOLO inference. Parsing also has a measurable cost and currently performs per-box device-to-CPU access, which is a future optimization target.
+YOLO inference remains the dominant runtime cost. Parsing / device-to-CPU synchronization is also a future optimization target.
 
-The project is designed so that local MPS development can later move to a CUDA worker without changing the high-level product architecture.
-
-Target deployment direction:
+Deployment direction remains:
 
 ```text
-Web UI / control plane
+CourtFlux web UI / control plane
         ↓
 remote inference worker
         ↓
-CUDA + YOLO + tracking
+CUDA + detection + tracking
         ↓
-structured results
+structured CourtFlux results
 ```
-
----
-
-## Near-term roadmap
-
-### 1. Validate effective ball trajectory
-
-- repeat the 960 temporal run with the new trajectory metrics
-- measure effective streaks and true missing gaps
-- visually inspect `BALL` vs `BALL PRED`
-- test temporal association at 1280
-- choose the final accuracy / performance operating point
-
-### 2. Ball-to-player possession association
-
-- determine the likely ball carrier
-- use spatial proximity + trajectory + track continuity
-- handle dribble separation and brief occlusion
-- detect possession changes conservatively
-
-### 3. Event primitives
-
-Once ball continuity and possession are reliable:
-
-- pass candidate detection
-- shot-attempt candidate detection
-- turnover candidate detection
-- rebound / loose-ball sequences
-
-### 4. Human-role separation
-
-- distinguish player vs referee vs coach / sideline personnel
-- prevent referees from entering team / identity statistics
-
-### 5. Player identity hardening
-
-- make roster constraints non-forcing
-- improve jersey crop quality and confidence gating
-- validate player identity visually
-- fill missing roster jersey numbers
-- add stronger temporal / appearance identity continuity
-
-### 6. Performance optimization
-
-- reduce per-box MPS → CPU synchronization
-- optimize parsing / batching
-- benchmark CUDA worker performance
-- preserve the gameplay filter as an early compute-saving stage
-
-### 7. Basketball analytics
-
-Only after the perception layer is sufficiently reliable:
-
-- shots by player
-- passes and pass networks
-- turnovers
-- possessions
-- rebounds
-- transition events
-- player movement / spacing
-- tactical and coaching analytics
 
 ---
 
@@ -458,16 +534,25 @@ CourtFlux is being built results-first:
 measure → diagnose → change → rerun → compare
 ```
 
-The goal is not to hide imperfect perception behind heuristics. Raw detector behaviour, temporal reconstruction and downstream analytics are kept separate so each layer can be measured objectively.
+A feature is considered successful only when it improves the final basketball signal **and** its uncertainty, cost and failure modes remain visible.
 
-A beta feature is considered successful when it improves the final basketball signal **and** its cost / failure modes are visible in the diagnostics.
+The current dependency rule is:
+
+```text
+P0 quality gates P1
+P1 enables P2 event attribution
+P1 + P2 enable P3
+P3 enables P4
+```
+
+Parallel work is allowed, but downstream features are not used to declare upstream perception solved.
 
 ---
 
 ## Status
 
-🚧 **CourtFlux active development — perception and ball-trajectory beta**
+🚧 **CourtFlux active development — P0 Ball Quality**
 
 Current priority:
 
-> Build a reliable continuous ball trajectory and stable player identity layer before implementing shot, pass and turnover analytics.
+> Build a precise, high-recall, confidence-aware and temporally reliable ball subsystem before investing seriously in possession and event inference.
