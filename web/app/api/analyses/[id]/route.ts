@@ -79,15 +79,29 @@ export async function GET(
     const game = Array.isArray(run.games) ? run.games[0] : run.games;
     const kind = sourceKind(run.video_source);
     let playableUrl: string | null = kind === "youtube" ? run.video_source : null;
+    let retention: { expires_at: string | null; deleted_at: string | null } | null = null;
 
     const privateSource = parseSupabaseSource(run.video_source);
     if (privateSource?.bucket === "analysis-videos") {
       const expectedPrefix = `${workspaceId}/`;
       if (privateSource.path.startsWith(expectedPrefix)) {
-        const { data: signed } = await admin.storage
-          .from(privateSource.bucket)
-          .createSignedUrl(privateSource.path, 3600);
-        playableUrl = signed?.signedUrl ?? null;
+        const { data: retentionRow } = await admin
+          .from("analysis_video_uploads")
+          .select("expires_at, deleted_at")
+          .eq("workspace_id", workspaceId)
+          .eq("object_path", privateSource.path)
+          .maybeSingle();
+
+        retention = retentionRow
+          ? { expires_at: retentionRow.expires_at, deleted_at: retentionRow.deleted_at }
+          : null;
+
+        if (!retentionRow?.deleted_at) {
+          const { data: signed } = await admin.storage
+            .from(privateSource.bucket)
+            .createSignedUrl(privateSource.path, 3600);
+          playableUrl = signed?.signedUrl ?? null;
+        }
       }
     }
 
@@ -130,6 +144,7 @@ export async function GET(
       source: {
         kind,
         playable_url: playableUrl,
+        retention,
       },
     });
   } catch (error) {
