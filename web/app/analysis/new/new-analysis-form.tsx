@@ -15,7 +15,6 @@ type TeamOption = {
 type Props = {
   workspaceName: string;
   role: string;
-  planCode: string;
   planName: string;
   usedMinutes: number;
   allowance: number | null;
@@ -91,7 +90,6 @@ function videoDuration(file: File) {
 export function NewAnalysisForm({
   workspaceName,
   role,
-  planCode,
   planName,
   usedMinutes,
   allowance,
