@@ -11,6 +11,8 @@
   "scripts": {
     "dev": "npm run dev --workspace basketball-ai-analytics-web",
     "build": "npm run build --workspace basketball-ai-analytics-web",
-    "start": "npm run start --workspace basketball-ai-analytics-web"
+    "start": "npm run start --workspace basketball-ai-analytics-web",
+    "lint": "npm run lint --workspace basketball-ai-analytics-web",
+    "typecheck": "npm run typecheck --workspace basketball-ai-analytics-web"
   }
 }
