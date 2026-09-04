@@ -1,0 +1,16 @@
+{
+  "name": "basketball-ai-analytics",
+  "version": "0.1.0",
+  "private": true,
+  "engines": {
+    "node": "24.x"
+  },
+  "workspaces": [
+    "web"
+  ],
+  "scripts": {
+    "dev": "npm run dev --workspace basketball-ai-analytics-web",
+    "build": "npm run build --workspace basketball-ai-analytics-web",
+    "start": "npm run start --workspace basketball-ai-analytics-web"
+  }
+}
