@@ -23,6 +23,7 @@ from services.vision.detector import Detector
 from services.vision.performance_detector import PerformanceDetector
 from services.vision.visual_analyzer import VisualAnalyzer
 from services.vision.team_only_analyzer import TeamOnlyAnalyzer
+from services.vision.performance_jersey_analyzer import PerformanceJerseyAnalyzer
 from services.analytics.engine import Engine
 from services.frame_loader import FrameLoader
 from services.gameplay_filter import GameplayFilter
@@ -139,9 +140,18 @@ def main(
             camera_tracker = CameraTracker(first_frame, homography, court_polygon)
             engine = Engine(fps=int(round(session.fps or 30.0)))
 
-        if detection_only and not enable_jersey:
-            print("⚡ Jersey model disabled; using lightweight team-only classifier.", flush=True)
-            visual = TeamOnlyAnalyzer(profiling_path=str(chosen_match_config))
+        if detection_only:
+            if enable_jersey:
+                print("⚡ Jersey recognition enabled with lean local-only benchmark model.", flush=True)
+                visual = PerformanceJerseyAnalyzer(
+                    profiling_path=str(chosen_match_config),
+                    device=resolved_device,
+                    model_path=str(PROJECT_ROOT / "weights" / "jersey_number_recon.pt"),
+                    sequence_length=8,
+                )
+            else:
+                print("⚡ Jersey model disabled; using lightweight team-only classifier.", flush=True)
+                visual = TeamOnlyAnalyzer(profiling_path=str(chosen_match_config))
         else:
             visual = VisualAnalyzer(reader=None, profiling_path=str(chosen_match_config))
 
