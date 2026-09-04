@@ -127,9 +127,11 @@ class DiagnosticPreview:
             if box is not None:
                 x1, y1, x2, y2 = box
                 ball_color = (0, 220, 255)
-                cv2.rectangle(canvas, (x1, y1), (x2, y2), ball_color, 2)
+                interpolated = bool(ball.get("interpolated"))
+                cv2.rectangle(canvas, (x1, y1), (x2, y2), ball_color, 1 if interpolated else 2)
                 conf = ball.get("confidence")
-                label = "BALL" if conf is None else f"BALL {float(conf):.2f}"
+                label_prefix = "BALL PRED" if interpolated else "BALL"
+                label = label_prefix if conf is None else f"{label_prefix} {float(conf):.2f}"
                 cv2.putText(
                     canvas,
                     label,
