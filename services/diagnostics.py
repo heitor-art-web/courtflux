@@ -2,13 +2,14 @@ from __future__ import annotations
 
 import json
 import time
+from collections import defaultdict
 from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict, Optional
 
 
 class RunDiagnostics:
-    """Write one comparable diagnostic bundle for each beta analysis run."""
+    """Write comparable beta diagnostics with buffered frame I/O and timing summaries."""
 
     def __init__(
         self,
@@ -21,14 +22,20 @@ class RunDiagnostics:
         imgsz: int,
         device: str,
         tracker: str,
+        detection_only: bool = False,
+        enable_jersey: bool = True,
+        jersey_interval_frames: int = 12,
+        batch_size: int = 100,
     ):
-        self.started = time.time()
+        self.started = time.perf_counter()
         self.run_id = datetime.now().strftime("%Y%m%d_%H%M%S_%f")
         self.run_dir = root / "evaluation" / "runs" / self.run_id
         self.run_dir.mkdir(parents=True, exist_ok=True)
         self.frames_path = self.run_dir / "frames.jsonl"
         self.summary_path = self.run_dir / "summary.json"
         self.meta_path = self.run_dir / "run_config.json"
+        self.batch_size = max(1, int(batch_size))
+        self._frame_buffer: list[dict[str, Any]] = []
 
         self.config = {
             "run_id": self.run_id,
@@ -41,6 +48,10 @@ class RunDiagnostics:
             "imgsz": imgsz,
             "device": device,
             "tracker": tracker,
+            "detection_only": bool(detection_only),
+            "jersey_enabled": bool(enable_jersey),
+            "jersey_interval_frames": int(jersey_interval_frames),
+            "diagnostics_batch_size": self.batch_size,
         }
         self._write_meta()
 
@@ -58,20 +69,22 @@ class RunDiagnostics:
         self.ball_rejected_outside_court = 0
         self.valid_homography_frames = 0
         self.keypoint_model_frames = 0
-        self.selected_ball_confidences = []
+        self.selected_ball_confidences: list[float] = []
         self.team_counts: Dict[str, int] = {}
+        self.detector_timing_ms = defaultdict(float)
+        self.detector_timing_calls = defaultdict(int)
+        self.jersey_attempts = 0
+        self.jersey_successes = 0
 
     def _write_meta(self) -> None:
         self.meta_path.write_text(json.dumps(self.config, indent=2), encoding="utf-8")
 
     def capture_match_config(self, source_path: Path) -> Optional[Path]:
-        """Snapshot the exact match configuration used by this run."""
         source_path = Path(source_path)
         if not source_path.exists():
             self.config["match_config"] = {"status": "missing", "source": str(source_path)}
             self._write_meta()
             return None
-
         try:
             data = json.loads(source_path.read_text(encoding="utf-8"))
         except Exception as exc:
@@ -84,11 +97,7 @@ class RunDiagnostics:
             return None
 
         snapshot_path = self.run_dir / "match_config.json"
-        snapshot_path.write_text(
-            json.dumps(data, indent=2, ensure_ascii=False) + "\n",
-            encoding="utf-8",
-        )
-
+        snapshot_path.write_text(json.dumps(data, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
         metadata = data.get("metadata", {}) or {}
         teams = data.get("teams", {}) or {}
         self.config["match_config"] = {
@@ -102,45 +111,58 @@ class RunDiagnostics:
         self._write_meta()
         return snapshot_path
 
+    def _flush_frames(self) -> None:
+        if not self._frame_buffer:
+            return
+        with self.frames_path.open("a", encoding="utf-8") as fh:
+            fh.writelines(json.dumps(row, ensure_ascii=False) + "\n" for row in self._frame_buffer)
+        self._frame_buffer.clear()
+
     def log_frame(self, frame_state: Any) -> None:
-        detector: Dict[str, Any] = frame_state.diagnostics.get("detector", {})
-        analytics: Dict[str, Any] = frame_state.diagnostics.get("analytics", {})
-        camera: Dict[str, Any] = frame_state.diagnostics.get("camera", {})
+        detector: Dict[str, Any] = frame_state.diagnostics.get("detector", {}) or {}
+        analytics: Dict[str, Any] = frame_state.diagnostics.get("analytics", {}) or {}
+        camera: Dict[str, Any] = frame_state.diagnostics.get("camera", {}) or {}
 
         valid_gameplay = bool(getattr(frame_state, "valid_gameplay", False))
         raw_ball_candidates = int(detector.get("raw_ball_candidates", 0) or 0)
         selected_ball = bool(detector.get("selected_ball", False))
-        ball_source = analytics.get("ball_source", "missing")
+        ball_source = analytics.get("ball_source", "detector" if selected_ball else "missing")
         selected_conf = detector.get("selected_ball_conf")
         rejected_by_class = detector.get("rejected_outside_court_by_class", {}) or {}
-        ball_rejected = sum(
-            int(count)
-            for name, count in rejected_by_class.items()
-            if "ball" in str(name).lower()
-        )
+        ball_rejected = sum(int(count) for name, count in rejected_by_class.items() if "ball" in str(name).lower())
 
+        detection_only = bool(self.config.get("detection_only"))
         homography_is_identity = bool(camera.get("homography_is_identity", True))
-        homography_valid = bool(analytics.get("homography_active", False)) and not homography_is_identity
-        keypoint_model_active = bool(camera.get("keypoint_model_active", False))
+        homography_valid = False if detection_only else (
+            bool(analytics.get("homography_active", False)) and not homography_is_identity
+        )
+        keypoint_model_active = False if detection_only else bool(camera.get("keypoint_model_active", False))
 
         players = list(getattr(frame_state, "players", []) or [])
         frame_team_counts: Dict[str, int] = {}
         players_with_team = 0
         players_with_jersey = 0
-
         for player in players:
             if not isinstance(player, dict):
                 continue
-
             team = player.get("team")
             if team and str(team).lower() not in {"unknown", "none"}:
                 team_name = str(team)
                 players_with_team += 1
                 frame_team_counts[team_name] = frame_team_counts.get(team_name, 0) + 1
-
             jersey = player.get("shirt_num") or player.get("shirt_number")
             if jersey is not None and str(jersey).strip():
                 players_with_jersey += 1
+
+        timings = detector.get("timing_ms", {}) or {}
+        for name, ms in timings.items():
+            try:
+                self.detector_timing_ms[str(name)] += float(ms)
+                self.detector_timing_calls[str(name)] += 1
+            except (TypeError, ValueError):
+                pass
+        self.jersey_attempts += int(detector.get("jersey_attempts", 0) or 0)
+        self.jersey_successes += int(detector.get("jersey_successes", 0) or 0)
 
         record = {
             "frame_id": int(getattr(frame_state, "frame_id", 0)),
@@ -160,14 +182,21 @@ class RunDiagnostics:
             "players_with_team": players_with_team,
             "players_with_jersey": players_with_jersey,
             "team_counts": frame_team_counts,
-            "keypoint_model_active": keypoint_model_active,
-            "homography_is_identity": homography_is_identity,
-            "homography_valid": homography_valid,
-            "events": list(getattr(frame_state, "events", []) or []),
+            "timing_ms": timings,
+            "events": [str(event) for event in (getattr(frame_state, "events", []) or [])],
         }
+        if not detection_only:
+            record.update(
+                {
+                    "keypoint_model_active": keypoint_model_active,
+                    "homography_is_identity": homography_is_identity,
+                    "homography_valid": homography_valid,
+                }
+            )
 
-        with self.frames_path.open("a", encoding="utf-8") as fh:
-            fh.write(json.dumps(record, ensure_ascii=False) + "\n")
+        self._frame_buffer.append(record)
+        if len(self._frame_buffer) >= self.batch_size:
+            self._flush_frames()
 
         self.total_frames += 1
         if valid_gameplay:
@@ -177,10 +206,8 @@ class RunDiagnostics:
             self.final_player_detections += record["players_final"]
             self.team_classified_detections += players_with_team
             self.jersey_identified_detections += players_with_jersey
-
             for team_name, count in frame_team_counts.items():
                 self.team_counts[team_name] = self.team_counts.get(team_name, 0) + int(count)
-
             self.ball_rejected_outside_court += ball_rejected
             if raw_ball_candidates > 0:
                 self.raw_ball_candidate_frames += 1
@@ -205,28 +232,33 @@ class RunDiagnostics:
     def _average(total: int, denominator: int) -> float:
         return round(total / max(denominator, 1), 3)
 
-    def finish(self, extra: Optional[Dict[str, Any]] = None) -> Path:
+    def finish(self, extra: Optional[Dict[str, Any]] = None, performance: Optional[Dict[str, Any]] = None) -> Path:
+        self._flush_frames()
         confidences = sorted(self.selected_ball_confidences)
         mean_conf = round(sum(confidences) / len(confidences), 4) if confidences else None
         median_conf = confidences[len(confidences) // 2] if confidences else None
+        timing_summary = {}
+        for name, total_ms in sorted(self.detector_timing_ms.items(), key=lambda item: item[1], reverse=True):
+            calls = self.detector_timing_calls[name]
+            timing_summary[name] = {
+                "calls": calls,
+                "total_sec": round(total_ms / 1000.0, 3),
+                "avg_ms": round(total_ms / max(calls, 1), 3),
+            }
 
         summary = {
             **self.config,
-            "elapsed_sec": round(time.time() - self.started, 2),
+            "elapsed_sec": round(time.perf_counter() - self.started, 2),
             "total_frames": self.total_frames,
             "gameplay_frames": self.gameplay_frames,
             "players": {
                 "raw_per_gameplay_frame": self._average(self.raw_player_detections, self.gameplay_frames),
                 "parsed_per_gameplay_frame": self._average(self.parsed_player_detections, self.gameplay_frames),
                 "final_per_gameplay_frame": self._average(self.final_player_detections, self.gameplay_frames),
-                "team_classification_rate": self._rate(
-                    self.team_classified_detections,
-                    self.final_player_detections,
-                ),
-                "jersey_identification_rate": self._rate(
-                    self.jersey_identified_detections,
-                    self.final_player_detections,
-                ),
+                "team_classification_rate": self._rate(self.team_classified_detections, self.final_player_detections),
+                "jersey_identification_rate": self._rate(self.jersey_identified_detections, self.final_player_detections),
+                "jersey_attempts": self.jersey_attempts,
+                "jersey_successes": self.jersey_successes,
                 "team_counts": self.team_counts,
             },
             "ball": {
@@ -238,13 +270,16 @@ class RunDiagnostics:
                 "selected_conf_mean": mean_conf,
                 "selected_conf_median": median_conf,
             },
-            "court": {
-                "keypoint_model_active_rate": self._rate(self.keypoint_model_frames, self.gameplay_frames),
-                "valid_homography_rate": self._rate(self.valid_homography_frames, self.gameplay_frames),
-            },
-            "homography_active_rate": self._rate(self.valid_homography_frames, self.gameplay_frames),
+            "detector_timing": timing_summary,
+            "performance": performance or {},
             "frames_file": str(self.frames_path),
         }
+        if not self.config.get("detection_only"):
+            summary["court"] = {
+                "keypoint_model_active_rate": self._rate(self.keypoint_model_frames, self.gameplay_frames),
+                "valid_homography_rate": self._rate(self.valid_homography_frames, self.gameplay_frames),
+            }
+            summary["homography_active_rate"] = self._rate(self.valid_homography_frames, self.gameplay_frames)
         if extra:
             summary["extra"] = extra
 
