@@ -9,6 +9,17 @@ import { workerFetch } from "@/lib/worker";
 
 export const dynamic = "force-dynamic";
 
+type GameContext = {
+  home_team?: unknown;
+  away_team?: unknown;
+  game_date?: unknown;
+  competition?: unknown;
+  source_type?: unknown;
+  source_label?: unknown;
+  home_kit_colors?: unknown;
+  away_kit_colors?: unknown;
+};
+
 function numberFromUnknown(value: unknown): number | null {
   if (typeof value === "number" && Number.isFinite(value)) return value;
   if (typeof value === "string" && value.trim()) {
@@ -16,6 +27,38 @@ function numberFromUnknown(value: unknown): number | null {
     return Number.isFinite(parsed) ? parsed : null;
   }
   return null;
+}
+
+function textFromUnknown(value: unknown, maxLength = 160) {
+  if (typeof value !== "string") return null;
+  const clean = value.trim();
+  return clean ? clean.slice(0, maxLength) : null;
+}
+
+function colorList(value: unknown) {
+  if (!Array.isArray(value)) return [];
+  return value
+    .filter((item): item is string => typeof item === "string")
+    .map((item) => item.trim())
+    .filter(Boolean)
+    .slice(0, 8);
+}
+
+async function ensureTeam(
+  admin: ReturnType<typeof createAdminClient>,
+  workspaceId: string,
+  name: string,
+) {
+  const { data, error } = await admin
+    .from("teams")
+    .upsert(
+      { workspace_id: workspaceId, name },
+      { onConflict: "workspace_id,name" },
+    )
+    .select("id")
+    .single();
+  if (error) throw error;
+  return data.id as string;
 }
 
 export async function POST(request: Request) {
@@ -45,10 +88,20 @@ export async function POST(request: Request) {
     if (!membership?.workspace_id) {
       return Response.json({ error: "No active CourtFlux workspace" }, { status: 403 });
     }
+    if (!["owner", "admin", "analyst"].includes(membership.role)) {
+      return Response.json({ error: "Your workspace role cannot start analyses" }, { status: 403 });
+    }
 
-    const payload = await request.json();
+    const payload = (await request.json()) as Record<string, unknown>;
     const workspaceId = membership.workspace_id as string;
     const admin = createAdminClient();
+    const startTimeSec = numberFromUnknown(payload.start_time_sec) ?? 0;
+    const endTimeSec = numberFromUnknown(payload.end_time_sec);
+
+    if (startTimeSec < 0 || endTimeSec === null || endTimeSec <= startTimeSec) {
+      return Response.json({ error: "Analysis end time must be greater than start time" }, { status: 400 });
+    }
+    const requestedMinutes = (endTimeSec - startTimeSec) / 60;
 
     const { data: entitlement } = await admin
       .from("workspace_entitlements")
@@ -91,6 +144,7 @@ export async function POST(request: Request) {
     const planCode = normalizePlanCode(entitlement?.plan_code);
     const limits = (entitlement?.limits ?? {}) as Record<string, unknown>;
     const monthlyAllowance = resolveMonthlyAllowance(planCode, limits, grantedMinutes);
+    const remainingMinutes = monthlyAllowance === null ? null : Math.max(0, monthlyAllowance - usedMinutes);
 
     if (!canStartAnalysis(usedMinutes, monthlyAllowance)) {
       return Response.json(
@@ -108,17 +162,87 @@ export async function POST(request: Request) {
       );
     }
 
+    if (remainingMinutes !== null && requestedMinutes > remainingMinutes + 0.001) {
+      return Response.json(
+        {
+          error: "Not enough analysis minutes remaining for this video window",
+          code: "analysis_allowance_insufficient",
+          plan_code: planCode,
+          analysis_minutes_requested: requestedMinutes,
+          analysis_minutes_used: usedMinutes,
+          analysis_minutes_allowance: monthlyAllowance,
+          analysis_minutes_remaining: remainingMinutes,
+          billing_active: false,
+          detail: "Shorten the analysis window or ask a CourtFlux admin for additional beta minutes. No overage will be charged automatically.",
+        },
+        { status: 429 },
+      );
+    }
+
+    let gameId: string | null = null;
+    const context = (payload.game_context && typeof payload.game_context === "object")
+      ? payload.game_context as GameContext
+      : null;
+
+    if (context) {
+      const homeTeam = textFromUnknown(context.home_team);
+      const awayTeam = textFromUnknown(context.away_team);
+      if (!homeTeam || !awayTeam || homeTeam === awayTeam) {
+        return Response.json({ error: "New Analysis requires two different team names" }, { status: 400 });
+      }
+
+      const [homeTeamId, awayTeamId] = await Promise.all([
+        ensureTeam(admin, workspaceId, homeTeam),
+        ensureTeam(admin, workspaceId, awayTeam),
+      ]);
+      const rawDate = textFromUnknown(context.game_date, 32);
+      const gameDate = rawDate && /^\d{4}-\d{2}-\d{2}$/.test(rawDate)
+        ? `${rawDate}T12:00:00.000Z`
+        : null;
+      const requestedSourceType = textFromUnknown(context.source_type, 24);
+      const sourceType = requestedSourceType === "youtube"
+        ? "youtube"
+        : requestedSourceType === "upload"
+          ? "upload"
+          : "video";
+      const source = textFromUnknown(payload.video_source, 2048);
+
+      const { data: game, error: gameError } = await admin
+        .from("games")
+        .insert({
+          workspace_id: workspaceId,
+          created_by: user.id,
+          title: `${homeTeam} vs ${awayTeam}`,
+          competition: textFromUnknown(context.competition),
+          game_date: gameDate,
+          home_team_id: homeTeamId,
+          away_team_id: awayTeamId,
+          video_source: source,
+          source_type: sourceType,
+          metadata: {
+            source_label: textFromUnknown(context.source_label, 240),
+            home_kit_colors: colorList(context.home_kit_colors),
+            away_kit_colors: colorList(context.away_kit_colors),
+          },
+        })
+        .select("id")
+        .single();
+      if (gameError) throw gameError;
+      gameId = game.id as string;
+    }
+
     runId = crypto.randomUUID();
     jobId = crypto.randomUUID();
 
     const { error: runError } = await admin.from("analysis_runs").insert({
       id: runId,
       workspace_id: workspaceId,
+      game_id: gameId,
       created_by: user.id,
       status: "queued",
       video_source: typeof payload.video_source === "string" ? payload.video_source : null,
-      start_time_sec: Number(payload.start_time_sec ?? 0),
-      end_time_sec: payload.end_time_sec == null ? null : Number(payload.end_time_sec),
+      start_time_sec: startTimeSec,
+      end_time_sec: endTimeSec,
       parameters: payload,
     });
     if (runError) throw runError;
@@ -136,6 +260,8 @@ export async function POST(request: Request) {
       method: "POST",
       body: JSON.stringify({
         ...payload,
+        start_time_sec: startTimeSec,
+        end_time_sec: endTimeSec,
         platform_run_id: runId,
         platform_job_id: jobId,
         workspace_id: workspaceId,
@@ -158,10 +284,17 @@ export async function POST(request: Request) {
         admin.from("analysis_jobs").update({ status: "failed", error: errorText, completed_at: new Date().toISOString() }).eq("id", jobId),
         admin.from("analysis_runs").update({ status: "failed", completed_at: new Date().toISOString() }).eq("id", runId),
       ]);
-      return Response.json({ ...data, run_id: runId, job_id: jobId }, { status: upstream.status });
+      return Response.json({ ...data, run_id: runId, job_id: jobId, game_id: gameId }, { status: upstream.status });
     }
 
-    return Response.json({ ...data, run_id: runId, job_id: jobId });
+    return Response.json({
+      ...data,
+      run_id: runId,
+      job_id: jobId,
+      game_id: gameId,
+      analysis_minutes_estimated: requestedMinutes,
+      analysis_minutes_remaining_before: remainingMinutes,
+    });
   } catch (error) {
     const errorText = error instanceof Error ? error.message : String(error);
     try {

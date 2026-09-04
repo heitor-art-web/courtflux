@@ -30,6 +30,10 @@ const nextConfig: NextConfig = {
         headers: noIndexHeaders,
       },
       {
+        source: "/analysis/:path*",
+        headers: noIndexHeaders,
+      },
+      {
         source: "/lab/:path*",
         headers: noIndexHeaders,
       },
