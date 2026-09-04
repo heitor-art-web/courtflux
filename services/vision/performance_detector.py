@@ -58,6 +58,29 @@ class PerformanceDetector:
         self.ball_tracker = TemporalBallTracker(
             max_hold_frames=self._env_int("BASKETBALL_BALL_HOLD_FRAMES", 5, 0, 30),
             reset_after_frames=self._env_int("BASKETBALL_BALL_RESET_FRAMES", 12, 2, 120),
+            base_gate_norm=self._env_float("BASKETBALL_BALL_GATE_BASE", 0.12, 0.02, 0.50),
+            gate_growth_per_frame=self._env_float(
+                "BASKETBALL_BALL_GATE_GROWTH", 0.025, 0.0, 0.25
+            ),
+            max_gate_norm=self._env_float("BASKETBALL_BALL_GATE_MAX", 0.28, 0.02, 0.75),
+            velocity_alpha=self._env_float(
+                "BASKETBALL_BALL_VELOCITY_ALPHA", 0.40, 0.0, 1.0
+            ),
+            score_confidence_weight=self._env_float(
+                "BASKETBALL_BALL_SCORE_CONF", 0.58, 0.0, 1.0
+            ),
+            score_proximity_weight=self._env_float(
+                "BASKETBALL_BALL_SCORE_PROX", 0.32, 0.0, 1.0
+            ),
+            score_size_weight=self._env_float(
+                "BASKETBALL_BALL_SCORE_SIZE", 0.10, 0.0, 1.0
+            ),
+            high_confidence_gate_threshold=self._env_float(
+                "BASKETBALL_BALL_HIGH_CONF_GATE_THRESHOLD", 0.85, 0.0, 1.0
+            ),
+            high_confidence_gate_multiplier=self._env_float(
+                "BASKETBALL_BALL_HIGH_CONF_GATE_MULTIPLIER", 1.35, 1.0, 3.0
+            ),
         )
 
         with open(profiling_path, "r", encoding="utf-8") as fh:
@@ -74,7 +97,14 @@ class PerformanceDetector:
             "🏀 Ball temporal association: "
             f"{'on' if self.ball_temporal_enabled else 'off'} "
             f"hold={self.ball_tracker.max_hold_frames}f "
-            f"reset={self.ball_tracker.reset_after_frames}f",
+            f"reset={self.ball_tracker.reset_after_frames}f "
+            f"weights=({self.ball_tracker.score_confidence_weight:.2f},"
+            f"{self.ball_tracker.score_proximity_weight:.2f},"
+            f"{self.ball_tracker.score_size_weight:.2f}) "
+            f"gate=({self.ball_tracker.base_gate_norm:.3f}+"
+            f"{self.ball_tracker.gate_growth_per_frame:.3f}/f "
+            f"max={self.ball_tracker.max_gate_norm:.3f}) "
+            f"high_conf_gate=x{self.ball_tracker.high_confidence_gate_multiplier:.2f}",
             flush=True,
         )
 
@@ -106,6 +136,17 @@ class PerformanceDetector:
         except ValueError:
             print(f"⚠️ Invalid {name}={raw!r}; using {fallback}.", flush=True)
             return int(fallback)
+
+    @staticmethod
+    def _env_float(name: str, fallback: float, minimum: float, maximum: float) -> float:
+        raw = os.getenv(name)
+        if raw is None or not raw.strip():
+            return float(fallback)
+        try:
+            return max(float(minimum), min(float(raw), float(maximum)))
+        except ValueError:
+            print(f"⚠️ Invalid {name}={raw!r}; using {fallback:.3f}.", flush=True)
+            return float(fallback)
 
     @staticmethod
     def _is_player_class(name: str) -> bool:
@@ -282,6 +323,22 @@ class PerformanceDetector:
             "ball_source": ball_source,
             "ball_temporal_enabled": self.ball_temporal_enabled,
             "ball_association": association,
+            "ball_score_weights": {
+                "confidence": round(self.ball_tracker.score_confidence_weight, 6),
+                "proximity": round(self.ball_tracker.score_proximity_weight, 6),
+                "size": round(self.ball_tracker.score_size_weight, 6),
+            },
+            "ball_gate_config": {
+                "base": round(self.ball_tracker.base_gate_norm, 6),
+                "growth_per_frame": round(self.ball_tracker.gate_growth_per_frame, 6),
+                "max": round(self.ball_tracker.max_gate_norm, 6),
+                "high_confidence_threshold": round(
+                    self.ball_tracker.high_confidence_gate_threshold, 6
+                ),
+                "high_confidence_multiplier": round(
+                    self.ball_tracker.high_confidence_gate_multiplier, 6
+                ),
+            },
             "inference_conf": self.inference_conf_thresh,
             "player_conf": self.player_conf_thresh,
             "ball_conf": self.ball_conf_thresh,
