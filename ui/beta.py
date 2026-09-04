@@ -26,7 +26,7 @@ DEFAULT_MODEL = settings.model if configured_model.exists() else (
     "weights/Model_v0.1.pt" if fallback_model.exists() else settings.model
 )
 
-st.set_page_config(page_title="Basketball AI Analytics — Beta Lab", page_icon="🏀", layout="wide")
+st.set_page_config(page_title="CourtFlux — Basketball Intelligence from Video", page_icon="🏀", layout="wide")
 
 
 def load_summary(path: Path) -> dict:
@@ -200,7 +200,8 @@ def render_summary(path: Path) -> None:
                 st.download_button(label, data=file_path.read_bytes(), file_name=f"{summary.get('run_id', 'run')}_{label}", mime=mime, width="stretch")
 
 
-st.title("🏀 Basketball AI Analytics — Performance Beta")
+st.title("🏀 CourtFlux")
+st.caption("Basketball Intelligence from Video")
 st.write("Performance benchmark with lightweight visual validation for players, teams, jerseys and ball detection.")
 
 if "match_config_editor" not in st.session_state:
@@ -233,7 +234,7 @@ with st.expander("Edit match_config.json", expanded=False):
             st.error(f"Invalid JSON: {exc}")
 
 with st.sidebar:
-    st.header("Performance run")
+    st.header("CourtFlux beta run")
     video_source = st.text_input("YouTube URL / local video", value=DEFAULT_VIDEO)
     start_time = st.text_input("Start", value="00:00")
     end_time = st.text_input("End", value="01:00")
@@ -289,7 +290,7 @@ with st.sidebar:
 
     if not config_ready:
         st.warning("Fix match_config.json before running.")
-    run_clicked = st.button("🚀 Run performance beta", type="primary", width="stretch", disabled=not config_ready)
+    run_clicked = st.button("🚀 Run CourtFlux beta", type="primary", width="stretch", disabled=not config_ready)
 
 if run_clicked:
     command = [
@@ -395,7 +396,7 @@ if run_clicked:
         st.session_state["last_summary_path"] = str(summary_path)
     if process.returncode == 0:
         status.update(label="Analysis completed", state="complete", expanded=False)
-        st.success("Performance run completed.")
+        st.success("CourtFlux beta run completed.")
     else:
         status.update(label=f"Analysis failed (exit {process.returncode})", state="error", expanded=True)
 
