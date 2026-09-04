@@ -8,9 +8,11 @@ from typing import Any
 import numpy as np
 from ultralytics import YOLO
 
+from services.vision.ball_tracker import TemporalBallTracker
+
 
 class PerformanceDetector:
-    """Lean detector/tracker with persistent team and player identity evidence."""
+    """Lean detector/tracker with persistent team/player identity and temporal ball association."""
 
     def __init__(
         self,
@@ -52,6 +54,12 @@ class PerformanceDetector:
         self.jersey_successes_total = 0
         self.jersey_time_ms_total = 0.0
 
+        self.ball_temporal_enabled = self._env_bool("BASKETBALL_BALL_TEMPORAL", True)
+        self.ball_tracker = TemporalBallTracker(
+            max_hold_frames=self._env_int("BASKETBALL_BALL_HOLD_FRAMES", 5, 0, 30),
+            reset_after_frames=self._env_int("BASKETBALL_BALL_RESET_FRAMES", 12, 2, 120),
+        )
+
         with open(profiling_path, "r", encoding="utf-8") as fh:
             self.match_config = json.load(fh)
 
@@ -60,6 +68,13 @@ class PerformanceDetector:
             f"inference={self.inference_conf_thresh:.3f} "
             f"player={self.player_conf_thresh:.3f} "
             f"ball={self.ball_conf_thresh:.3f}",
+            flush=True,
+        )
+        print(
+            "🏀 Ball temporal association: "
+            f"{'on' if self.ball_temporal_enabled else 'off'} "
+            f"hold={self.ball_tracker.max_hold_frames}f "
+            f"reset={self.ball_tracker.reset_after_frames}f",
             flush=True,
         )
 
@@ -73,6 +88,24 @@ class PerformanceDetector:
         except ValueError:
             print(f"⚠️ Invalid {name}={raw!r}; using {fallback:.3f}.", flush=True)
             return float(fallback)
+
+    @staticmethod
+    def _env_bool(name: str, fallback: bool) -> bool:
+        raw = os.getenv(name)
+        if raw is None or not raw.strip():
+            return bool(fallback)
+        return raw.strip().lower() not in {"0", "false", "no", "off"}
+
+    @staticmethod
+    def _env_int(name: str, fallback: int, minimum: int, maximum: int) -> int:
+        raw = os.getenv(name)
+        if raw is None or not raw.strip():
+            return int(fallback)
+        try:
+            return max(minimum, min(int(raw), maximum))
+        except ValueError:
+            print(f"⚠️ Invalid {name}={raw!r}; using {fallback}.", flush=True)
+            return int(fallback)
 
     @staticmethod
     def _is_player_class(name: str) -> bool:
@@ -116,10 +149,56 @@ class PerformanceDetector:
             verbose=False,
         )
 
+    def _select_ball(self, candidates: list[dict[str, Any]], frame_state):
+        frame_id = int(getattr(frame_state, "frame_id", 0))
+        if not self.ball_temporal_enabled:
+            if not candidates:
+                return None, {
+                    "source": "missing",
+                    "selected_index": None,
+                    "score": None,
+                    "distance_norm": None,
+                    "gate_norm": None,
+                    "rejected_candidates": 0,
+                    "hold_age_frames": 0,
+                }
+            selected_index = max(
+                range(len(candidates)),
+                key=lambda idx: float(candidates[idx].get("confidence", 0.0)),
+            )
+            ball = dict(candidates[selected_index])
+            ball["interpolated"] = False
+            ball["source"] = "detector_highest_conf"
+            return ball, {
+                "source": "detector_highest_conf",
+                "selected_index": selected_index,
+                "score": float(ball.get("confidence", 0.0)),
+                "distance_norm": None,
+                "gate_norm": None,
+                "rejected_candidates": 0,
+                "hold_age_frames": 0,
+            }
+
+        decision = self.ball_tracker.select(
+            candidates=candidates,
+            frame_id=frame_id,
+            frame_shape=frame_state.frame.shape,
+        )
+        return decision.ball, {
+            "source": decision.source,
+            "selected_index": decision.selected_index,
+            "score": None if decision.score is None else round(float(decision.score), 6),
+            "distance_norm": (
+                None if decision.distance_norm is None else round(float(decision.distance_norm), 6)
+            ),
+            "gate_norm": None if decision.gate_norm is None else round(float(decision.gate_norm), 6),
+            "rejected_candidates": int(decision.rejected_candidates),
+            "hold_age_frames": int(decision.hold_age_frames),
+        }
+
     def _parse(self, frame_state, results):
         players = []
-        best_ball = None
-        best_ball_conf = 0.0
+        ball_candidates: list[dict[str, Any]] = []
         class_counts: dict[str, int] = {}
         raw_total = 0
         raw_players = 0
@@ -163,19 +242,24 @@ class PerformanceDetector:
                             "player_name": None,
                         }
                     )
-                elif is_ball and conf >= self.ball_conf_thresh:
+                elif is_ball and conf >= self.ball_conf_thresh and x2 > x1 and y2 > y1:
                     accepted_ball_candidates += 1
-                    if conf > best_ball_conf:
-                        best_ball_conf = conf
-                        best_ball = {
+                    ball_candidates.append(
+                        {
                             "box": [x1, y1, x2, y2],
                             "center": center,
                             "confidence": conf,
                             "interpolated": False,
                         }
+                    )
+
+        selected_ball, association = self._select_ball(ball_candidates, frame_state)
+        ball_source = str(association.get("source") or "missing")
+        direct_selected = selected_ball is not None and not bool(selected_ball.get("interpolated"))
 
         frame_state.players = players
-        frame_state.ball = best_ball
+        frame_state.ball = selected_ball
+        frame_state.diagnostics.setdefault("analytics", {})["ball_source"] = ball_source
         frame_state.diagnostics["detector"] = {
             "raw_total": raw_total,
             "raw_class_counts": class_counts,
@@ -188,9 +272,16 @@ class PerformanceDetector:
             "rejected_outside_court_total": 0,
             "rejected_outside_court_by_class": {},
             "parsed_players": len(players),
-            "selected_ball": best_ball is not None,
-            "selected_ball_conf": best_ball_conf if best_ball is not None else None,
-            "selected_ball_center": list(best_ball["center"]) if best_ball is not None else None,
+            "selected_ball": direct_selected,
+            "selected_ball_conf": (
+                float(selected_ball.get("confidence", 0.0)) if direct_selected else None
+            ),
+            "selected_ball_center": (
+                list(selected_ball["center"]) if direct_selected else None
+            ),
+            "ball_source": ball_source,
+            "ball_temporal_enabled": self.ball_temporal_enabled,
+            "ball_association": association,
             "inference_conf": self.inference_conf_thresh,
             "player_conf": self.player_conf_thresh,
             "ball_conf": self.ball_conf_thresh,
@@ -223,7 +314,9 @@ class PerformanceDetector:
             if scores:
                 profile["team_observations"] += 1
                 for team_name, value in scores.items():
-                    profile["team_score_sums"][team_name] = float(profile["team_score_sums"].get(team_name, 0.0)) + float(value)
+                    profile["team_score_sums"][team_name] = float(
+                        profile["team_score_sums"].get(team_name, 0.0)
+                    ) + float(value)
 
                 observations = max(int(profile["team_observations"]), 1)
                 averages = {
@@ -296,9 +389,18 @@ class PerformanceDetector:
             player["ocr_attempted"] = True
 
             if hasattr(self.visual, "predict_jersey"):
-                prediction = dict(self.visual.predict_jersey(track_id=track_id, team_name=profile.get("team")) or {})
+                prediction = dict(
+                    self.visual.predict_jersey(
+                        track_id=track_id,
+                        team_name=profile.get("team"),
+                    ) or {}
+                )
             else:
-                number = self.visual.get_shirt_number(crop, track_id=track_id, team_name=profile.get("team"))
+                number = self.visual.get_shirt_number(
+                    crop,
+                    track_id=track_id,
+                    team_name=profile.get("team"),
+                )
                 prediction = {
                     "accepted": bool(number),
                     "candidate_number": number or None,
@@ -319,21 +421,39 @@ class PerformanceDetector:
             if prediction.get("accepted") and candidate:
                 candidate = str(candidate)
                 posterior = float(prediction.get("candidate_posterior", 1.0) or 0.0)
-                evidence = max(0.0, posterior) * max(0.35, float(profile.get("team_confidence", 0.0)))
-                profile["jersey_votes"][candidate] = float(profile["jersey_votes"].get(candidate, 0.0)) + evidence
-                profile["jersey_vote_counts"][candidate] = int(profile["jersey_vote_counts"].get(candidate, 0)) + 1
+                evidence = max(0.0, posterior) * max(
+                    0.35,
+                    float(profile.get("team_confidence", 0.0)),
+                )
+                profile["jersey_votes"][candidate] = float(
+                    profile["jersey_votes"].get(candidate, 0.0)
+                ) + evidence
+                profile["jersey_vote_counts"][candidate] = int(
+                    profile["jersey_vote_counts"].get(candidate, 0)
+                ) + 1
 
-                ordered_votes = sorted(profile["jersey_votes"].items(), key=lambda item: item[1], reverse=True)
+                ordered_votes = sorted(
+                    profile["jersey_votes"].items(),
+                    key=lambda item: item[1],
+                    reverse=True,
+                )
                 top_number, top_evidence = ordered_votes[0]
                 second_evidence = ordered_votes[1][1] if len(ordered_votes) > 1 else 0.0
                 top_count = int(profile["jersey_vote_counts"].get(top_number, 0))
 
-                if top_count >= 2 and top_evidence >= 0.35 and (top_evidence - second_evidence) >= 0.12:
+                if (
+                    top_count >= 2
+                    and top_evidence >= 0.35
+                    and (top_evidence - second_evidence) >= 0.12
+                ):
                     profile["shirt_num"] = top_number
                     profile["identity_team"] = profile.get("team")
                     profile["identity_locked"] = True
                     if hasattr(self.visual, "resolve_player_name"):
-                        profile["player_name"] = self.visual.resolve_player_name(profile.get("team"), top_number)
+                        profile["player_name"] = self.visual.resolve_player_name(
+                            profile.get("team"),
+                            top_number,
+                        )
                     player["shirt_num"] = top_number
                     player["player_name"] = profile.get("player_name")
                     player["ocr_success"] = True
@@ -380,9 +500,10 @@ class PerformanceDetector:
         frame_id = int(getattr(frame_state, "frame_id", 0))
         if frame_id > 0 and frame_id % 100 == 0:
             locked = sum(1 for profile in self.player_db.values() if profile.get("identity_locked"))
+            ball_source = str(diag.get("ball_source") or "missing")
             print(
                 f"[PROGRESS] frame={frame_id} players={len(frame_state.players)} "
-                f"ball={'yes' if frame_state.ball is not None else 'no'} "
+                f"ball={ball_source} "
                 f"jersey_attempts={self.jersey_attempts_total} "
                 f"identity_locks={locked} "
                 f"jersey_time={self.jersey_time_ms_total / 1000.0:.1f}s",
