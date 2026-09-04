@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from pathlib import Path
 from time import perf_counter
-from typing import Dict, List, Optional
+from typing import Any, Dict, List, Optional
 
 import cv2
 import numpy as np
@@ -47,13 +47,15 @@ class TemporalJerseyClassifier(nn.Module):
 
 
 class PerformanceJerseyAnalyzer(TeamOnlyAnalyzer):
-    """Team scoring + structured temporal jersey decoding for beta identity runs.
+    """Team scoring + structured temporal jersey decoding for beta identity runs."""
 
-    The model always exposes its raw digit prediction. Roster constraints are applied as
-    a decoder over all valid roster numbers rather than as a binary post-hoc rejection
-    of the top raw number. This makes failures diagnosable and uses roster information
-    in the statistically useful place: candidate selection.
-    """
+    STATE_PREFIXES = (
+        "module.",
+        "model.",
+        "number_model.",
+        "network.",
+        "net.",
+    )
 
     def __init__(
         self,
@@ -96,55 +98,180 @@ class PerformanceJerseyAnalyzer(TeamOnlyAnalyzer):
         if isinstance(checkpoint, nn.Module):
             model = checkpoint
             coverage = 1.0
+            matched_count = len(model.state_dict())
             missing_count = 0
             unexpected_count = 0
+            checkpoint_path_used = "root(module)"
+            checkpoint_keys = list(model.state_dict().keys())[:12]
         else:
             model = TemporalJerseyClassifier()
-            state_dict = checkpoint.get("state_dict", checkpoint) if isinstance(checkpoint, dict) else checkpoint
-            if not isinstance(state_dict, dict):
-                raise TypeError("Unsupported jersey checkpoint format")
-            state_dict = self._normalize_state_dict(state_dict, set(model.state_dict().keys()))
-            missing, unexpected = model.load_state_dict(state_dict, strict=False)
-            model_key_count = max(len(model.state_dict()), 1)
+            expected_state = model.state_dict()
+            selected = self._select_best_state_dict(checkpoint, expected_state)
+            state_dict = selected["state_dict"]
+            coverage = float(selected["coverage"])
+            matched_count = int(selected["matched"])
+            checkpoint_path_used = str(selected["path"])
+            checkpoint_keys = list(selected["raw_keys"][:12])
+
+            compatible = {
+                key: value
+                for key, value in state_dict.items()
+                if key in expected_state
+                and torch.is_tensor(value)
+                and tuple(value.shape) == tuple(expected_state[key].shape)
+            }
+            missing, unexpected = model.load_state_dict(compatible, strict=False)
             missing_count = len(missing)
             unexpected_count = len(unexpected)
-            coverage = 1.0 - (missing_count / model_key_count)
+
             if coverage < 0.95:
+                sample = ", ".join(checkpoint_keys[:8]) or "<no tensor keys found>"
                 raise RuntimeError(
-                    f"Jersey checkpoint only covers {coverage:.1%} of model keys "
-                    f"({missing_count} missing, {unexpected_count} unexpected)."
-                )
-            if missing_count or unexpected_count:
-                print(
-                    f"⚠️ Jersey checkpoint compatibility: coverage={coverage:.1%}, "
-                    f"missing={missing_count}, unexpected={unexpected_count}",
-                    flush=True,
+                    "Jersey checkpoint architecture mismatch after nested checkpoint inspection. "
+                    f"Best tensor dictionary='{checkpoint_path_used}', coverage={coverage:.1%} "
+                    f"({matched_count}/{len(expected_state)} shape-compatible model keys). "
+                    f"Sample checkpoint keys: {sample}"
                 )
 
         self.checkpoint_diagnostics = {
             "coverage": round(float(coverage), 4),
+            "matched_keys": int(matched_count),
             "missing_keys": int(missing_count),
             "unexpected_keys": int(unexpected_count),
+            "checkpoint_path": checkpoint_path_used,
+            "sample_keys": checkpoint_keys,
         }
         self.number_model = model.to(self.device).eval()
         print(
             f"✅ Jersey model ready in {perf_counter() - started:.2f}s; "
-            f"checkpoint coverage={coverage:.1%}.",
+            f"checkpoint coverage={coverage:.1%}; source={checkpoint_path_used}.",
             flush=True,
         )
 
-    @staticmethod
-    def _normalize_state_dict(state_dict: dict, model_keys: set[str]) -> dict:
-        if set(state_dict.keys()) & model_keys:
-            return state_dict
-        for prefix in ("module.", "model.", "number_model."):
-            candidate = {
-                (key[len(prefix):] if str(key).startswith(prefix) else str(key)): value
-                for key, value in state_dict.items()
-            }
-            if set(candidate.keys()) & model_keys:
-                return candidate
-        return state_dict
+    @classmethod
+    def _collect_state_dict_candidates(
+        cls,
+        value: Any,
+        path: str = "root",
+        depth: int = 0,
+    ) -> list[tuple[str, dict]]:
+        if depth > 5:
+            return []
+        if isinstance(value, nn.Module):
+            return [(f"{path}(module)", dict(value.state_dict()))]
+        if not isinstance(value, dict):
+            return []
+
+        candidates: list[tuple[str, dict]] = []
+        tensor_map = {
+            str(key): item
+            for key, item in value.items()
+            if torch.is_tensor(item)
+        }
+        if tensor_map:
+            candidates.append((path, tensor_map))
+
+        priority_keys = (
+            "state_dict",
+            "model_state_dict",
+            "model",
+            "network",
+            "net",
+            "weights",
+            "number_model",
+            "module",
+        )
+        visited: set[str] = set()
+        for key in priority_keys:
+            if key in value:
+                visited.add(key)
+                candidates.extend(
+                    cls._collect_state_dict_candidates(value[key], f"{path}.{key}", depth + 1)
+                )
+        for key, item in value.items():
+            key_text = str(key)
+            if key_text in visited:
+                continue
+            if isinstance(item, (dict, nn.Module)):
+                candidates.extend(
+                    cls._collect_state_dict_candidates(item, f"{path}.{key_text}", depth + 1)
+                )
+        return candidates
+
+    @classmethod
+    def _normalized_variants(cls, state_dict: dict) -> list[dict]:
+        base = {str(key): value for key, value in state_dict.items()}
+        variants = [base]
+
+        current = base
+        for _ in range(4):
+            changed = False
+            stripped = {}
+            for key, value in current.items():
+                new_key = key
+                for prefix in cls.STATE_PREFIXES:
+                    if new_key.startswith(prefix):
+                        new_key = new_key[len(prefix):]
+                        changed = True
+                        break
+                stripped[new_key] = value
+            if not changed:
+                break
+            variants.append(stripped)
+            current = stripped
+
+        unique: list[dict] = []
+        signatures: set[tuple[str, ...]] = set()
+        for variant in variants:
+            signature = tuple(sorted(variant.keys())[:64])
+            if signature not in signatures:
+                signatures.add(signature)
+                unique.append(variant)
+        return unique
+
+    @classmethod
+    def _select_best_state_dict(cls, checkpoint: Any, expected_state: dict) -> dict:
+        candidates = cls._collect_state_dict_candidates(checkpoint)
+        if not candidates:
+            top_type = type(checkpoint).__name__
+            top_keys = list(checkpoint.keys())[:12] if isinstance(checkpoint, dict) else []
+            raise RuntimeError(
+                f"No tensor state_dict found in jersey checkpoint (type={top_type}, keys={top_keys})."
+            )
+
+        best: dict | None = None
+        expected_count = max(len(expected_state), 1)
+        for path, raw_state in candidates:
+            raw_keys = list(raw_state.keys())
+            for variant in cls._normalized_variants(raw_state):
+                matched = 0
+                key_matches = 0
+                for key, value in variant.items():
+                    if key not in expected_state:
+                        continue
+                    key_matches += 1
+                    if torch.is_tensor(value) and tuple(value.shape) == tuple(expected_state[key].shape):
+                        matched += 1
+                score = (matched, key_matches, len(variant))
+                if best is None or score > best["score"]:
+                    best = {
+                        "path": path,
+                        "state_dict": variant,
+                        "raw_keys": raw_keys,
+                        "matched": matched,
+                        "key_matches": key_matches,
+                        "coverage": matched / expected_count,
+                        "score": score,
+                    }
+
+        assert best is not None
+        print(
+            f"🔎 Jersey checkpoint inspection: source={best['path']} "
+            f"shape_matches={best['matched']}/{len(expected_state)} "
+            f"key_matches={best['key_matches']} tensor_keys={len(best['state_dict'])}",
+            flush=True,
+        )
+        return best
 
     def observe_track(self, crop: np.ndarray, track_id: int) -> None:
         if track_id < 0 or crop is None or crop.size == 0:
