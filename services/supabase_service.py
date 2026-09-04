@@ -2,7 +2,9 @@ from __future__ import annotations
 
 import os
 import threading
+import time
 from datetime import datetime, timezone
+from pathlib import Path
 from typing import Any
 
 try:
@@ -58,13 +60,14 @@ class SupabaseRunStore:
         print(f"⚠️ Supabase {action} failed: {type(exc).__name__}: {exc}")
 
     def _retention_loop(self) -> None:
-        interval = max(3600, int(os.getenv("VIDEO_RETENTION_SWEEP_SECONDS", "21600")))
+        interval = max(3600, int(os.getenv("VIDEO_RETENTION_SWEEP_SECONDS", "3600")))
         # Give the worker time to finish startup before the first storage sweep.
         if self._retention_stop.wait(10):
             return
         while not self._retention_stop.is_set():
             try:
                 self.purge_expired_analysis_videos()
+                self.purge_expired_local_video_cache()
             except Exception as exc:  # pragma: no cover - retention must never stop inference
                 self._warn("video retention sweep", exc)
             self._retention_stop.wait(interval)
@@ -84,6 +87,28 @@ class SupabaseRunStore:
             self.client.table("analysis_runs").update(values).eq("id", run_id).execute()
         except Exception as exc:
             self._warn("run update", exc)
+
+    def purge_expired_local_video_cache(self, retention_days: int = 60) -> int:
+        """Remove old worker-local uploaded-video cache files."""
+        cache_dir = Path(os.getenv("COURTFLUX_UPLOAD_CACHE_DIR", "data/uploads"))
+        if not cache_dir.exists():
+            return 0
+
+        cutoff = time.time() - max(1, retention_days) * 24 * 60 * 60
+        removed = 0
+        for path in cache_dir.iterdir():
+            if not path.is_file():
+                continue
+            try:
+                if path.stat().st_mtime <= cutoff:
+                    path.unlink(missing_ok=True)
+                    removed += 1
+            except Exception as exc:
+                self._warn("local video cache delete", exc)
+
+        if removed:
+            print(f"🧹 CourtFlux retention: removed {removed} expired worker cache file(s)")
+        return removed
 
     def purge_expired_analysis_videos(self, limit: int = 100) -> int:
         """Delete expired source videos while preserving analysis rows and derived metrics."""
