@@ -276,16 +276,15 @@ export function NewAnalysisForm({
           <div className={styles.eyebrow}>Analysis queued</div>
           <h1>Your basketball video is in the CourtFlux pipeline.</h1>
           <p>
-            The dashboard will show this run as queued or running while the private-beta worker processes it.
-            Results will be attached to the analysis record when processing completes.
+            CourtFlux now has a dedicated processing page for this run. You can follow the real queue and worker state there, leave the page, and return later from your workspace.
           </p>
           <div className={styles.successMeta}>
             <span>Estimated usage</span><strong>{formatMinutes(estimatedMinutes)} min</strong>
             <span>Job</span><strong>{result.job_id.slice(0, 8)}…</strong>
           </div>
           <div className={styles.successActions}>
-            <Link className={styles.primaryButton} href="/account">View dashboard</Link>
-            <button className={styles.secondaryButton} type="button" onClick={() => setResult(null)}>Start another analysis</button>
+            <Link className={styles.primaryButton} href={result.run_id ? `/analysis/${result.run_id}` : "/account"}>Track analysis</Link>
+            <Link className={styles.secondaryButton} href="/account">Dashboard</Link>
           </div>
         </section>
       </main>

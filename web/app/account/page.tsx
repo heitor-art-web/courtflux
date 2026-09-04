@@ -263,7 +263,7 @@ export default async function AccountPage() {
             <div className={styles.panelHeader}>
               <div>
                 <h2 id="recent-analyses-title">Recent analyses</h2>
-                <p>Latest game and clip processing activity for this workspace.</p>
+                <p>Latest game and clip processing activity for this workspace. Open any run to follow processing or review its results.</p>
               </div>
               {canManageAnalysis ? <Link className={styles.secondaryButton} href="/analysis/new">New analysis</Link> : null}
             </div>
@@ -275,17 +275,19 @@ export default async function AccountPage() {
                   const title = game?.title || sourceLabel(run.video_source);
                   const duration = formatDuration(run.start_time_sec, run.end_time_sec);
                   return (
-                    <article className={styles.analysisRow} key={run.id}>
-                      <div>
-                        <p className={styles.analysisTitle}>{title}</p>
-                        <div className={styles.analysisMeta}>
-                          <span>{formatDate(game?.game_date || run.created_at)}</span>
-                          {duration ? <span>{duration}</span> : null}
-                          <span>{sourceLabel(run.video_source)}</span>
+                    <Link href={`/analysis/${run.id}`} key={run.id} style={{ color: "inherit", textDecoration: "none" }}>
+                      <article className={styles.analysisRow}>
+                        <div>
+                          <p className={styles.analysisTitle}>{title}</p>
+                          <div className={styles.analysisMeta}>
+                            <span>{formatDate(game?.game_date || run.created_at)}</span>
+                            {duration ? <span>{duration}</span> : null}
+                            <span>{sourceLabel(run.video_source)}</span>
+                          </div>
                         </div>
-                      </div>
-                      <span className={statusClass(run.status)}>{run.status}</span>
-                    </article>
+                        <span className={statusClass(run.status)}>{run.status}</span>
+                      </article>
+                    </Link>
                   );
                 })}
               </div>
