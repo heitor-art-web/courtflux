@@ -2,7 +2,7 @@
 
 import Image from "next/image";
 import Link from "next/link";
-import { useEffect, useMemo, useState } from "react";
+import { useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import styles from "./page.module.css";
 
@@ -40,10 +40,11 @@ export function TeamManager({ workspaceName, role, primaryTeamId, initialTeams }
   const router = useRouter();
   const canManage = ["owner", "admin", "analyst"].includes(role);
   const canChangePrimary = ["owner", "admin"].includes(role);
-  const [teams, setTeams] = useState(initialTeams);
-  const [selectedId, setSelectedId] = useState(
-    primaryTeamId ?? initialTeams.find((team) => !team.isArchived)?.id ?? initialTeams[0]?.id ?? "",
-  );
+  const defaultTeam = initialTeams.find((team) => team.id === primaryTeamId)
+    ?? initialTeams.find((team) => !team.isArchived)
+    ?? initialTeams[0]
+    ?? null;
+  const [selectedId, setSelectedId] = useState(defaultTeam?.id ?? "");
   const [showArchived, setShowArchived] = useState(false);
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState("");
@@ -54,35 +55,28 @@ export function TeamManager({ workspaceName, role, primaryTeamId, initialTeams }
   const [newSeason, setNewSeason] = useState("");
   const [newAgeGroup, setNewAgeGroup] = useState("");
 
-  const selected = teams.find((team) => team.id === selectedId) ?? null;
-  const [name, setName] = useState(selected?.name ?? "");
-  const [shortName, setShortName] = useState(selected?.shortName ?? "");
-  const [season, setSeason] = useState(selected?.season ?? "");
-  const [ageGroup, setAgeGroup] = useState(selected?.ageGroup ?? "");
-  const [roster, setRoster] = useState<EditablePlayer[]>(selected ? editableRoster(selected.roster) : []);
+  const [name, setName] = useState(defaultTeam?.name ?? "");
+  const [shortName, setShortName] = useState(defaultTeam?.shortName ?? "");
+  const [season, setSeason] = useState(defaultTeam?.season ?? "");
+  const [ageGroup, setAgeGroup] = useState(defaultTeam?.ageGroup ?? "");
+  const [roster, setRoster] = useState<EditablePlayer[]>(defaultTeam ? editableRoster(defaultTeam.roster) : []);
 
-  useEffect(() => {
-    setTeams(initialTeams);
-    if (!initialTeams.some((team) => team.id === selectedId)) {
-      setSelectedId(primaryTeamId ?? initialTeams.find((team) => !team.isArchived)?.id ?? initialTeams[0]?.id ?? "");
-    }
-  }, [initialTeams, primaryTeamId, selectedId]);
+  const selected = initialTeams.find((team) => team.id === selectedId) ?? null;
+  const visibleTeams = useMemo(
+    () => initialTeams.filter((team) => showArchived || !team.isArchived),
+    [initialTeams, showArchived],
+  );
 
-  useEffect(() => {
-    const team = teams.find((item) => item.id === selectedId);
-    setName(team?.name ?? "");
-    setShortName(team?.shortName ?? "");
-    setSeason(team?.season ?? "");
-    setAgeGroup(team?.ageGroup ?? "");
-    setRoster(team ? editableRoster(team.roster) : []);
+  function selectTeam(team: Team) {
+    setSelectedId(team.id);
+    setName(team.name);
+    setShortName(team.shortName ?? "");
+    setSeason(team.season ?? "");
+    setAgeGroup(team.ageGroup ?? "");
+    setRoster(editableRoster(team.roster));
     setMessage("");
     setError("");
-  }, [selectedId, teams]);
-
-  const visibleTeams = useMemo(
-    () => teams.filter((team) => showArchived || !team.isArchived),
-    [teams, showArchived],
-  );
+  }
 
   async function request(url: string, init: RequestInit) {
     setBusy(true);
@@ -119,8 +113,7 @@ export function TeamManager({ workspaceName, role, primaryTeamId, initialTeams }
       setNewShortName("");
       setNewSeason("");
       setNewAgeGroup("");
-      setSelectedId(data.id);
-      setMessage("Team created.");
+      setMessage("Team created. Select it from the list to add a roster.");
     }
   }
 
@@ -176,7 +169,8 @@ export function TeamManager({ workspaceName, role, primaryTeamId, initialTeams }
       if (field === "jerseyNumber") {
         return { ...player, jerseyNumber: value === "" ? null : Number(value) };
       }
-      return { ...player, [field]: value };
+      if (field === "name") return { ...player, name: value };
+      return { ...player, position: value };
     }));
   }
 
@@ -194,7 +188,10 @@ export function TeamManager({ workspaceName, role, primaryTeamId, initialTeams }
         })),
       }),
     });
-    if (data) setMessage("Roster saved. New Analysis can now prefill these players.");
+    if (data) {
+      // Reload once so newly inserted roster entries have their persistent IDs before another edit.
+      window.location.reload();
+    }
   }
 
   return (
@@ -222,12 +219,12 @@ export function TeamManager({ workspaceName, role, primaryTeamId, initialTeams }
       <div className={styles.layout}>
         <aside className={styles.teamSidebar}>
           <div className={styles.sidebarHeader}>
-            <div><strong>Your teams</strong><span>{teams.filter((team) => !team.isArchived).length} active</span></div>
+            <div><strong>Your teams</strong><span>{initialTeams.filter((team) => !team.isArchived).length} active</span></div>
             <label className={styles.archiveToggle}><input type="checkbox" checked={showArchived} onChange={(event) => setShowArchived(event.target.checked)} /> Show archived</label>
           </div>
           <div className={styles.teamList}>
             {visibleTeams.map((team) => (
-              <button key={team.id} type="button" onClick={() => setSelectedId(team.id)} className={team.id === selectedId ? styles.teamButtonActive : styles.teamButton}>
+              <button key={team.id} type="button" onClick={() => selectTeam(team)} className={team.id === selectedId ? styles.teamButtonActive : styles.teamButton}>
                 <span><strong>{team.name}</strong><small>{[team.ageGroup, team.season].filter(Boolean).join(" · ") || "Basketball team"}</small></span>
                 <span className={styles.teamMeta}>{team.id === primaryTeamId ? "Primary" : team.isArchived ? "Archived" : `${team.roster.length} players`}</span>
               </button>
@@ -236,7 +233,7 @@ export function TeamManager({ workspaceName, role, primaryTeamId, initialTeams }
           </div>
 
           {canManage ? (
-            <details className={styles.createPanel} open={!teams.length}>
+            <details className={styles.createPanel} open={!initialTeams.length}>
               <summary>Add team</summary>
               <div className={styles.createFields}>
                 <label>Team name *<input value={newName} onChange={(event) => setNewName(event.target.value)} placeholder="U18 Men" /></label>
