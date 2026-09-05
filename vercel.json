@@ -4,6 +4,14 @@
   "installCommand": "npm ci",
   "buildCommand": "npm run build",
   "outputDirectory": "web/.next",
+  "env": {
+    "VERCEL_PREVIEW_FEEDBACK_ENABLED": "0"
+  },
+  "build": {
+    "env": {
+      "VERCEL_PREVIEW_FEEDBACK_ENABLED": "0"
+    }
+  },
   "git": {
     "deploymentEnabled": {
       "assistant-*": false
