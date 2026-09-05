@@ -1,0 +1,119 @@
+{
+  "metadata": {
+    "title": "Basketball Video Analysis for Coaches",
+    "description": "Basketball video analysis for individual coaches. Review ordinary game film faster and build structured player, team and ball evidence with CourtFlux.",
+    "canonical": "/basketball-analysis-for-coaches",
+    "openGraph": {
+      "title": "Basketball Video Analysis for Coaches | CourtFlux",
+      "description": "Spend less time scrubbing game film and more time coaching from structured player, team and ball evidence.",
+      "image": {
+        "url": "/brand/CourtFlux_Full_Analyst_Workspace.png",
+        "width": 1672,
+        "height": 941,
+        "alt": "CourtFlux basketball analysis workspace for coaches"
+      }
+    },
+    "twitter": {
+      "title": "Basketball Video Analysis for Coaches | CourtFlux",
+      "description": "Review ordinary basketball game film faster with structured tracking evidence.",
+      "image": "/brand/CourtFlux_Full_Analyst_Workspace.png"
+    }
+  },
+  "schema": {
+    "pageName": "Basketball Video Analysis for Coaches",
+    "pageDescription": "CourtFlux helps individual basketball coaches reduce manual video review and build structured player, team and ball evidence from ordinary game film.",
+    "breadcrumbName": "For Coaches"
+  },
+  "navigation": [
+    { "label": "Workflow", "href": "#workflow" },
+    { "label": "Benefits", "href": "#benefits" },
+    { "label": "How CourtFlux works", "href": "/basketball-video-analysis" },
+    { "label": "Pricing", "href": "/#pricing" },
+    { "label": "Start beta", "href": "/login?mode=signup", "cta": true }
+  ],
+  "hero": {
+    "eyebrow": "Basketball video analysis for individual coaches",
+    "title": "Spend less time scrubbing game film and more time",
+    "highlight": "developing players.",
+    "lead": "CourtFlux helps individual basketball coaches turn the game film they already record into structured player, team and ball evidence. Find useful patterns faster without changing how you capture matches.",
+    "primary": { "label": "Start beta", "href": "/login?mode=signup" },
+    "secondary": { "label": "See the analysis workflow", "href": "#workflow" },
+    "trust": ["Built for normal game film", "Coach-first workflow", "Private beta"],
+    "image": {
+      "src": "/brand/CourtFlux_Full_Analyst_Workspace.png",
+      "alt": "CourtFlux workspace helping a basketball coach review tracked players and ball movement from game film",
+      "width": 1672,
+      "height": 941
+    }
+  },
+  "problemStrip": [
+    { "title": "Save review time", "copy": "Spend less of the week manually searching through full-game video." },
+    { "title": "See player movement", "copy": "Build a clearer evidence layer around how players move through the game." },
+    { "title": "Follow the ball", "copy": "Use temporal ball tracking as the foundation for richer basketball context." }
+  ],
+  "how": {
+    "eyebrow": "A simpler coaching workflow",
+    "title": "Start with the film. Get to the",
+    "highlight": "teaching point faster.",
+    "copy": "CourtFlux is designed to fit around the video workflow European coaches already use. Upload a match or submit a supported video source, add the two teams and let the tracking layer organise the evidence before you review it.",
+    "image": {
+      "src": "/brand/CourtFlux_Video_Tracking_Tactical_Insight.png",
+      "alt": "CourtFlux basketball video moving from tracked game footage toward coaching analysis",
+      "width": 768,
+      "height": 1024
+    },
+    "steps": [
+      { "number": "01", "title": "Upload the basketball footage you already have.", "copy": "No specialist capture system is required. Start from normal club, academy or competition game film." },
+      { "number": "02", "title": "CourtFlux tracks players, teams and the ball.", "copy": "The current beta builds temporal tracking evidence instead of asking you to inspect every frame manually." },
+      { "number": "03", "title": "Return to the analysis when you need it.", "copy": "Completed analyses stay in My Analyses so the coaching evidence remains easy to reopen throughout the season." }
+    ]
+  },
+  "outcomes": {
+    "eyebrow": "Designed around coaching work",
+    "title": "Use video to support",
+    "highlight": "player development.",
+    "copy": "The goal is not to replace the coach's judgement. It is to reduce repetitive video work and make useful evidence easier to reach.",
+    "cards": [
+      { "label": "Review", "title": "Spend fewer hours searching footage", "items": ["Process full games or shorter segments", "Reopen completed analyses from one history", "Keep the source video secondary to the coaching result"] },
+      { "label": "Development", "title": "Build a stronger evidence trail", "items": ["Review player tracking across game footage", "Compare movement with the ball and team context", "Keep basketball judgement with the coach"] },
+      { "label": "Foundation", "title": "Grow with the analysis stack", "items": ["Player and team tracking available in beta", "Ball intelligence under active benchmark", "Possessions, events and tactical layers added only after validation"] }
+    ]
+  },
+  "evidence": {
+    "eyebrow": "Ball and player patterns",
+    "title": "Find the movement behind",
+    "highlight": "the moment you want to coach.",
+    "copy": "CourtFlux connects frame-level detections across time so a coach can work from trajectories and game context rather than isolated boxes. The current beta focuses on player tracking, team classification and ball continuity because those layers are prerequisites for reliable basketball events later.",
+    "note": "CourtFlux does not yet present possession, pass, shot, rebound or tactical recommendations as validated customer outputs.",
+    "image": {
+      "src": "/brand/CourtFlux_Ball_Intelligence.png",
+      "alt": "CourtFlux ball tracking evidence for basketball coaching review",
+      "width": 768,
+      "height": 1024
+    }
+  },
+  "faqIntro": { "eyebrow": "Coach FAQ", "title": "Questions from", "highlight": "individual coaches." },
+  "faq": [
+    { "question": "Do I need an analyst to use CourtFlux?", "answer": "No. The Coach workflow is aimed at individual coaches who want a faster way to organise and review basketball video evidence." },
+    { "question": "Can I analyse opposition footage as well as my own team?", "answer": "Yes, provided you have the right or authority to submit and analyse the footage. The analysis workflow is based on the video and match context rather than requiring the source to be your own team." },
+    { "question": "Do I need a complete roster before analysing a game?", "answer": "No. Home and away team names are enough to start. Roster and jersey details can remain optional until player-level identity is needed." },
+    { "question": "What can I expect from the beta today?", "answer": "The current customer evidence focuses on player tracking, team classification, ball detection and temporal ball tracking diagnostics. Richer basketball events and tactical intelligence remain in development." },
+    { "question": "Is my uploaded game video kept forever?", "answer": "No. Directly uploaded source video is scheduled for deletion after 60 days. The derived analysis results and statistics remain available in your workspace." }
+  ],
+  "finalCta": {
+    "eyebrow": "CourtFlux private beta",
+    "title": "Give your next video review a",
+    "highlight": "better starting point.",
+    "copy": "Use the basketball footage you already record and see how structured tracking evidence can reduce manual review time.",
+    "primary": { "label": "Start beta", "href": "/login?mode=signup" },
+    "secondary": { "label": "See pricing", "href": "/#pricing" }
+  },
+  "footer": [
+    { "label": "Home", "href": "/" },
+    { "label": "Basketball video analysis", "href": "/basketball-video-analysis" },
+    { "label": "For teams", "href": "/basketball-analysis-for-teams" },
+    { "label": "Pricing", "href": "/#pricing" },
+    { "label": "Trust", "href": "/trust" },
+    { "label": "Sign in", "href": "/login" }
+  ]
+}

@@ -1,0 +1,17 @@
+{
+  "published": false,
+  "status": "pending-development",
+  "dependsOn": "roadmap-16-academy-architecture",
+  "plannedSlug": "/basketball-analysis-for-academies",
+  "audience": "European basketball academies and broader multi-team development programmes",
+  "positioning": {
+    "primaryOutcome": "Improve player development across multiple squads with a consistent video-analysis workflow.",
+    "supportingOutcomes": [
+      "Save staff time reviewing game film",
+      "Find player and ball patterns faster",
+      "Create consistent analysis across age groups and teams"
+    ],
+    "cta": "Start beta"
+  },
+  "editorNote": "Do not publish this landing page until the multi-team Academy product architecture in roadmap #16 is sufficiently implemented. This file intentionally keeps the future positioning editable without presenting unavailable academy workflows as live."
+}

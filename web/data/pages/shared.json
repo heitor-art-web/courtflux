@@ -1,0 +1,20 @@
+{
+  "brandAlt": "CourtFlux — Basketball Intelligence",
+  "legalNavigation": [
+    { "label": "Trust", "href": "/trust" },
+    { "label": "Video & data", "href": "/video-data" },
+    { "label": "AI limitations", "href": "/ai-limitations" },
+    { "label": "Privacy", "href": "/privacy" },
+    { "label": "Terms", "href": "/terms" }
+  ],
+  "legalFooter": {
+    "copyright": "© 2026 CourtFlux · Private beta",
+    "links": [
+      { "label": "Home", "href": "/" },
+      { "label": "Trust", "href": "/trust" },
+      { "label": "Privacy", "href": "/privacy" },
+      { "label": "Terms", "href": "/terms" },
+      { "label": "Sign in", "href": "/login" }
+    ]
+  }
+}

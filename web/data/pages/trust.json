@@ -1,0 +1,60 @@
+{
+  "metadata": {
+    "title": "Trust & Security",
+    "description": "How CourtFlux handles basketball video, workspace access, retention and beta AI limitations.",
+    "canonical": "/trust"
+  },
+  "eyebrow": "Trust at CourtFlux",
+  "title": "Private basketball video should stay private — and the limits of the AI should stay visible.",
+  "intro": "CourtFlux is being built for real coaching workflows, including academies and youth basketball. This page explains the controls that exist today rather than claiming certifications or guarantees we do not yet have.",
+  "notice": [
+    { "text": "60-day source-video retention. ", "strong": true },
+    { "text": "Videos uploaded to CourtFlux are automatically scheduled for deletion 60 days after upload. The derived analysis results and statistics remain available after the source video is removed." }
+  ],
+  "sections": [
+    {
+      "title": "What is protected today",
+      "bullets": [
+        "Uploaded analysis videos are stored in a private Supabase Storage bucket rather than a public media library.",
+        "Analysis pages require authentication and are scoped to the user's active CourtFlux workspace.",
+        "Private video playback uses short-lived signed URLs rather than permanent public links.",
+        "Customer analysis routes are marked noindex so authenticated workspace content is not intended for search indexing.",
+        "CourtFlux does not automatically publish uploaded footage or analysis results."
+      ]
+    },
+    {
+      "title": "Video retention",
+      "retention": [
+        { "label": "Source video", "value": "Deleted after 60 days" },
+        { "label": "Analysis results", "value": "Retained after video deletion" },
+        { "label": "Reason", "value": "Keep review history without storing footage indefinitely" }
+      ],
+      "paragraphs": [
+        [
+          { "text": "Deletion applies to uploaded CourtFlux source videos. If a user analyses a YouTube URL, the original video remains governed by YouTube and the uploader; CourtFlux may create temporary processing copies on its worker infrastructure." }
+        ]
+      ]
+    },
+    {
+      "title": "What CourtFlux does not claim",
+      "paragraphs": [
+        [
+          { "text": "During private beta, CourtFlux does not claim SOC 2 certification, ISO certification, end-to-end encryption, legal compliance certification, or perfect computer-vision accuracy. Security and compliance controls will mature with the product and will be documented when they are actually in place." }
+        ],
+        [
+          { "text": "See " },
+          { "text": "AI limitations", "href": "/ai-limitations" },
+          { "text": " for the current evidence boundary." }
+        ]
+      ]
+    },
+    {
+      "title": "Youth basketball and safeguarding",
+      "paragraphs": [
+        [
+          { "text": "Academies, clubs and other organisations uploading footage that includes minors are responsible for having the authority, notices and permissions required for that recording and its analysis. CourtFlux should not be used to bypass a club's safeguarding or privacy obligations." }
+        ]
+      ]
+    }
+  ]
+}
