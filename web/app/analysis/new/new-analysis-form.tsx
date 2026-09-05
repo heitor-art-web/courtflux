@@ -111,11 +111,14 @@ export function NewAnalysisForm({
   usageLevel,
   teams,
 }: Props) {
+  const initialRemaining = allowance === null ? null : Math.max(0, allowance - usedMinutes);
+  const initialEnd = initialRemaining === null ? 60 : Math.max(0.1, Math.min(60, initialRemaining || 0.1));
+
   const [sourceMode, setSourceMode] = useState<"upload" | "youtube">("upload");
   const [file, setFile] = useState<File | null>(null);
   const [youtubeUrl, setYoutubeUrl] = useState("");
   const [startMinutes, setStartMinutes] = useState("0");
-  const [endMinutes, setEndMinutes] = useState("60");
+  const [endMinutes, setEndMinutes] = useState(() => initialEnd.toString());
   const [homeTeam, setHomeTeam] = useState("");
   const [awayTeam, setAwayTeam] = useState("");
   const [gameDate, setGameDate] = useState("");
@@ -146,6 +149,24 @@ export function NewAnalysisForm({
   const blocked = !canManage || usageLevel === "exhausted" || wouldExceed;
   const canSubmit = sourceReady && contextReady && scopeReady && rightsConfirmed && !blocked && !busy;
 
+  const nextStep = !canManage
+    ? "Your workspace role is view-only. Ask an owner or admin for analysis access."
+    : usageLevel === "exhausted"
+      ? "Your monthly analysis allowance is used. Wait for the reset or request a beta top-up."
+      : wouldExceed
+        ? `Shorten the analysis window to fit the ${formatMinutes(remaining ?? 0)} min remaining this month.`
+        : !sourceReady
+          ? sourceMode === "upload"
+            ? "Select a basketball video to continue."
+            : "Add a valid YouTube URL to continue."
+          : !contextReady
+            ? "Enter two different team names."
+            : !scopeReady
+              ? "Set an analysis end time greater than the start time."
+              : !rightsConfirmed
+                ? "Confirm that you are allowed to submit this footage."
+                : null;
+
   const teamNames = useMemo(() => teams.map((team) => team.name), [teams]);
 
   function savedTeam(value: string) {
@@ -174,11 +195,12 @@ export function NewAnalysisForm({
       return;
     }
     try {
-      const durationSeconds = await videoDuration(nextFile);
+      const durationMinutes = (await videoDuration(nextFile)) / 60;
+      const suggestedEnd = remaining === null ? durationMinutes : Math.min(durationMinutes, remaining);
       setStartMinutes("0");
-      setEndMinutes((durationSeconds / 60).toFixed(1));
+      setEndMinutes(Math.max(0.1, suggestedEnd).toFixed(1));
     } catch {
-      // Keep the editable 60-minute default when browser metadata is unavailable.
+      // Keep the editable allowance-aware default when browser metadata is unavailable.
     }
   }
 
@@ -408,7 +430,9 @@ export function NewAnalysisForm({
               <div className={styles.field}><label htmlFor="start-minutes">Start at (minutes)</label><input id="start-minutes" type="number" min="0" step="0.1" value={startMinutes} onChange={(event) => setStartMinutes(event.target.value)} /></div>
               <div className={styles.field}><label htmlFor="end-minutes">End at (minutes)</label><input id="end-minutes" type="number" min="0.1" step="0.1" value={endMinutes} onChange={(event) => setEndMinutes(event.target.value)} /></div>
             </div>
-            <div className={styles.scopeHint}>A 42-minute game segment uses approximately <strong>42 analysis minutes</strong>. Processing speed does not change the allowance.</div>
+            <div className={styles.scopeHint}>
+              A 42-minute game segment uses approximately <strong>42 analysis minutes</strong>. When CourtFlux can read an uploaded video&apos;s duration, the initial window is automatically capped to your remaining monthly allowance.
+            </div>
           </section>
         </div>
 
@@ -429,6 +453,12 @@ export function NewAnalysisForm({
           </label>
           <p className={styles.privateNote}>Read the <Link href="/video-data">Video & Data Policy</Link> and <Link href="/terms">private-beta terms</Link>.</p>
 
+          {nextStep && !busy ? (
+            <div className={styles.readinessBox} role="status" aria-live="polite">
+              <strong>To enable analysis</strong>
+              <span>{nextStep}</span>
+            </div>
+          ) : null}
           {projectedPercent >= 80 && !wouldExceed && usageLevel !== "exhausted" ? <div className={styles.warningBox}>This analysis will take the workspace above 80% of its monthly allowance.</div> : null}
           {wouldExceed ? <div className={styles.errorBox}>This analysis is longer than your remaining allowance. Shorten the analysis window or ask a CourtFlux admin for additional beta minutes.</div> : null}
           {usageLevel === "exhausted" ? <div className={styles.errorBox}>Your monthly allowance is currently exhausted. New analyses are paused until reset or a manual beta top-up.</div> : null}
@@ -437,7 +467,7 @@ export function NewAnalysisForm({
           {stage ? <div className={styles.stageBox} role="status" aria-live="polite">{stage}</div> : null}
 
           <button className={styles.primaryButton} type="button" disabled={!canSubmit} onClick={() => void submitAnalysis()} aria-busy={busy}>
-            {busy ? "Preparing analysis…" : `Start analysis · ${formatMinutes(estimatedMinutes)} min`}
+            {busy ? "Preparing analysis…" : canSubmit ? `Start analysis · ${formatMinutes(estimatedMinutes)} min` : "Complete setup to analyse"}
           </button>
           <p className={styles.privateNote}>Billing is not active in the private beta. CourtFlux will not charge an overage automatically.</p>
           <Link className={styles.secondaryLink} href="/account">Cancel and return to dashboard</Link>
