@@ -2,6 +2,8 @@ import Image from "next/image";
 import Link from "next/link";
 import type { ReactNode } from "react";
 import shared from "@/data/pages/shared.json";
+import { localizePublicHref, type Locale } from "@/lib/i18n/config";
+import { localizeContent } from "@/lib/i18n/public-content";
 import styles from "./legal.module.css";
 
 type RichTextPart = {
@@ -44,27 +46,32 @@ export function LegalPage({
   intro,
   notice,
   children,
+  locale = "en",
 }: {
   eyebrow: string;
   title: string;
   intro: string;
   notice?: ReactNode;
   children: ReactNode;
+  locale?: Locale;
 }) {
+  const localizedShared = localizeContent(shared, locale);
+  const homeHref = localizePublicHref("/", locale);
+
   return (
     <main className={styles.legalPage}>
       <header className={styles.header}>
-        <Link className={styles.brand} href="/" aria-label="CourtFlux home">
+        <Link className={styles.brand} href={homeHref} aria-label="CourtFlux home">
           <Image
             src="/brand/horizontal_logo_safe_crop.png"
-            alt={shared.brandAlt}
+            alt={localizedShared.brandAlt}
             width={660}
             height={185}
             priority
           />
         </Link>
         <nav className={styles.nav} aria-label="Trust and legal navigation">
-          {shared.legalNavigation.map((item) => (
+          {localizedShared.legalNavigation.map((item) => (
             <Link href={item.href} key={item.href}>{item.label}</Link>
           ))}
         </nav>
@@ -81,9 +88,9 @@ export function LegalPage({
       </div>
 
       <footer className={styles.footer}>
-        <span>{shared.legalFooter.copyright}</span>
+        <span>{localizedShared.legalFooter.copyright}</span>
         <div className={styles.footerLinks}>
-          {shared.legalFooter.links.map((item) => (
+          {localizedShared.legalFooter.links.map((item) => (
             <Link href={item.href} key={item.href}>{item.label}</Link>
           ))}
         </div>
@@ -92,13 +99,14 @@ export function LegalPage({
   );
 }
 
-export function LegalContentPage({ content }: { content: LegalPageContent }) {
+export function LegalContentPage({ content, locale = "en" }: { content: LegalPageContent; locale?: Locale }) {
   return (
     <LegalPage
       eyebrow={content.eyebrow}
       title={content.title}
       intro={content.intro}
       notice={content.notice ? <RichText parts={content.notice} /> : undefined}
+      locale={locale}
     >
       {content.sections.map((section) => (
         <section className={styles.section} key={section.title}>
