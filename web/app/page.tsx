@@ -1,14 +1,21 @@
 import type { Metadata } from "next";
 import Image from "next/image";
 import Link from "next/link";
-import content from "@/data/pages/home.json";
+import englishContent from "@/data/pages/home.json";
+import { localizePublicHref } from "@/lib/i18n/config";
+import { localizeContent } from "@/lib/i18n/public-content";
+import { getRequestLocale } from "@/lib/i18n/request";
 import { metadataFromContent } from "@/lib/page-content";
 import { getSiteUrl } from "@/lib/site";
 import styles from "./home.module.css";
 
 const siteUrl = getSiteUrl();
+type HomeContent = typeof englishContent;
 
-export const metadata: Metadata = metadataFromContent(content.metadata);
+export async function generateMetadata(): Promise<Metadata> {
+  const locale = await getRequestLocale();
+  return metadataFromContent(localizeContent(englishContent, locale).metadata);
+}
 
 const toneClasses = {
   now: styles.now,
@@ -16,7 +23,7 @@ const toneClasses = {
   later: styles.later,
 };
 
-function CapabilityCard({ item }: { item: (typeof content.capabilities)[number] }) {
+function CapabilityCard({ item }: { item: HomeContent["capabilities"][number] }) {
   return (
     <article className={styles.card}>
       <div className={styles.kicker}>{item.kicker}</div>
@@ -27,7 +34,11 @@ function CapabilityCard({ item }: { item: (typeof content.capabilities)[number] 
   );
 }
 
-export default function HomePage() {
+export default async function HomePage() {
+  const locale = await getRequestLocale();
+  const content = localizeContent(englishContent, locale);
+  const homeHref = localizePublicHref("/", locale);
+  const localizedSiteUrl = `${siteUrl}${homeHref === "/" ? "" : homeHref}`;
   const structuredData = {
     "@context": "https://schema.org",
     "@graph": [
@@ -45,7 +56,7 @@ export default function HomePage() {
         name: "CourtFlux",
         url: siteUrl,
         publisher: { "@id": `${siteUrl}/#organization` },
-        inLanguage: "en",
+        inLanguage: locale,
       },
       {
         "@type": "SoftwareApplication",
@@ -64,17 +75,18 @@ export default function HomePage() {
       },
       {
         "@type": "WebPage",
-        "@id": `${siteUrl}/#webpage`,
-        url: siteUrl,
+        "@id": `${localizedSiteUrl}#webpage`,
+        url: localizedSiteUrl,
         name: content.schema.webPageName,
         description: content.schema.webPageDescription,
         isPartOf: { "@id": `${siteUrl}/#website` },
         about: { "@id": `${siteUrl}/#software` },
-        inLanguage: "en",
+        inLanguage: locale,
       },
       {
         "@type": "FAQPage",
-        "@id": `${siteUrl}/#faq`,
+        "@id": `${localizedSiteUrl}#faq`,
+        inLanguage: locale,
         mainEntity: content.faq.map(({ question, answer }) => ({
           "@type": "Question",
           name: question,
@@ -92,7 +104,7 @@ export default function HomePage() {
       />
 
       <header className={styles.siteHeader}>
-        <Link href="/" className={styles.logoLink} aria-label="CourtFlux home">
+        <Link href={homeHref} className={styles.logoLink} aria-label="CourtFlux home">
           <Image
             className={styles.logo}
             src="/brand/horizontal_logo_safe_crop.png"
