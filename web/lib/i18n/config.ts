@@ -1,5 +1,3 @@
-import { headers } from "next/headers";
-
 export const SUPPORTED_LOCALES = ["en", "pt-PT", "es-ES"] as const;
 export type Locale = (typeof SUPPORTED_LOCALES)[number];
 
@@ -96,10 +94,4 @@ export function localizedAlternates(pathname: string): Record<string, string> {
     "es-ES": localizePublicHref(cleanPath, "es-ES"),
     "x-default": localizePublicHref(cleanPath, "en"),
   };
-}
-
-export async function getRequestLocale(): Promise<Locale> {
-  const requestHeaders = await headers();
-  const locale = requestHeaders.get("x-courtflux-locale");
-  return isLocale(locale) ? locale : DEFAULT_LOCALE;
 }
