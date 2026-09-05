@@ -1,18 +1,27 @@
 import type { Metadata } from "next";
 import Image from "next/image";
 import Link from "next/link";
-import content from "@/data/pages/basketball-video-analysis.json";
+import englishContent from "@/data/pages/basketball-video-analysis.json";
+import { localizePublicHref } from "@/lib/i18n/config";
+import { localizeContent } from "@/lib/i18n/public-content";
+import { getRequestLocale } from "@/lib/i18n/request";
 import { metadataFromContent } from "@/lib/page-content";
 import { getSiteUrl } from "@/lib/site";
 import styles from "./page.module.css";
 
 const siteUrl = getSiteUrl();
-const path = content.metadata.canonical;
 
-export const metadata: Metadata = metadataFromContent(content.metadata);
+export async function generateMetadata(): Promise<Metadata> {
+  const locale = await getRequestLocale();
+  return metadataFromContent(localizeContent(englishContent, locale).metadata);
+}
 
-export default function BasketballVideoAnalysisPage() {
+export default async function BasketballVideoAnalysisPage() {
+  const locale = await getRequestLocale();
+  const content = localizeContent(englishContent, locale);
+  const path = content.metadata.canonical;
   const pageUrl = `${siteUrl}${path}`;
+  const homeHref = localizePublicHref("/", locale);
   const structuredData = {
     "@context": "https://schema.org",
     "@graph": [
@@ -24,16 +33,18 @@ export default function BasketballVideoAnalysisPage() {
         description: content.schema.pageDescription,
         isPartOf: { "@id": `${siteUrl}/#website` },
         about: { "@id": `${siteUrl}/#software` },
+        inLanguage: locale,
       },
       {
         "@type": "BreadcrumbList",
         itemListElement: [
-          { "@type": "ListItem", position: 1, name: "CourtFlux", item: siteUrl },
+          { "@type": "ListItem", position: 1, name: "CourtFlux", item: `${siteUrl}${homeHref === "/" ? "" : homeHref}` },
           { "@type": "ListItem", position: 2, name: content.schema.breadcrumbName, item: pageUrl },
         ],
       },
       {
         "@type": "FAQPage",
+        inLanguage: locale,
         mainEntity: content.faq.map(({ question, answer }) => ({
           "@type": "Question",
           name: question,
@@ -48,7 +59,7 @@ export default function BasketballVideoAnalysisPage() {
       <script type="application/ld+json" dangerouslySetInnerHTML={{ __html: JSON.stringify(structuredData).replace(/</g, "\\u003c") }} />
 
       <header className={styles.header}>
-        <Link href="/" aria-label="CourtFlux home" className={styles.logoLink}>
+        <Link href={homeHref} aria-label="CourtFlux home" className={styles.logoLink}>
           <Image src="/brand/horizontal_logo_safe_crop.png" alt="CourtFlux — Basketball Intelligence" width={660} height={185} className={styles.logo} priority />
         </Link>
         <nav className={styles.nav} aria-label="Basketball video analysis navigation">
@@ -176,7 +187,7 @@ export default function BasketballVideoAnalysisPage() {
         </section>
 
         <footer className={styles.footer}>
-          <Link href="/" aria-label="CourtFlux home">
+          <Link href={homeHref} aria-label="CourtFlux home">
             <Image src="/brand/horizontal_logo_safe_crop.png" alt="CourtFlux — Basketball Intelligence" width={660} height={185} className={styles.footerLogo} />
           </Link>
           <div className={styles.footerLinks}>{content.footer.map((item) => <Link href={item.href} key={`${item.href}-${item.label}`}>{item.label}</Link>)}</div>
