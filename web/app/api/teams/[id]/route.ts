@@ -37,13 +37,23 @@ export async function PATCH(
 
   const { data: team } = await supabase
     .from("teams")
-    .select("id, is_archived")
+    .select("id")
     .eq("id", id)
     .eq("workspace_id", membership.workspace_id)
     .maybeSingle();
   if (!team) return Response.json({ error: "Team not found" }, { status: 404 });
 
   const payload = (await request.json()) as Record<string, unknown>;
+  const { data: workspace } = await supabase
+    .from("workspaces")
+    .select("primary_team_id")
+    .eq("id", membership.workspace_id)
+    .maybeSingle();
+
+  if (payload.is_archived === true && workspace?.primary_team_id === id && !["owner", "admin"].includes(membership.role)) {
+    return Response.json({ error: "Only workspace owners and admins can archive the primary team" }, { status: 403 });
+  }
+
   const updates: Record<string, unknown> = {};
   if ("name" in payload) {
     const name = cleanText(payload.name, 120);
@@ -84,15 +94,12 @@ export async function PATCH(
     if (error) return Response.json({ error: error.message }, { status: 500 });
   }
 
-  if (payload.is_archived === true && ["owner", "admin"].includes(membership.role)) {
-    const { data: workspace } = await supabase
+  if (payload.is_archived === true && workspace?.primary_team_id === id) {
+    const { error } = await supabase
       .from("workspaces")
-      .select("primary_team_id")
-      .eq("id", membership.workspace_id)
-      .maybeSingle();
-    if (workspace?.primary_team_id === id) {
-      await supabase.from("workspaces").update({ primary_team_id: null }).eq("id", membership.workspace_id);
-    }
+      .update({ primary_team_id: null })
+      .eq("id", membership.workspace_id);
+    if (error) return Response.json({ error: error.message }, { status: 500 });
   }
 
   return Response.json({ ok: true });

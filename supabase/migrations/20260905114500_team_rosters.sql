@@ -31,30 +31,30 @@ create unique index if not exists team_players_active_jersey_unique
 
 create trigger team_players_set_updated_at
   before update on public.team_players
-  for each row execute function public.set_updated_at();
+  for each row execute function private.set_updated_at();
 
 alter table public.team_players enable row level security;
 
 create policy team_players_select on public.team_players for select to authenticated
-  using (public.is_workspace_member(workspace_id));
+  using (private.is_workspace_member(workspace_id));
 create policy team_players_insert on public.team_players for insert to authenticated
   with check (
-    public.can_manage_workspace(workspace_id)
+    private.can_manage_workspace(workspace_id)
     and exists (
       select 1 from public.teams t
       where t.id = team_id and t.workspace_id = team_players.workspace_id
     )
   );
 create policy team_players_update on public.team_players for update to authenticated
-  using (public.can_manage_workspace(workspace_id))
+  using (private.can_manage_workspace(workspace_id))
   with check (
-    public.can_manage_workspace(workspace_id)
+    private.can_manage_workspace(workspace_id)
     and exists (
       select 1 from public.teams t
       where t.id = team_id and t.workspace_id = team_players.workspace_id
     )
   );
 create policy team_players_delete on public.team_players for delete to authenticated
-  using (public.is_workspace_admin(workspace_id));
+  using (private.is_workspace_admin(workspace_id));
 
 grant select, insert, update, delete on public.team_players to authenticated;
