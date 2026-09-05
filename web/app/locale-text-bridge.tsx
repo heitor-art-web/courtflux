@@ -29,7 +29,7 @@ function translateTree(root: Node, locale: Locale) {
 
   const documentRoot = root instanceof Document ? root.documentElement : root;
   const walker = document.createTreeWalker(documentRoot, NodeFilter.SHOW_TEXT | NodeFilter.SHOW_ELEMENT);
-  let current = walker.currentNode;
+  let current: Node | null = walker.currentNode;
 
   while (current) {
     if (current.nodeType === Node.ELEMENT_NODE) {
