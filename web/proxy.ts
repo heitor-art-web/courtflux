@@ -26,7 +26,7 @@ export async function proxy(request: NextRequest) {
   const locale: Locale = pathLocale ?? (isPublicPath(pathname) ? DEFAULT_LOCALE : cookieLocale(request));
   const requestHeaders = new Headers(request.headers);
   requestHeaders.set("x-courtflux-locale", locale);
-  const sessionRequest = new NextRequest(request.url, { headers: requestHeaders });
+  const sessionRequest = new NextRequest(request, { headers: requestHeaders });
   const sessionResponse = await updateSession(sessionRequest);
 
   if (sessionResponse.status >= 300 && sessionResponse.status < 400) return sessionResponse;
