@@ -1,11 +1,11 @@
 import type { Locale } from "./config";
 import { localizePublicHref } from "./config";
-import { translateText } from "./translations";
+import { translateRuntimeText } from "./translations";
 
 function localizeValue(value: unknown, locale: Locale, key?: string): unknown {
   if (typeof value === "string") {
     if (key === "href" || key === "canonical") return localizePublicHref(value, locale);
-    return translateText(locale, value);
+    return translateRuntimeText(locale, value);
   }
   if (Array.isArray(value)) return value.map((item) => localizeValue(item, locale));
   if (value && typeof value === "object") {
