@@ -159,6 +159,10 @@ web/node_modules/
 web/.next/
 web/.vercel/
 
+# Generated localization modules
+web/lib/i18n/pt-PT.ts
+web/lib/i18n/es-ES.ts
+
 # Project runtime data / models
 /data
 /evaluation

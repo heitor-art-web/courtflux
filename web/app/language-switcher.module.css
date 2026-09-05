@@ -1,0 +1,52 @@
+.switcher {
+  position: fixed;
+  right: max(14px, env(safe-area-inset-right));
+  bottom: max(14px, env(safe-area-inset-bottom));
+  z-index: 1200;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 7px 9px;
+  border: 1px solid rgba(122, 141, 160, 0.32);
+  border-radius: 12px;
+  background: rgba(7, 18, 30, 0.94);
+  box-shadow: 0 10px 28px rgba(0, 0, 0, 0.2);
+  backdrop-filter: blur(12px);
+}
+
+.switcher span {
+  color: #aeb9c6;
+  font-size: 0.7rem;
+  font-weight: 800;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.switcher select {
+  min-height: 34px;
+  max-width: 164px;
+  border: 0;
+  border-radius: 8px;
+  background: #112235;
+  color: #f5f7fa;
+  padding: 0 28px 0 9px;
+  font: inherit;
+  font-size: 0.76rem;
+  font-weight: 750;
+  cursor: pointer;
+}
+
+.switcher select:focus-visible {
+  outline: 2px solid #ff7417;
+  outline-offset: 2px;
+}
+
+@media (max-width: 640px) {
+  .switcher {
+    right: max(10px, env(safe-area-inset-right));
+    bottom: max(10px, env(safe-area-inset-bottom));
+    padding: 6px;
+  }
+  .switcher span { display: none; }
+  .switcher select { max-width: 142px; }
+}

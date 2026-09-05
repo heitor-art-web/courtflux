@@ -30,7 +30,7 @@ export async function updateSession(request: NextRequest) {
   } = await supabase.auth.getUser();
 
   const pathname = request.nextUrl.pathname;
-  const protectedPage = pathname === "/" || pathname.startsWith("/account");
+  const protectedPage = pathname.startsWith("/account");
 
   if (!user && protectedPage) {
     const loginUrl = request.nextUrl.clone();

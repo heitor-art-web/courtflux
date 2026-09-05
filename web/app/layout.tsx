@@ -2,6 +2,9 @@ import type { Metadata, Viewport } from "next";
 import "./globals.css";
 import "./accessibility.css";
 import { getSiteUrl } from "@/lib/site";
+import { getRequestLocale } from "@/lib/i18n/request";
+import { LanguageSwitcher } from "./language-switcher";
+import { LocaleTextBridge } from "./locale-text-bridge";
 
 const siteUrl = getSiteUrl();
 
@@ -46,18 +49,27 @@ export const metadata: Metadata = {
 };
 
 export const viewport: Viewport = {
-  colorScheme: "dark",
+  colorScheme: "dark light",
   themeColor: "#06111f",
 };
 
-export default function RootLayout({ children }: Readonly<{ children: React.ReactNode }>) {
+export default async function RootLayout({ children }: Readonly<{ children: React.ReactNode }>) {
+  const locale = await getRequestLocale();
+  const skipLabel = locale === "pt-PT"
+    ? "Saltar para o conteúdo principal"
+    : locale === "es-ES"
+      ? "Saltar al contenido principal"
+      : "Skip to main content";
+
   return (
-    <html lang="en">
+    <html lang={locale}>
       <body>
-        <a className="skip-link" href="#main-content">Skip to main content</a>
+        <a className="skip-link" href="#main-content">{skipLabel}</a>
         <div id="main-content" tabIndex={-1}>
           {children}
         </div>
+        <LocaleTextBridge locale={locale} />
+        <LanguageSwitcher initialLocale={locale} />
       </body>
     </html>
   );

@@ -1,4 +1,5 @@
 import type { Metadata } from "next";
+import { localizedAlternates, localeFromPathname } from "@/lib/i18n/config";
 
 export type EditablePageMetadata = {
   title: string;
@@ -22,10 +23,16 @@ export type EditablePageMetadata = {
 };
 
 export function metadataFromContent(content: EditablePageMetadata): Metadata {
+  const locale = localeFromPathname(content.canonical) ?? "en";
+  const openGraphLocale = locale === "pt-PT" ? "pt_PT" : locale === "es-ES" ? "es_ES" : "en_GB";
+  const alternateLocale = ["en_GB", "pt_PT", "es_ES"].filter((item) => item !== openGraphLocale);
   const metadata: Metadata = {
     title: content.title,
     description: content.description,
-    alternates: { canonical: content.canonical },
+    alternates: {
+      canonical: content.canonical,
+      languages: localizedAlternates(content.canonical),
+    },
     robots: { index: true, follow: true },
   };
 
@@ -34,6 +41,8 @@ export function metadataFromContent(content: EditablePageMetadata): Metadata {
       type: "website",
       url: content.canonical,
       siteName: "CourtFlux",
+      locale: openGraphLocale,
+      alternateLocale,
       title: content.openGraph.title,
       description: content.openGraph.description,
       images: content.openGraph.image ? [content.openGraph.image] : undefined,

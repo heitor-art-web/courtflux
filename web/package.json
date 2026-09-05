@@ -6,10 +6,14 @@
     "node": "24.x"
   },
   "scripts": {
+    "predev": "node scripts/generate-i18n-dictionaries.mjs",
     "dev": "next dev",
+    "prebuild": "node scripts/generate-i18n-dictionaries.mjs",
     "build": "next build",
     "start": "next start",
+    "prelint": "node scripts/generate-i18n-dictionaries.mjs",
     "lint": "eslint . --max-warnings=0",
+    "pretypecheck": "node scripts/generate-i18n-dictionaries.mjs",
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
