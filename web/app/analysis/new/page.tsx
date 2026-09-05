@@ -44,7 +44,7 @@ export default async function NewAnalysisPage() {
   const monthStart = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1));
   const nextMonth = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth() + 1, 1));
 
-  const [entitlementResult, usageResult, grantsResult, teamsResult] = await Promise.all([
+  const [entitlementResult, usageResult, grantsResult, teamsResult, playersResult] = await Promise.all([
     admin
       .from("workspace_entitlements")
       .select("plan_code, plan_name, limits")
@@ -68,8 +68,17 @@ export default async function NewAnalysisPage() {
       .from("teams")
       .select("id, name, short_name")
       .eq("workspace_id", workspaceId)
+      .eq("is_archived", false)
       .order("name")
       .limit(50),
+    admin
+      .from("team_players")
+      .select("team_id, name, jersey_number, position")
+      .eq("workspace_id", workspaceId)
+      .eq("is_active", true)
+      .order("jersey_number", { ascending: true, nullsFirst: false })
+      .order("name", { ascending: true })
+      .limit(1000),
   ]);
 
   const nowMs = now.getTime();
@@ -95,6 +104,22 @@ export default async function NewAnalysisPage() {
     ? membership.workspaces[0]
     : membership.workspaces;
 
+  const rosterByTeam = new Map<string, Array<{
+    name: string;
+    jerseyNumber: number | null;
+    position: string | null;
+  }>>();
+
+  for (const player of playersResult.data ?? []) {
+    const roster = rosterByTeam.get(player.team_id) ?? [];
+    roster.push({
+      name: player.name,
+      jerseyNumber: player.jersey_number,
+      position: player.position,
+    });
+    rosterByTeam.set(player.team_id, roster);
+  }
+
   return (
     <NewAnalysisForm
       workspaceName={workspace?.name ?? "CourtFlux workspace"}
@@ -107,6 +132,7 @@ export default async function NewAnalysisPage() {
         id: team.id,
         name: team.name,
         shortName: team.short_name,
+        roster: rosterByTeam.get(team.id) ?? [],
       }))}
     />
   );
