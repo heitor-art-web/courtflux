@@ -1,6 +1,7 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useState } from "react";
+import { useRouter } from "next/navigation";
 import type { Locale } from "@/lib/i18n/config";
 import styles from "./language-switcher.module.css";
 
@@ -37,18 +38,18 @@ function targetPath(pathname: string, locale: Locale) {
 }
 
 export function LanguageSwitcher({ initialLocale }: { initialLocale: Locale }) {
+  const router = useRouter();
   const [locale, setLocale] = useState(initialLocale);
-
-  useEffect(() => setLocale(initialLocale), [initialLocale]);
 
   function changeLanguage(nextLocale: Locale) {
     setLocale(nextLocale);
     document.cookie = `${COOKIE_NAME}=${encodeURIComponent(nextLocale)}; Max-Age=31536000; Path=/; SameSite=Lax`;
     const destination = `${targetPath(window.location.pathname, nextLocale)}${window.location.search}${window.location.hash}`;
-    window.location.assign(destination);
+    router.push(destination);
+    router.refresh();
   }
 
-  const label = locale === "pt-PT" ? "Idioma" : locale === "es-ES" ? "Idioma" : "Language";
+  const label = locale === "en" ? "Language" : "Idioma";
 
   return (
     <label className={styles.switcher} data-i18n-ignore>
