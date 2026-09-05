@@ -1,6 +1,7 @@
 import Image from "next/image";
 import Link from "next/link";
 import { getSiteUrl } from "@/lib/site";
+import { localizePublicHref, type Locale } from "@/lib/i18n/config";
 import styles from "./basketball-video-analysis/page.module.css";
 
 type AudienceContent = {
@@ -54,9 +55,10 @@ type AudienceContent = {
   footer: Array<{ label: string; href: string }>;
 };
 
-export function AudienceLandingPage({ content }: { content: AudienceContent }) {
+export function AudienceLandingPage({ content, locale = "en" }: { content: AudienceContent; locale?: Locale }) {
   const siteUrl = getSiteUrl();
   const pageUrl = `${siteUrl}${content.metadata.canonical}`;
+  const homeHref = localizePublicHref("/", locale);
   const structuredData = {
     "@context": "https://schema.org",
     "@graph": [
@@ -68,16 +70,18 @@ export function AudienceLandingPage({ content }: { content: AudienceContent }) {
         description: content.schema.pageDescription,
         isPartOf: { "@id": `${siteUrl}/#website` },
         about: { "@id": `${siteUrl}/#software` },
+        inLanguage: locale,
       },
       {
         "@type": "BreadcrumbList",
         itemListElement: [
-          { "@type": "ListItem", position: 1, name: "CourtFlux", item: siteUrl },
+          { "@type": "ListItem", position: 1, name: "CourtFlux", item: `${siteUrl}${homeHref === "/" ? "" : homeHref}` },
           { "@type": "ListItem", position: 2, name: content.schema.breadcrumbName, item: pageUrl },
         ],
       },
       {
         "@type": "FAQPage",
+        inLanguage: locale,
         mainEntity: content.faq.map(({ question, answer }) => ({
           "@type": "Question",
           name: question,
@@ -92,7 +96,7 @@ export function AudienceLandingPage({ content }: { content: AudienceContent }) {
       <script type="application/ld+json" dangerouslySetInnerHTML={{ __html: JSON.stringify(structuredData).replace(/</g, "\\u003c") }} />
 
       <header className={styles.header}>
-        <Link href="/" aria-label="CourtFlux home" className={styles.logoLink}>
+        <Link href={homeHref} aria-label="CourtFlux home" className={styles.logoLink}>
           <Image src="/brand/horizontal_logo_safe_crop.png" alt="CourtFlux — Basketball Intelligence" width={660} height={185} className={styles.logo} priority />
         </Link>
         <nav className={styles.nav} aria-label="Audience landing page navigation">
@@ -173,7 +177,7 @@ export function AudienceLandingPage({ content }: { content: AudienceContent }) {
         </section>
 
         <footer className={styles.footer}>
-          <Link href="/" aria-label="CourtFlux home"><Image src="/brand/horizontal_logo_safe_crop.png" alt="CourtFlux — Basketball Intelligence" width={660} height={185} className={styles.footerLogo} /></Link>
+          <Link href={homeHref} aria-label="CourtFlux home"><Image src="/brand/horizontal_logo_safe_crop.png" alt="CourtFlux — Basketball Intelligence" width={660} height={185} className={styles.footerLogo} /></Link>
           <div className={styles.footerLinks}>{content.footer.map((item) => <Link href={item.href} key={`${item.href}-${item.label}`}>{item.label}</Link>)}</div>
         </footer>
       </div>
