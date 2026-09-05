@@ -1,7 +1,42 @@
 import Image from "next/image";
 import Link from "next/link";
 import type { ReactNode } from "react";
+import shared from "@/data/pages/shared.json";
 import styles from "./legal.module.css";
+
+type RichTextPart = {
+  text: string;
+  href?: string;
+  strong?: boolean;
+};
+
+type LegalSectionContent = {
+  title: string;
+  paragraphs?: RichTextPart[][];
+  bullets?: string[];
+  retention?: Array<{ label: string; value: string }>;
+};
+
+export type LegalPageContent = {
+  eyebrow: string;
+  title: string;
+  intro: string;
+  notice?: RichTextPart[];
+  sections: LegalSectionContent[];
+};
+
+function RichText({ parts }: { parts: RichTextPart[] }) {
+  return (
+    <>
+      {parts.map((part, index) => {
+        let node: ReactNode = part.text;
+        if (part.strong) node = <strong>{node}</strong>;
+        if (part.href) node = <Link href={part.href}>{node}</Link>;
+        return <span key={`${part.text}-${index}`}>{node}</span>;
+      })}
+    </>
+  );
+}
 
 export function LegalPage({
   eyebrow,
@@ -22,18 +57,16 @@ export function LegalPage({
         <Link className={styles.brand} href="/" aria-label="CourtFlux home">
           <Image
             src="/brand/horizontal_logo_safe_crop.png"
-            alt="CourtFlux — Basketball Intelligence"
+            alt={shared.brandAlt}
             width={660}
             height={185}
             priority
           />
         </Link>
         <nav className={styles.nav} aria-label="Trust and legal navigation">
-          <Link href="/trust">Trust</Link>
-          <Link href="/video-data">Video & data</Link>
-          <Link href="/ai-limitations">AI limitations</Link>
-          <Link href="/privacy">Privacy</Link>
-          <Link href="/terms">Terms</Link>
+          {shared.legalNavigation.map((item) => (
+            <Link href={item.href} key={item.href}>{item.label}</Link>
+          ))}
         </nav>
       </header>
 
@@ -48,16 +81,44 @@ export function LegalPage({
       </div>
 
       <footer className={styles.footer}>
-        <span>© 2026 CourtFlux · Private beta</span>
+        <span>{shared.legalFooter.copyright}</span>
         <div className={styles.footerLinks}>
-          <Link href="/">Home</Link>
-          <Link href="/trust">Trust</Link>
-          <Link href="/privacy">Privacy</Link>
-          <Link href="/terms">Terms</Link>
-          <Link href="/login">Sign in</Link>
+          {shared.legalFooter.links.map((item) => (
+            <Link href={item.href} key={item.href}>{item.label}</Link>
+          ))}
         </div>
       </footer>
     </main>
+  );
+}
+
+export function LegalContentPage({ content }: { content: LegalPageContent }) {
+  return (
+    <LegalPage
+      eyebrow={content.eyebrow}
+      title={content.title}
+      intro={content.intro}
+      notice={content.notice ? <RichText parts={content.notice} /> : undefined}
+    >
+      {content.sections.map((section) => (
+        <section className={styles.section} key={section.title}>
+          <h2>{section.title}</h2>
+          {section.retention ? (
+            <div className={styles.retention}>
+              {section.retention.map((row) => (
+                <div key={row.label}><span>{row.label}</span><strong>{row.value}</strong></div>
+              ))}
+            </div>
+          ) : null}
+          {section.bullets ? (
+            <ul>{section.bullets.map((item) => <li key={item}>{item}</li>)}</ul>
+          ) : null}
+          {section.paragraphs?.map((parts, index) => (
+            <p key={`${section.title}-${index}`}><RichText parts={parts} /></p>
+          ))}
+        </section>
+      ))}
+    </LegalPage>
   );
 }
 

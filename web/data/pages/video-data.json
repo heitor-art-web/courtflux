@@ -1,0 +1,43 @@
+{
+  "metadata": {
+    "title": "Video & Data Policy",
+    "description": "How CourtFlux stores, processes and removes uploaded basketball video while retaining analysis results.",
+    "canonical": "/video-data"
+  },
+  "eyebrow": "Video & data",
+  "title": "Your uploaded video has a 60-day lifetime. Your analysis history does not disappear with it.",
+  "intro": "CourtFlux separates source footage from the structured evidence created from that footage. This keeps coaching results useful without storing source video indefinitely.",
+  "notice": [
+    { "text": "Automatic source-video deletion: ", "strong": true },
+    { "text": "uploaded videos are scheduled for deletion 60 days after upload. Derived analysis summaries, metrics and workspace records are retained after the source file is deleted." }
+  ],
+  "sections": [
+    {
+      "title": "What happens after upload",
+      "retention": [
+        { "label": "Day 0", "value": "Private upload and analysis" },
+        { "label": "Days 1–60", "value": "Source can be used for review and re-opening the analysis" },
+        { "label": "After day 60", "value": "Source video removed; analysis record stays" }
+      ],
+      "paragraphs": [[{ "text": "The 60-day period is calculated from the upload time, not from the date of the basketball game." }]]
+    },
+    {
+      "title": "What remains after video deletion",
+      "bullets": [
+        "The analysis run record and processing status.",
+        "Derived tracking summaries and diagnostic statistics produced by the completed run.",
+        "Game context such as team names, date and competition when supplied.",
+        "Usage records needed to show analysis-minute consumption."
+      ],
+      "paragraphs": [[{ "text": "The deleted source file is no longer available for playback in CourtFlux after retention expires." }]]
+    },
+    {
+      "title": "Uploaded footage and YouTube sources are different",
+      "paragraphs": [[{ "text": "For direct uploads, CourtFlux controls the private stored copy and applies the 60-day deletion policy. When a user submits a YouTube URL, the original source remains on YouTube under that platform's and uploader's control. CourtFlux may create temporary processing copies on worker infrastructure to perform analysis." }]]
+    },
+    {
+      "title": "Permission to upload",
+      "paragraphs": [[{ "text": "Users must have the right or authority to upload and analyse the footage they submit. This is particularly important for clubs, schools and academies working with children or other protected participants. The New Analysis flow asks the user to confirm this before an analysis can start." }]]
+    }
+  ]
+}

@@ -1,0 +1,119 @@
+{
+  "metadata": {
+    "title": "Basketball Video Analysis for Teams",
+    "description": "Basketball video analysis for coaching and performance staff. Build a shared review workflow around player, team and ball evidence with CourtFlux.",
+    "canonical": "/basketball-analysis-for-teams",
+    "openGraph": {
+      "title": "Basketball Video Analysis for Team Staff | CourtFlux",
+      "description": "Give basketball coaching and performance staff one place to process, review and revisit structured video evidence.",
+      "image": {
+        "url": "/brand/CourtFlux_Split_Screen_Court_Reconstruction.png",
+        "width": 1672,
+        "height": 941,
+        "alt": "CourtFlux basketball video analysis for team staff"
+      }
+    },
+    "twitter": {
+      "title": "Basketball Video Analysis for Team Staff | CourtFlux",
+      "description": "Build a repeatable staff workflow around ordinary basketball game film and structured tracking evidence.",
+      "image": "/brand/CourtFlux_Split_Screen_Court_Reconstruction.png"
+    }
+  },
+  "schema": {
+    "pageName": "Basketball Video Analysis for Teams",
+    "pageDescription": "CourtFlux helps basketball coaching and performance staff reduce manual video review and build a shared history of player, team and ball tracking evidence.",
+    "breadcrumbName": "For Teams"
+  },
+  "navigation": [
+    { "label": "Workflow", "href": "#workflow" },
+    { "label": "Benefits", "href": "#benefits" },
+    { "label": "How CourtFlux works", "href": "/basketball-video-analysis" },
+    { "label": "Pricing", "href": "/#pricing" },
+    { "label": "Start beta", "href": "/login?mode=signup", "cta": true }
+  ],
+  "hero": {
+    "eyebrow": "Basketball video analysis for coaching and performance staff",
+    "title": "Give your staff one place to turn game film into",
+    "highlight": "shared evidence.",
+    "lead": "CourtFlux helps basketball team staff process ordinary game footage, review player and ball tracking evidence and return to the same analysis history without rebuilding the workflow for every match.",
+    "primary": { "label": "Start beta", "href": "/login?mode=signup" },
+    "secondary": { "label": "See the team workflow", "href": "#workflow" },
+    "trust": ["One analysis history", "Normal basketball footage", "Built for staff review"],
+    "image": {
+      "src": "/brand/CourtFlux_Split_Screen_Court_Reconstruction.png",
+      "alt": "CourtFlux basketball analysis showing game footage and tracked court context for coaching staff",
+      "width": 1672,
+      "height": 941
+    }
+  },
+  "problemStrip": [
+    { "title": "Reduce repeated review", "copy": "Keep completed analyses available instead of restarting from raw video every time." },
+    { "title": "Create shared context", "copy": "Give coaches and performance staff a common record of the same processed game." },
+    { "title": "Find patterns faster", "copy": "Build the player and ball tracking foundation needed for richer team analysis." }
+  ],
+  "how": {
+    "eyebrow": "A repeatable staff workflow",
+    "title": "Process once. Return to the",
+    "highlight": "same basketball context.",
+    "copy": "CourtFlux separates the customer workflow from engineering controls. Staff submit a game, follow real processing state, review the evidence and reopen the analysis later from a searchable history.",
+    "image": {
+      "src": "/brand/CourtFlux_Full_Analyst_Workspace.png",
+      "alt": "CourtFlux basketball analyst workspace for a team coaching staff",
+      "width": 1672,
+      "height": 941
+    },
+    "steps": [
+      { "number": "01", "title": "Submit a match or useful segment.", "copy": "Upload footage or use a supported YouTube source, then add the two teams and only the match context you actually know." },
+      { "number": "02", "title": "Follow real processing state.", "copy": "Queued, running, completed and failed states remain visible without invented progress percentages or raw engineering controls." },
+      { "number": "03", "title": "Keep the analysis in the team's history.", "copy": "My Analyses makes completed and in-progress work easy to search, filter and reopen across the season." }
+    ]
+  },
+  "outcomes": {
+    "eyebrow": "For the staff around one team",
+    "title": "Make video review more",
+    "highlight": "consistent across the week.",
+    "copy": "CourtFlux is designed for the head coach, assistants and performance staff who need the same game evidence without turning the product into an engineering dashboard.",
+    "cards": [
+      { "label": "Organisation", "title": "Keep a searchable analysis history", "items": ["Search by matchup, team or competition", "Filter by processing status and source", "Reopen the same customer-facing results page"] },
+      { "label": "Evidence", "title": "Work from the same tracking foundation", "items": ["Player detection and tracking", "Team classification", "Ball detection and temporal continuity"] },
+      { "label": "Transparency", "title": "Know what is proven and what is next", "items": ["Current beta outputs stay inside the validated evidence boundary", "Development layers are labelled as development", "Coaching judgement remains with staff"] }
+    ]
+  },
+  "evidence": {
+    "eyebrow": "Player and ball patterns",
+    "title": "Build the foundation for",
+    "highlight": "faster team review.",
+    "copy": "Reliable team analysis depends on tracking the game across time. CourtFlux focuses first on player movement, team classification and ball continuity so later possessions, events and tactical structure can be built on stronger evidence rather than guessed from isolated frames.",
+    "note": "Shared staff collaboration, advanced player identity and richer structured team analytics will continue to mature with the product; they should not be interpreted as fully finished beta capabilities today.",
+    "image": {
+      "src": "/brand/CourtFlux_Video_Tracking_Tactical_Insight.png",
+      "alt": "CourtFlux tracked basketball game footage for team staff review",
+      "width": 768,
+      "height": 1024
+    }
+  },
+  "faqIntro": { "eyebrow": "Team FAQ", "title": "Questions from", "highlight": "basketball staff." },
+  "faq": [
+    { "question": "Who is the Team workflow aimed at?", "answer": "It is aimed at the staff around one basketball team: coaches, assistants and performance or video analysts who want a repeatable analysis workflow around the same game history." },
+    { "question": "Does every staff member need to prepare a roster before analysis?", "answer": "No. The first analysis only requires home and away teams. Roster and jersey information is optional and can be added when player-level identity becomes useful." },
+    { "question": "Can staff return to older analyses?", "answer": "Yes. My Analyses provides a searchable and filterable history of the workspace's analysis runs, including processing state and saved results." },
+    { "question": "What happens to uploaded source video?", "answer": "Direct uploads are scheduled for deletion 60 days after upload. Analysis results and statistics remain available after the source video is removed." },
+    { "question": "Does CourtFlux already provide tactical recommendations?", "answer": "No. Tactical intelligence remains part of the longer-term product direction. Current customer-facing beta results stay focused on validated player, team and ball tracking evidence." }
+  ],
+  "finalCta": {
+    "eyebrow": "CourtFlux private beta",
+    "title": "Build a more repeatable",
+    "highlight": "team video workflow.",
+    "copy": "Start with the footage your staff already records and keep each analysis easy to review and revisit throughout the season.",
+    "primary": { "label": "Start beta", "href": "/login?mode=signup" },
+    "secondary": { "label": "See pricing", "href": "/#pricing" }
+  },
+  "footer": [
+    { "label": "Home", "href": "/" },
+    { "label": "Basketball video analysis", "href": "/basketball-video-analysis" },
+    { "label": "For coaches", "href": "/basketball-analysis-for-coaches" },
+    { "label": "Pricing", "href": "/#pricing" },
+    { "label": "Trust", "href": "/trust" },
+    { "label": "Sign in", "href": "/login" }
+  ]
+}

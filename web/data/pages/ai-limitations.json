@@ -1,0 +1,39 @@
+{
+  "metadata": {
+    "title": "AI Limitations",
+    "description": "Current limitations of CourtFlux basketball tracking and beta analysis output.",
+    "canonical": "/ai-limitations"
+  },
+  "eyebrow": "AI limitations",
+  "title": "CourtFlux evidence is useful only when its uncertainty stays visible.",
+  "intro": "Computer vision does not observe basketball perfectly. Camera angle, occlusion, motion blur, resolution, crowded paint areas and rapid ball movement can all reduce tracking quality.",
+  "notice": [
+    { "text": "Beta evidence boundary: ", "strong": true },
+    { "text": "current customer results focus on player, team and ball tracking diagnostics. Possessions, passes, shots, rebounds, event attribution and tactical recommendations are not presented as reliable results until those layers are validated." }
+  ],
+  "sections": [
+    {
+      "title": "Direct evidence and predicted continuity are different",
+      "paragraphs": [[{ "text": "A direct ball detection comes from an observed frame-level candidate selected by the tracking system. A predicted hold is a conservative temporal estimate used to bridge a short gap. CourtFlux keeps those categories separate in results so predicted continuity is not presented as a direct observation." }]]
+    },
+    {
+      "title": "Common failure conditions",
+      "bullets": [
+        "The ball is hidden behind a player, referee or basket structure.",
+        "The camera pans, zooms or cuts quickly.",
+        "Video resolution, compression or lighting makes the ball difficult to distinguish.",
+        "Players overlap heavily or leave and re-enter the frame.",
+        "Similar kit colours make team classification harder.",
+        "Jersey numbers are too small, blurred or occluded to read reliably."
+      ]
+    },
+    {
+      "title": "Tracking confidence is not basketball truth",
+      "paragraphs": [[{ "text": "Model confidence describes the system's certainty about a computer-vision output. It is not a guarantee that an event happened, that a player identity is correct, or that a coaching interpretation is valid." }]]
+    },
+    {
+      "title": "Coach and analyst judgement remains necessary",
+      "paragraphs": [[{ "text": "CourtFlux is designed to reduce manual video work and surface evidence, not to replace basketball judgement. Important decisions should be checked against the source footage and the user's own context." }]]
+    }
+  ]
+}

@@ -1,0 +1,65 @@
+{
+  "metadata": {
+    "title": "Privacy Policy",
+    "description": "CourtFlux private-beta privacy policy covering accounts, basketball video, analysis data and retention.",
+    "canonical": "/privacy"
+  },
+  "eyebrow": "Privacy policy · Private beta",
+  "title": "CourtFlux privacy policy",
+  "intro": "This private-beta policy explains the data CourtFlux currently needs to operate the product and how uploaded basketball footage is handled. It is a working policy and will be reviewed before wider commercial launch.",
+  "notice": [
+    { "text": "Key retention rule: ", "strong": true },
+    { "text": "uploaded source videos are scheduled for automatic deletion 60 days after upload. Derived analysis results and statistics remain in the workspace after the source video is removed." }
+  ],
+  "sections": [
+    {
+      "title": "Who operates the service",
+      "paragraphs": [[
+        { "text": "The service is currently operated under the name " },
+        { "text": "CourtFlux", "strong": true },
+        { "text": ". A formal legal-entity identity and dedicated privacy contact are launch-readiness items that have not yet been published." }
+      ]]
+    },
+    {
+      "title": "Data CourtFlux processes",
+      "bullets": [
+        "Account information such as email address, profile name and authentication identifiers.",
+        "Workspace information such as membership role, plan, teams and usage allowance.",
+        "Basketball footage submitted directly or referenced through supported external sources.",
+        "Game context supplied by users, including team names, dates, competition, kits and optional roster information.",
+        "Derived analysis information such as tracking summaries, diagnostics, statistics, run status and processing logs.",
+        "Technical information needed to secure and operate the service, including timestamps and service logs."
+      ]
+    },
+    {
+      "title": "How the data is used",
+      "paragraphs": [
+        [{ "text": "CourtFlux uses this information to authenticate users, operate private workspaces, process requested basketball analyses, show results, measure analysis-minute usage, diagnose failures and improve the beta product." }],
+        [{ "text": "CourtFlux does not present uploaded customer footage as public content." }]
+      ]
+    },
+    {
+      "title": "Storage and service providers",
+      "paragraphs": [[{ "text": "The current web and data architecture uses service providers including Supabase for authentication, database and private storage, and Vercel for the customer-facing web application. Analysis workers process video separately from the web interface. Providers may process data as needed to deliver their infrastructure services." }]]
+    },
+    {
+      "title": "Video retention and analysis retention",
+      "paragraphs": [
+        [{ "text": "Directly uploaded source videos are scheduled for deletion 60 days after upload. CourtFlux retains the derived analysis record and statistics so users can keep historical evidence after the original file is gone." }],
+        [
+          { "text": "Read the simpler " },
+          { "text": "Video & Data Policy", "href": "/video-data" },
+          { "text": " for the product-level explanation." }
+        ]
+      ]
+    },
+    {
+      "title": "Children and youth basketball",
+      "paragraphs": [[{ "text": "CourtFlux is designed for organisations that may work with youth basketball. The organisation or user submitting footage is responsible for having the appropriate authority, notices and permissions to record, upload and analyse people appearing in that footage." }]]
+    },
+    {
+      "title": "Access, correction and deletion requests",
+      "paragraphs": [[{ "text": "A dedicated privacy email has not yet been published. During private beta, users should use the same communication channel through which they received CourtFlux access for account or data requests. A formal privacy contact and self-service deletion controls remain pre-launch work." }]]
+    }
+  ]
+}
