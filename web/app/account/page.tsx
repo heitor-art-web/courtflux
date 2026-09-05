@@ -151,6 +151,7 @@ export default async function AccountPage() {
           .from("teams")
           .select("id, name, short_name", { count: "exact" })
           .eq("workspace_id", workspaceId)
+          .eq("is_archived", false)
           .order("name")
           .limit(6),
       ])
@@ -204,6 +205,7 @@ export default async function AccountPage() {
         </Link>
         <div className={styles.topActions}>
           <Link href="/analyses">My analyses</Link>
+          <Link href="/teams">Teams & rosters</Link>
           <Link href="/basketball-video-analysis">How analysis works</Link>
           <Link href="/">Public site</Link>
           <SignOutButton />
@@ -372,7 +374,7 @@ export default async function AccountPage() {
 
             {teams.length ? (
               <div className={styles.teamList} aria-label="Workspace teams">
-                {teams.map((team) => <span className={styles.teamChip} key={team.id}>{team.short_name || team.name}</span>)}
+                {teams.map((team) => <Link href="/teams" className={styles.teamChip} key={team.id}>{team.short_name || team.name}</Link>)}
               </div>
             ) : (
               <div className={styles.betaNote}>
@@ -390,6 +392,7 @@ export default async function AccountPage() {
             </div>
             <div className={styles.quickActions}>
               <Link href="/analyses">My analyses <span>→</span></Link>
+              <Link href="/teams">Manage teams & rosters <span>→</span></Link>
               {canManageAnalysis ? <Link href="/analysis/new">Start new analysis <span>→</span></Link> : <div className={styles.quickActionDisabled}>Analysis unavailable <span>{analysisAllowed ? "View-only role" : "Allowance used"}</span></div>}
               <Link href="/basketball-video-analysis">Basketball video analysis <span>→</span></Link>
               <Link href="/#pricing">Plans and analysis minutes <span>→</span></Link>

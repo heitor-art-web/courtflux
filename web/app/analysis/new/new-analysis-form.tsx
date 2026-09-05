@@ -10,6 +10,11 @@ type TeamOption = {
   id: string;
   name: string;
   shortName: string | null;
+  roster: Array<{
+    name: string;
+    jerseyNumber: number | null;
+    position: string | null;
+  }>;
 };
 
 type Props = {
@@ -68,6 +73,14 @@ function parseRoster(value: string) {
     roster[jersey] = { name };
   }
   return roster;
+}
+
+function savedRosterText(team: TeamOption | undefined) {
+  if (!team) return "";
+  return team.roster
+    .filter((player) => player.jerseyNumber !== null)
+    .map((player) => `${player.jerseyNumber} ${player.name}`)
+    .join("\n");
 }
 
 function videoDuration(file: File) {
@@ -134,6 +147,21 @@ export function NewAnalysisForm({
   const canSubmit = sourceReady && contextReady && scopeReady && rightsConfirmed && !blocked && !busy;
 
   const teamNames = useMemo(() => teams.map((team) => team.name), [teams]);
+
+  function savedTeam(value: string) {
+    const normalized = value.trim().toLocaleLowerCase();
+    return teams.find((team) => team.name.toLocaleLowerCase() === normalized);
+  }
+
+  function prefillRoster(side: "home" | "away") {
+    const teamName = side === "home" ? homeTeam : awayTeam;
+    const currentRoster = side === "home" ? homeRoster : awayRoster;
+    if (currentRoster.trim()) return;
+    const roster = savedRosterText(savedTeam(teamName));
+    if (!roster) return;
+    if (side === "home") setHomeRoster(roster);
+    else setAwayRoster(roster);
+  }
 
   async function chooseFile(nextFile: File | null) {
     setError("");
@@ -302,6 +330,7 @@ export function NewAnalysisForm({
         </Link>
         <div className={styles.topActions}>
           <span>{workspaceName}</span>
+          <Link className={styles.accountLink} href="/teams">Teams & rosters</Link>
           <Link className={styles.accountLink} href="/account">Dashboard</Link>
         </div>
       </header>
@@ -354,8 +383,8 @@ export function NewAnalysisForm({
             <div className={styles.sectionHeading}><span>2</span><div><h2 id="context-title">Match context</h2><p>Only the two team names are required. Everything else can be added later.</p></div></div>
             <datalist id="workspace-teams">{teamNames.map((name) => <option value={name} key={name} />)}</datalist>
             <div className={styles.twoCols}>
-              <div className={styles.field}><label htmlFor="home-team">Home team *</label><input id="home-team" list="workspace-teams" value={homeTeam} onChange={(event) => setHomeTeam(event.target.value)} placeholder="Home team" /></div>
-              <div className={styles.field}><label htmlFor="away-team">Away team *</label><input id="away-team" list="workspace-teams" value={awayTeam} onChange={(event) => setAwayTeam(event.target.value)} placeholder="Away team" /></div>
+              <div className={styles.field}><label htmlFor="home-team">Home team *</label><input id="home-team" list="workspace-teams" value={homeTeam} onChange={(event) => setHomeTeam(event.target.value)} onBlur={() => prefillRoster("home")} placeholder="Home team" /><small>{savedTeam(homeTeam)?.roster.length ? `${savedTeam(homeTeam)?.roster.length} saved roster entries available` : "Choose a saved team or type a new name."}</small></div>
+              <div className={styles.field}><label htmlFor="away-team">Away team *</label><input id="away-team" list="workspace-teams" value={awayTeam} onChange={(event) => setAwayTeam(event.target.value)} onBlur={() => prefillRoster("away")} placeholder="Away team" /><small>{savedTeam(awayTeam)?.roster.length ? `${savedTeam(awayTeam)?.roster.length} saved roster entries available` : "Choose a saved team or type a new name."}</small></div>
               <div className={styles.field}><label htmlFor="game-date">Game date</label><input id="game-date" type="date" value={gameDate} onChange={(event) => setGameDate(event.target.value)} /></div>
               <div className={styles.field}><label htmlFor="competition">Competition</label><input id="competition" value={competition} onChange={(event) => setCompetition(event.target.value)} placeholder="League, tournament or friendly" /></div>
               <div className={styles.field}><label htmlFor="home-colors">Home-team kit colours</label><input id="home-colors" value={homeColors} onChange={(event) => setHomeColors(event.target.value)} placeholder="Blue, white" /><small>Optional, but useful for team classification.</small></div>
@@ -364,7 +393,7 @@ export function NewAnalysisForm({
 
             <details className={styles.optionalDetails}>
               <summary>Optional jersey numbers / roster</summary>
-              <p>You can analyse anonymous tracks without a roster. Add one player per line only if you have the information.</p>
+              <p>Saved teams prefill jersey-numbered players when this section is still empty. You can edit the list for this analysis without changing the saved team roster. <Link href="/teams">Manage saved teams and rosters</Link>.</p>
               <div className={styles.twoCols}>
                 <div className={styles.field}><label htmlFor="home-roster">{homeTeam.trim() || "Home team"} roster</label><textarea id="home-roster" value={homeRoster} onChange={(event) => setHomeRoster(event.target.value)} placeholder={"7 Jordan Smith\n12 Alex Brown"} /></div>
                 <div className={styles.field}><label htmlFor="away-roster">{awayTeam.trim() || "Away team"} roster</label><textarea id="away-roster" value={awayRoster} onChange={(event) => setAwayRoster(event.target.value)} placeholder={"4 Sam Lee\n21 Chris Jones"} /></div>
