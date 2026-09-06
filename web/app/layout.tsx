@@ -1,6 +1,7 @@
 import type { Metadata, Viewport } from "next";
 import "./globals.css";
 import "./accessibility.css";
+import "./homepage-light.css";
 import { getSiteUrl } from "@/lib/site";
 import { getRequestLocale } from "@/lib/i18n/request";
 import { LanguageSwitcher } from "./language-switcher";
@@ -49,8 +50,8 @@ export const metadata: Metadata = {
 };
 
 export const viewport: Viewport = {
-  colorScheme: "dark light",
-  themeColor: "#06111f",
+  colorScheme: "light dark",
+  themeColor: "#ffffff",
 };
 
 export default async function RootLayout({ children }: Readonly<{ children: React.ReactNode }>) {
