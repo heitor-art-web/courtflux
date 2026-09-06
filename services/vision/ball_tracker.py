@@ -52,8 +52,10 @@ class TemporalBallTracker:
 
     Optional controlled reacquisition provides an escape hatch when the active trajectory
     is no longer supported. It never widens the normal gate. Instead, an out-of-gate
-    challenger must be sufficiently confident and persist consistently across multiple
-    frames before it is allowed to replace the active trajectory.
+    challenger must be sufficiently confident, remain size-compatible with the active
+    ball hypothesis, and persist consistently across multiple frames before it can replace
+    the active trajectory. Recovery is deliberately more conservative while a normal
+    in-gate track is still healthy and becomes less restrictive after the track degrades.
     """
 
     def __init__(
@@ -145,11 +147,13 @@ class TemporalBallTracker:
         self.reacquire_min_size_similarity = max(
             0.0, min(float(reacquire_min_size_similarity), 1.0)
         )
+        self.reacquire_policy = "state_aware_v2"
 
         if os.getenv("BASKETBALL_BALL_REACQUIRE") is not None:
             print(
                 "🏀 Ball controlled reacquisition: "
                 f"{'on' if self.reacquire_enabled else 'off'} "
+                f"policy={self.reacquire_policy} "
                 f"min_conf={self.reacquire_min_confidence:.2f} "
                 f"margin={self.reacquire_confidence_margin:.2f} "
                 f"confirm={self.reacquire_confirm_frames}f "
@@ -321,11 +325,19 @@ class TemporalBallTracker:
         self._challenger_streak = 0
         self._challenger_confidence = None
 
+    def _expire_challenger(self, frame_id: int) -> None:
+        """Keep a pending challenger through one brief detector gap, then expire it."""
+        if self._challenger_last_frame_id is None:
+            return
+        if int(frame_id) - int(self._challenger_last_frame_id) > 2:
+            self._reset_challenger()
+
     def _update_challenger(
         self,
         candidate: dict[str, Any],
         frame_id: int,
         diagonal: float,
+        required_streak: int | None = None,
     ) -> bool:
         center = np.asarray(candidate["center"], dtype=np.float64)
         area = self._candidate_area(candidate)
@@ -358,7 +370,15 @@ class TemporalBallTracker:
         self._challenger_last_frame_id = int(frame_id)
         self._challenger_confidence = confidence
         self.track_state = "REACQUIRING"
-        return self._challenger_streak >= self.reacquire_confirm_frames
+        confirmation_target = max(
+            1,
+            int(
+                self.reacquire_confirm_frames
+                if required_streak is None
+                else required_streak
+            ),
+        )
+        return self._challenger_streak >= confirmation_target
 
     def _direct_ball(
         self,
@@ -500,31 +520,60 @@ class TemporalBallTracker:
             self._reset_challenger()
             return None
 
+        self._expire_challenger(frame_id)
+
+        # While the normal gate is still producing a healthy TRACKED observation,
+        # reacquisition must clear the full confidence bar and survive one extra frame.
+        # Once the active hypothesis has degraded, remove the confidence margin from the
+        # absolute floor and use the configured confirmation window. This makes recovery
+        # state-aware without globally widening the gate or changing score weights.
+        active_supported = selected_confidence is not None and self.track_state == "TRACKED"
+        minimum_confidence = self.reacquire_min_confidence
+        if not active_supported:
+            minimum_confidence = max(
+                0.0,
+                self.reacquire_min_confidence - self.reacquire_confidence_margin,
+            )
+
         outside = [
             (index, candidate, details)
             for index, (candidate, details) in enumerate(zip(candidates, candidate_details))
             if not details.plausible
-            and details.confidence >= self.reacquire_min_confidence
+            and details.confidence >= minimum_confidence
+            and details.size_similarity >= self.reacquire_min_size_similarity
         ]
         if not outside:
-            self._reset_challenger()
+            # Do not destroy a credible challenger on one detector miss. The pending
+            # hypothesis expires naturally after the same two-frame continuity window
+            # used by _update_challenger().
             return None
 
-        outside.sort(key=lambda item: item[2].confidence, reverse=True)
+        # Prefer confidence only after accounting for compatibility with the active
+        # ball's size. This prevents a persistent, high-confidence wrong-size object from
+        # winning purely because it has the largest detector score.
+        outside.sort(
+            key=lambda item: (
+                item[2].confidence * item[2].size_similarity,
+                item[2].confidence,
+            ),
+            reverse=True,
+        )
         index, candidate, details = outside[0]
 
         if (
-            selected_confidence is not None
+            active_supported
+            and selected_confidence is not None
             and details.confidence
             < float(selected_confidence) + self.reacquire_confidence_margin
         ):
-            self._reset_challenger()
             return None
 
+        required_streak = self.reacquire_confirm_frames + (1 if active_supported else 0)
         confirmed = self._update_challenger(
             candidate=candidate,
             frame_id=frame_id,
             diagonal=diagonal,
+            required_streak=required_streak,
         )
         if not confirmed:
             return None
