@@ -28,10 +28,9 @@ export async function GET() {
     });
 
     const admin = createAdminClient();
-    const { error: adminError } = await admin.auth.admin.listUsers({
-      page: 1,
-      perPage: 1,
-    });
+    const { error: adminError } = await admin
+      .from("plans")
+      .select("code", { head: true, count: "exact" });
 
     const publicApi = publicResponse.ok;
     const adminApi = !adminError;
