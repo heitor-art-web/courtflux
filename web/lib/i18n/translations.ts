@@ -1,11 +1,12 @@
 import type { Locale } from "./config";
 import { APP_CORE_TRANSLATIONS } from "./app-core";
 import ptPT from "./pt-PT";
+import ptPTPolish from "./pt-PT-polish";
 import esES from "./es-ES";
 import esESPolish from "./es-ES-polish";
 
 const DICTIONARIES: Record<Exclude<Locale, "en">, Record<string, string>> = {
-  "pt-PT": { ...ptPT, ...APP_CORE_TRANSLATIONS["pt-PT"] },
+  "pt-PT": { ...ptPT, ...ptPTPolish, ...APP_CORE_TRANSLATIONS["pt-PT"] },
   "es-ES": { ...esES, ...esESPolish, ...APP_CORE_TRANSLATIONS["es-ES"] },
 };
 
