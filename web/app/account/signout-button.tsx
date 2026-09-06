@@ -7,21 +7,34 @@ import { createClient } from "@/lib/supabase/client";
 export function SignOutButton() {
   const router = useRouter();
   const [busy, setBusy] = useState(false);
+  const [errorMessage, setErrorMessage] = useState<string | null>(null);
 
   return (
-    <button
-      type="button"
-      disabled={busy}
-      aria-busy={busy}
-      onClick={async () => {
-        setBusy(true);
-        const supabase = createClient();
-        await supabase.auth.signOut();
-        router.push("/login");
-        router.refresh();
-      }}
-    >
-      {busy ? "Signing out…" : "Sign out"}
-    </button>
+    <div>
+      <button
+        type="button"
+        disabled={busy}
+        aria-busy={busy}
+        onClick={async () => {
+          setBusy(true);
+          setErrorMessage(null);
+
+          const supabase = createClient();
+          const { error } = await supabase.auth.signOut({ scope: "global" });
+
+          if (error) {
+            setErrorMessage("Sign out failed. Please try again.");
+            setBusy(false);
+            return;
+          }
+
+          router.push("/login");
+          router.refresh();
+        }}
+      >
+        {busy ? "Signing out…" : "Sign out"}
+      </button>
+      {errorMessage ? <span role="alert">{errorMessage}</span> : null}
+    </div>
   );
 }
