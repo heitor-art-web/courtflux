@@ -260,6 +260,8 @@ def replay(
         if truth is not None:
             visible = bool(truth.get("visible"))
             counts["visible" if visible else "not_visible"] += 1
+            source_counts[source] += 1
+            state_counts[str(decision.track_state)] += 1
             if visible and true_indices:
                 counts["candidate_available"] += 1
                 if correct and source in DIRECT_SOURCES:
@@ -287,20 +289,20 @@ def replay(
                 counts["reacquired"] += 1
                 counts["reacquired_correct" if correct else "reacquired_wrong"] += 1
 
-        source_counts[source] += 1
-        state_counts[str(decision.track_state)] += 1
         selected_score = None
         if decision.selected_index is not None and 0 <= decision.selected_index < len(pre_scores):
             selected_score = pre_scores[decision.selected_index]
         records[frame_id] = {
             "frame_id": frame_id,
             "timestamp_sec": row.get("timestamp_sec"),
+            "truth_available": truth is not None,
+            "truth_visible": None if truth is None else bool(truth.get("visible")),
             "source": source,
             "track_state": str(decision.track_state),
             "selected_index": decision.selected_index,
-            "selected_correct": bool(correct),
+            "selected_correct": None if truth is None else bool(correct),
             "selected_distance_px": rounded(distance, 3),
-            "classification": classify(source, decision.ball, correct),
+            "classification": None if truth is None else classify(source, decision.ball, correct),
             "trajectory_present": decision.ball is not None,
             "reacquired": bool(decision.reacquired and not reset),
             "candidate_count": len(candidates),
@@ -370,11 +372,13 @@ def event_detail(
     row = production_by_frame[frame_id]
     assoc = association(row)
     truth = truth_by_frame.get(frame_id)
+    truth_available = truth is not None
+    truth_visible = None if truth is None else bool(truth.get("visible"))
     traces = [dict(c) for c in assoc.get("candidates") or [] if isinstance(c, dict)]
     selected_index = assoc.get("selected_index")
     selected = traces[selected_index] if isinstance(selected_index, int) and 0 <= selected_index < len(traces) else None
-    selected_correct = item_matches_truth(selected, truth, gt_radius_px, bbox_iou)[0]
-    true_indices = [i for i, c in enumerate(traces) if item_matches_truth(c, truth, gt_radius_px, bbox_iou)[0]]
+    selected_correct = None if truth is None else item_matches_truth(selected, truth, gt_radius_px, bbox_iou)[0]
+    true_indices = [] if truth is None else [i for i, c in enumerate(traces) if item_matches_truth(c, truth, gt_radius_px, bbox_iou)[0]]
     selected_assoc = selected.get("association") if isinstance(selected, dict) and isinstance(selected.get("association"), dict) else {}
     distance_norm, gate_norm = selected_assoc.get("distance_norm"), selected_assoc.get("gate_norm")
     gate_ratio = None if distance_norm is None or gate_norm in (None, 0) else float(distance_norm) / float(gate_norm)
@@ -387,7 +391,11 @@ def event_detail(
     previous_assoc = association(previous or {})
 
     off_event, on_event = off.get(frame_id), on.get(frame_id)
-    if off_event and on_event and bool(truth and truth.get("visible")):
+    if not truth_available:
+        label = "unlabeled_event"
+    elif not truth_visible:
+        label = "ball_not_visible"
+    elif off_event and on_event:
         if on_event["selected_correct"] and not off_event["selected_correct"]:
             label = "recovery_win"
         elif off_event["selected_correct"] and not on_event["selected_correct"]:
@@ -418,7 +426,9 @@ def event_detail(
     return {
         "frame_id": frame_id,
         "timestamp_sec": row.get("timestamp_sec"),
-        "production_reacquisition_correct": bool(selected_correct),
+        "truth_available": truth_available,
+        "truth_visible": truth_visible,
+        "production_reacquisition_correct": selected_correct,
         "production_source": assoc.get("source"),
         "production_track_state": assoc.get("track_state"),
         "production_challenger_streak": int(assoc.get("challenger_streak", 0) or 0),
@@ -467,6 +477,8 @@ def flatten_event(event: dict[str, Any]) -> dict[str, Any]:
     return {
         "frame_id": event.get("frame_id"),
         "timestamp_sec": event.get("timestamp_sec"),
+        "truth_available": event.get("truth_available"),
+        "truth_visible": event.get("truth_visible"),
         "correct": event.get("production_reacquisition_correct"),
         "counterfactual_label": cf.get("label"),
         "candidate_count": event.get("candidate_count"),
@@ -498,8 +510,10 @@ def flatten_event(event: dict[str, Any]) -> dict[str, Any]:
 
 
 def aggregate_events(events: list[dict[str, Any]]) -> dict[str, Any]:
-    correct = [e for e in events if e.get("production_reacquisition_correct")]
-    wrong = [e for e in events if not e.get("production_reacquisition_correct")]
+    labeled = [e for e in events if e.get("truth_available")]
+    unlabeled = [e for e in events if not e.get("truth_available")]
+    correct = [e for e in labeled if e.get("production_reacquisition_correct") is True]
+    wrong = [e for e in labeled if e.get("production_reacquisition_correct") is False]
 
     def mean(group: list[dict[str, Any]], key: str) -> float | None:
         values = [float(e[key]) for e in group if e.get(key) is not None]
@@ -511,10 +525,12 @@ def aggregate_events(events: list[dict[str, Any]]) -> dict[str, Any]:
 
     labels = Counter(str((e.get("counterfactual_at_event") or {}).get("label")) for e in events)
     return {
-        "events": len(events),
-        "correct": len(correct),
-        "wrong": len(wrong),
-        "precision_pct": pct(len(correct), len(events)),
+        "events_total_production": len(events),
+        "events_with_sparse_truth": len(labeled),
+        "events_without_sparse_truth": len(unlabeled),
+        "correct_on_labeled_events": len(correct),
+        "wrong_on_labeled_events": len(wrong),
+        "precision_pct_on_labeled_events": pct(len(correct), len(labeled)),
         "counterfactual_labels": dict(labels),
         "feature_means": {
             "correct": {
@@ -684,7 +700,10 @@ def main() -> None:
     if args.video and not args.no_visuals:
         video_path = Path(args.video).expanduser().resolve()
         for event in events:
-            status = "correct" if event["production_reacquisition_correct"] else "wrong"
+            if not event.get("truth_available"):
+                continue
+            correctness = event.get("production_reacquisition_correct")
+            status = "correct" if correctness is True else "wrong"
             draw_contact_sheet(video_path, event, production_by_frame, truth_by_frame, output_dir / "visual" / f"event_{int(event['frame_id']):06d}_{status}.jpg", int(args.video_frame_offset), float(args.gt_radius_px), float(args.bbox_iou))
 
     print(json.dumps(summary, indent=2, ensure_ascii=False))
