@@ -69,12 +69,7 @@ class PerformanceDetector(BasePerformanceDetector):
             (getattr(model, "overrides", {}) or {}).get("model"),
         ]
         inner = getattr(model, "model", None)
-        candidates.extend(
-            [
-                getattr(inner, "pt_path", None),
-                getattr(inner, "yaml_file", None),
-            ]
-        )
+        candidates.append(getattr(inner, "pt_path", None))
         for candidate in candidates:
             if candidate:
                 return str(candidate)
