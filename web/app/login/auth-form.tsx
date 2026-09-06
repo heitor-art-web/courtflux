@@ -50,8 +50,12 @@ export function AuthForm({ initialMode }: { initialMode: AuthMode }) {
 
       setMessage("Account created. Check your email to confirm the account, then sign in. CourtFlux will guide you through role and team setup next.");
       setMode("login");
-    } catch (authError) {
-      setError(authError instanceof Error ? authError.message : String(authError));
+    } catch {
+      setError(
+        mode === "login"
+          ? "Unable to sign in. Check your email and password and try again."
+          : "Unable to create an account with these details. If you already have an account, sign in instead."
+      );
     } finally {
       setBusy(false);
     }
