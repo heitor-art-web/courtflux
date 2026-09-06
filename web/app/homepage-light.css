@@ -1,0 +1,63 @@
+/* Public homepage light canvas.
+   Keep CourtFlux navy for navigation/video/high-focus surfaces and orange for primary actions. */
+
+main:has(> script[type="application/ld+json"] + header):has(> div > section[aria-labelledby="hero-title"]) {
+  --cf-bg: #ffffff;
+  --cf-panel: #ffffff;
+  --cf-panel-2: #f7f9fb;
+  --cf-text: #102336;
+  --cf-muted: #617181;
+  --cf-line: rgba(16, 35, 54, 0.12);
+  background: #ffffff !important;
+  color: #102336 !important;
+}
+
+main:has(> script[type="application/ld+json"] + header):has(> div > section[aria-labelledby="hero-title"]) > div {
+  background: transparent;
+}
+
+main:has(> script[type="application/ld+json"] + header):has(> div > section[aria-labelledby="hero-title"]) h1,
+main:has(> script[type="application/ld+json"] + header):has(> div > section[aria-labelledby="hero-title"]) h2,
+main:has(> script[type="application/ld+json"] + header):has(> div > section[aria-labelledby="hero-title"]) h3 {
+  color: #102336;
+}
+
+main:has(> script[type="application/ld+json"] + header):has(> div > section[aria-labelledby="hero-title"]) p {
+  color: #617181;
+}
+
+main:has(> script[type="application/ld+json"] + header):has(> div > section[aria-labelledby="hero-title"]) article {
+  border-color: #d9e2ea;
+  background: #ffffff;
+  box-shadow: 0 12px 30px rgba(18, 40, 60, 0.06);
+}
+
+main:has(> script[type="application/ld+json"] + header):has(> div > section[aria-labelledby="hero-title"]) article h3 {
+  color: #183047;
+}
+
+main:has(> script[type="application/ld+json"] + header):has(> div > section[aria-labelledby="hero-title"]) article p,
+main:has(> script[type="application/ld+json"] + header):has(> div > section[aria-labelledby="hero-title"]) article li {
+  color: #68798a;
+}
+
+main:has(> script[type="application/ld+json"] + header):has(> div > section[aria-labelledby="hero-title"]) details {
+  border-color: #d9e2ea;
+  background: #ffffff;
+}
+
+main:has(> script[type="application/ld+json"] + header):has(> div > section[aria-labelledby="hero-title"]) details summary {
+  color: #183047;
+}
+
+main:has(> script[type="application/ld+json"] + header):has(> div > section[aria-labelledby="hero-title"]) footer {
+  border-top-color: #dfe6ec;
+}
+
+main:has(> script[type="application/ld+json"] + header):has(> div > section[aria-labelledby="hero-title"]) footer a {
+  color: #526577;
+}
+
+main:has(> script[type="application/ld+json"] + header):has(> div > section[aria-labelledby="hero-title"]) footer a:hover {
+  color: #d85d08;
+}
