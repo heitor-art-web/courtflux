@@ -112,8 +112,8 @@ def test_replay_summary_is_separate_from_production() -> None:
             "selected_size_similarity": 0.7,
         },
     ]
-    summary = aggregate_replay_recovery_events(events, 5, 10, "state_aware_v3b")
-    assert summary["policy"] == "state_aware_v3b"
+    summary = aggregate_replay_recovery_events(events, 5, 10, "state_aware_v3c")
+    assert summary["policy"] == "state_aware_v3c"
     assert summary["events_total_replay"] == 3
     assert summary["events_with_sparse_truth"] == 2
     assert summary["events_without_sparse_truth"] == 1
@@ -124,10 +124,12 @@ def test_replay_summary_is_separate_from_production() -> None:
     assert summary["counterfactual_labels"]["recovery_loss"] == 1
 
 
-def test_current_tracker_policy_is_v3b() -> None:
+def test_current_tracker_policy_is_v3c() -> None:
     tracker = TemporalBallTracker(reacquire_enabled=True)
-    assert tracker.reacquire_policy == "state_aware_v3b"
-    assert tracker.reacquire_min_unsupported_frames == 3
+    assert tracker.reacquire_policy == "state_aware_v3c"
+    assert tracker.reacquire_min_unsupported_frames == 2
+    assert tracker.reacquire_confirm_frames == 2
+    assert tracker.reacquire_promotion_frames == 3
 
 
 def main() -> None:
@@ -135,7 +137,7 @@ def main() -> None:
         test_counterfactual_labels,
         test_episode_trigger_uses_current_replay_recovery,
         test_replay_summary_is_separate_from_production,
-        test_current_tracker_policy_is_v3b,
+        test_current_tracker_policy_is_v3c,
     ]
     for test in tests:
         test()
