@@ -17,9 +17,9 @@ from evaluation.ball_error_review import (
 
 def test_candidate_matches_point_truth_uses_official_radius() -> None:
     truth = {"visible": True, "point": [100.0, 100.0], "bbox": None}
-    inside = {"center": [130.0, 120.0], "box": [120, 110, 140, 130], "confidence": 0.8}
+    boundary = {"center": [140.0, 100.0], "box": [130, 90, 150, 110], "confidence": 0.8}
     outside = {"center": [141.0, 100.0], "box": [131, 90, 151, 110], "confidence": 0.8}
-    assert candidate_matches_truth(inside, truth, 40.0, 0.25)[0] is True
+    assert candidate_matches_truth(boundary, truth, 40.0, 0.25)[0] is True
     assert candidate_matches_truth(outside, truth, 40.0, 0.25)[0] is False
 
 
