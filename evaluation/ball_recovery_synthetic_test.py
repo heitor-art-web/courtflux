@@ -47,6 +47,7 @@ def tracker() -> TemporalBallTracker:
         reacquire_confirm_frames=2,
         reacquire_radius_norm=0.04,
         reacquire_min_size_similarity=0.25,
+        reacquire_min_unsupported_frames=3,
     )
 
 
@@ -63,7 +64,7 @@ def test_wrong_size_challenger_is_rejected() -> None:
     assert all(decision.source != "detector_reacquired" for decision in decisions)
 
 
-def test_degraded_track_can_recover_lower_confidence_candidate() -> None:
+def test_short_unsupported_gap_cannot_recover() -> None:
     subject = tracker()
     subject.select([candidate(100, 100, 0.60)], 0, FRAME_SHAPE)
 
@@ -73,8 +74,23 @@ def test_degraded_track_can_recover_lower_confidence_candidate() -> None:
     assert first.source == "predicted_hold"
     assert first.track_state == "REACQUIRING"
     assert first.challenger_streak == 1
-    assert second.source == "detector_reacquired"
-    assert second.reacquired is True
+    assert second.source == "predicted_hold"
+    assert second.reacquired is False
+    assert second.challenger_streak == 2
+
+
+def test_degraded_track_can_recover_after_cooldown() -> None:
+    subject = tracker()
+    subject.select([candidate(100, 100, 0.60)], 0, FRAME_SHAPE)
+
+    first = subject.select([candidate(500, 500, 0.35)], 1, FRAME_SHAPE)
+    second = subject.select([candidate(505, 500, 0.35)], 2, FRAME_SHAPE)
+    third = subject.select([candidate(510, 500, 0.35)], 3, FRAME_SHAPE)
+
+    assert first.source == "predicted_hold"
+    assert second.source == "predicted_hold"
+    assert third.source == "detector_reacquired"
+    assert third.reacquired is True
 
 
 def test_plausible_association_has_absolute_priority() -> None:
@@ -144,7 +160,8 @@ def test_pending_challenger_survives_one_detector_gap() -> None:
 def main() -> None:
     tests = [
         test_wrong_size_challenger_is_rejected,
-        test_degraded_track_can_recover_lower_confidence_candidate,
+        test_short_unsupported_gap_cannot_recover,
+        test_degraded_track_can_recover_after_cooldown,
         test_plausible_association_has_absolute_priority,
         test_plausible_association_cancels_pending_challenger,
         test_pending_challenger_survives_one_detector_gap,
