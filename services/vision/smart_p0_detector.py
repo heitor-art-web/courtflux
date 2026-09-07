@@ -275,3 +275,28 @@ class PerformanceDetector(P0PerformanceDetector):
         association["enhanced_candidate_count"] = len(enhanced)
         association["candidate_count"] = len(enhanced)
         return ball, association
+
+    def process(self, frame_state: Any):
+        """Expose smart candidate cost separately from core parse cost.
+
+        The parent P0 detector times the entire parse stage, which now contains the smart
+        candidate pass. Reclassify that measured time after processing so the shared
+        profiler reports Detector/parse and Detector/smart_ball without double-counting.
+        This changes profiling only; detection and association behavior are untouched.
+        """
+        frame_state = super().process(frame_state)
+        detector = frame_state.diagnostics.get("detector", {}) or {}
+        association = detector.get("ball_association", {}) or {}
+        smart = association.get("smart_pipeline", {}) or {}
+        if not bool(smart.get("enabled", False)):
+            return frame_state
+
+        smart_ms = max(0.0, float(smart.get("timing_ms", 0.0) or 0.0))
+        timings = detector.get("timing_ms", {}) or {}
+        parse_ms = max(0.0, float(timings.get("parse", 0.0) or 0.0))
+        timings["parse"] = round(max(0.0, parse_ms - smart_ms), 4)
+        timings["smart_ball"] = round(smart_ms, 4)
+        detector["timing_ms"] = timings
+        detector["smart_ball_timing_ms"] = round(smart_ms, 4)
+        frame_state.diagnostics["detector"] = detector
+        return frame_state
