@@ -77,23 +77,54 @@ def test_degraded_track_can_recover_lower_confidence_candidate() -> None:
     assert second.reacquired is True
 
 
-def test_supported_track_requires_confidence_margin() -> None:
+def test_plausible_association_has_absolute_priority() -> None:
     subject = tracker()
     subject.select([candidate(100, 100, 0.60)], 0, FRAME_SHAPE)
 
-    decision = subject.select(
+    decisions = []
+    for frame_id in (1, 2, 3):
+        decisions.append(
+            subject.select(
+                [
+                    candidate(100 + frame_id * 2, 100, 0.55),
+                    candidate(500 + frame_id * 4, 500, 0.95),
+                ],
+                frame_id,
+                FRAME_SHAPE,
+            )
+        )
+
+    assert all(decision.source == "detector_associated" for decision in decisions)
+    assert all(decision.selected_index == 0 for decision in decisions)
+    assert not any(decision.reacquired for decision in decisions)
+    assert all(decision.challenger_streak == 0 for decision in decisions)
+    assert subject.track_state == "TRACKED"
+
+
+def test_plausible_association_cancels_pending_challenger() -> None:
+    subject = tracker()
+    subject.select([candidate(100, 100, 0.60)], 0, FRAME_SHAPE)
+
+    first = subject.select([candidate(500, 500, 0.35)], 1, FRAME_SHAPE)
+    supported = subject.select(
         [
-            candidate(102, 100, 0.70),
-            candidate(500, 500, 0.75),
+            candidate(102, 100, 0.55),
+            candidate(505, 500, 0.95),
         ],
-        1,
+        2,
         FRAME_SHAPE,
     )
+    after_reset = subject.select([candidate(510, 500, 0.35)], 3, FRAME_SHAPE)
 
-    assert decision.source == "detector_associated"
-    assert decision.selected_index == 0
-    assert decision.reacquired is False
-    assert decision.challenger_streak == 0
+    assert first.source == "predicted_hold"
+    assert first.challenger_streak == 1
+    assert supported.source == "detector_associated"
+    assert supported.selected_index == 0
+    assert supported.reacquired is False
+    assert supported.challenger_streak == 0
+    assert after_reset.source == "predicted_hold"
+    assert after_reset.reacquired is False
+    assert after_reset.challenger_streak == 1
 
 
 def test_pending_challenger_survives_one_detector_gap() -> None:
@@ -114,7 +145,8 @@ def main() -> None:
     tests = [
         test_wrong_size_challenger_is_rejected,
         test_degraded_track_can_recover_lower_confidence_candidate,
-        test_supported_track_requires_confidence_margin,
+        test_plausible_association_has_absolute_priority,
+        test_plausible_association_cancels_pending_challenger,
         test_pending_challenger_survives_one_detector_gap,
     ]
     for test in tests:
