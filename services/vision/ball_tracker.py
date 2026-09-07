@@ -56,11 +56,13 @@ class TemporalBallTracker:
     trajectory has no plausible normal association. It never widens the normal gate.
     Any plausible in-gate association has absolute priority and cancels recovery.
 
-    state_aware_v3c keeps an out-of-gate recovery hypothesis separate from the active
-    trajectory. A challenger first becomes provisional after temporal confirmation, then
-    requires additional consistent support before promotion. Until promotion it never
-    mutates last_center/last_area/velocity. On promotion, the challenger trajectory's own
-    velocity seeds the new active track instead of forcing velocity to zero.
+    state_aware_v3d retains the independent provisional recovery trajectory introduced in
+    v3c, but promotion is now arbitrated against the active hold. A provisional challenger
+    cannot replace an active prediction while that prediction is still inside the image
+    and within the configured hold window. Promotion additionally requires the existing
+    high-confidence threshold. This lets an obviously exiting/stale active hypothesis
+    yield early while preventing persistent alternatives from poisoning a still-credible
+    hold. On promotion, recovery-local velocity seeds the new active track.
     """
 
     def __init__(
@@ -108,9 +110,7 @@ class TemporalBallTracker:
         self.high_confidence_gate_threshold = max(
             0.0, min(float(high_confidence_gate_threshold), 1.0)
         )
-        self.high_confidence_gate_multiplier = max(
-            1.0, float(high_confidence_gate_multiplier)
-        )
+        self.high_confidence_gate_multiplier = max(1.0, float(high_confidence_gate_multiplier))
 
         self.reacquire_enabled = (
             self._env_bool("BASKETBALL_BALL_REACQUIRE", False)
@@ -153,9 +153,7 @@ class TemporalBallTracker:
             else int(reacquire_promotion_frames)
         )
 
-        self.reacquire_min_confidence = max(
-            0.0, min(float(reacquire_min_confidence), 1.0)
-        )
+        self.reacquire_min_confidence = max(0.0, min(float(reacquire_min_confidence), 1.0))
         self.reacquire_confidence_margin = max(
             0.0, min(float(reacquire_confidence_margin), 1.0)
         )
@@ -164,14 +162,13 @@ class TemporalBallTracker:
         self.reacquire_min_size_similarity = max(
             0.0, min(float(reacquire_min_size_similarity), 1.0)
         )
-        self.reacquire_min_unsupported_frames = max(
-            1, int(reacquire_min_unsupported_frames)
-        )
+        self.reacquire_min_unsupported_frames = max(1, int(reacquire_min_unsupported_frames))
         self.reacquire_promotion_frames = max(
             self.reacquire_confirm_frames + 1,
             int(reacquire_promotion_frames),
         )
-        self.reacquire_policy = "state_aware_v3c"
+        self.reacquire_promotion_min_confidence = self.high_confidence_gate_threshold
+        self.reacquire_policy = "state_aware_v3d"
 
         if os.getenv("BASKETBALL_BALL_REACQUIRE") is not None:
             print(
@@ -182,6 +179,7 @@ class TemporalBallTracker:
                 f"margin={self.reacquire_confidence_margin:.2f} "
                 f"confirm={self.reacquire_confirm_frames}f "
                 f"promote={self.reacquire_promotion_frames}f "
+                f"promote_conf={self.reacquire_promotion_min_confidence:.2f} "
                 f"min_unsupported={self.reacquire_min_unsupported_frames}f "
                 f"radius={self.reacquire_radius_norm:.3f}diag "
                 f"min_size_sim={self.reacquire_min_size_similarity:.2f}",
@@ -287,10 +285,7 @@ class TemporalBallTracker:
         plausible = distance_norm <= gate_norm
         high_confidence_gate_used = False
         if not plausible and confidence >= self.high_confidence_gate_threshold:
-            extended_gate = min(
-                gate_norm * self.high_confidence_gate_multiplier,
-                self.max_gate_norm,
-            )
+            extended_gate = min(gate_norm * self.high_confidence_gate_multiplier, self.max_gate_norm)
             plausible = distance_norm <= extended_gate
             high_confidence_gate_used = plausible and extended_gate > gate_norm
 
@@ -325,12 +320,7 @@ class TemporalBallTracker:
             return None
         diagonal = self._frame_diagonal(frame_shape)
         gate_norm = self._gate(dt)
-        return self._candidate_score_details(
-            candidate,
-            predicted_center,
-            diagonal,
-            gate_norm,
-        )
+        return self._candidate_score_details(candidate, predicted_center, diagonal, gate_norm)
 
     def _score_candidate(
         self,
@@ -339,21 +329,37 @@ class TemporalBallTracker:
         diagonal: float,
         gate_norm: float,
     ) -> tuple[float, float, bool]:
-        details = self._candidate_score_details(
-            candidate,
-            predicted_center,
-            diagonal,
-            gate_norm,
-        )
+        details = self._candidate_score_details(candidate, predicted_center, diagonal, gate_norm)
         return details.score, details.distance_norm, details.plausible
+
+    def _active_hold_viable(
+        self,
+        frame_id: int,
+        frame_shape: tuple[int, ...],
+    ) -> bool:
+        """Whether the active trajectory still owns the short prediction grace window."""
+        if (
+            self.last_center is None
+            or self.last_frame_id is None
+            or self.max_hold_frames <= 0
+        ):
+            return False
+        age = int(frame_id) - int(self.last_frame_id)
+        if age <= 0 or age > self.max_hold_frames:
+            return False
+        predicted_center = self._predict_center(frame_id)
+        if predicted_center is None:
+            return False
+        height, width = frame_shape[:2]
+        return bool(
+            0.0 <= float(predicted_center[0]) <= float(max(width - 1, 0))
+            and 0.0 <= float(predicted_center[1]) <= float(max(height - 1, 0))
+        )
 
     def _challenger_velocity_payload(self) -> tuple[float, float] | None:
         if self._challenger_streak <= 0:
             return None
-        return (
-            float(self._challenger_velocity[0]),
-            float(self._challenger_velocity[1]),
-        )
+        return float(self._challenger_velocity[0]), float(self._challenger_velocity[1])
 
     def _reset_challenger(self) -> None:
         self._challenger_center = None
@@ -385,15 +391,10 @@ class TemporalBallTracker:
 
         consistent = False
         measured_velocity: np.ndarray | None = None
-        if (
-            self._challenger_center is not None
-            and self._challenger_last_frame_id is not None
-        ):
+        if self._challenger_center is not None and self._challenger_last_frame_id is not None:
             dt = int(frame_id) - int(self._challenger_last_frame_id)
             if 0 < dt <= 2:
-                distance_norm = float(
-                    np.linalg.norm(center - self._challenger_center) / diagonal
-                )
+                distance_norm = float(np.linalg.norm(center - self._challenger_center) / diagonal)
                 allowed_radius = self.reacquire_radius_norm * float(max(dt, 1))
                 size_similarity = self._area_similarity(area, self._challenger_area)
                 consistent = (
@@ -401,17 +402,14 @@ class TemporalBallTracker:
                     and size_similarity >= self.reacquire_min_size_similarity
                 )
                 if consistent:
-                    measured_velocity = (
-                        center - self._challenger_center
-                    ) / float(dt)
+                    measured_velocity = (center - self._challenger_center) / float(dt)
 
         if consistent:
             self._challenger_streak += 1
             if measured_velocity is not None:
                 alpha = self.velocity_alpha
                 self._challenger_velocity = (
-                    (1.0 - alpha) * self._challenger_velocity
-                    + alpha * measured_velocity
+                    (1.0 - alpha) * self._challenger_velocity + alpha * measured_velocity
                 )
         else:
             self._challenger_streak = 1
@@ -521,7 +519,6 @@ class TemporalBallTracker:
         age = int(frame_id) - int(self.last_frame_id)
         if age <= 0 or age > self.max_hold_frames:
             return None
-
         predicted_center = self._predict_center(frame_id)
         if predicted_center is None:
             return None
@@ -549,10 +546,7 @@ class TemporalBallTracker:
             "source": "predicted_hold",
             "hold_age_frames": age,
         }
-        if self._challenger_streak > 0:
-            self.track_state = "REACQUIRING"
-        else:
-            self.track_state = "DEGRADED"
+        self.track_state = "REACQUIRING" if self._challenger_streak > 0 else "DEGRADED"
         return BallAssociationDecision(
             ball=ball,
             source="predicted_hold",
@@ -575,6 +569,7 @@ class TemporalBallTracker:
         candidates: list[dict[str, Any]],
         candidate_details: list[BallCandidateScore],
         frame_id: int,
+        frame_shape: tuple[int, ...],
         diagonal: float,
     ) -> tuple[int, dict[str, Any], BallCandidateScore, np.ndarray] | None:
         if not self.reacquire_enabled:
@@ -582,22 +577,18 @@ class TemporalBallTracker:
             return None
 
         self._expire_challenger(frame_id)
-
         minimum_confidence = max(
             0.0,
             self.reacquire_min_confidence - self.reacquire_confidence_margin,
         )
         outside = [
             (index, candidate, details)
-            for index, (candidate, details) in enumerate(
-                zip(candidates, candidate_details)
-            )
+            for index, (candidate, details) in enumerate(zip(candidates, candidate_details))
             if not details.plausible
             and details.confidence >= minimum_confidence
             and details.size_similarity >= self.reacquire_min_size_similarity
         ]
         if not outside:
-            # A single miss does not immediately destroy the recovery hypothesis.
             return None
 
         outside.sort(
@@ -608,12 +599,7 @@ class TemporalBallTracker:
             reverse=True,
         )
         index, candidate, details = outside[0]
-
-        streak = self._update_challenger(
-            candidate=candidate,
-            frame_id=frame_id,
-            diagonal=diagonal,
-        )
+        streak = self._update_challenger(candidate, frame_id, diagonal)
 
         unsupported_age = (
             self.reacquire_min_unsupported_frames
@@ -622,13 +608,17 @@ class TemporalBallTracker:
         )
         if unsupported_age < self.reacquire_min_unsupported_frames:
             return None
-
-        # v3c two-stage recovery: temporal confirmation creates a provisional
-        # hypothesis; one or more further consistent observations are required
-        # before that hypothesis may replace the active trajectory.
         if not self._challenger_provisional:
             return None
         if streak < self.reacquire_promotion_frames:
+            return None
+
+        # v3d promotion arbitration. Provisional evidence is allowed to accumulate, but
+        # promotion must not pre-empt a still-viable active hold and must itself satisfy
+        # the already-configured high-confidence evidence threshold.
+        if details.confidence < self.reacquire_promotion_min_confidence:
+            return None
+        if self._active_hold_viable(frame_id, frame_shape):
             return None
 
         return index, candidate, details, self._challenger_velocity.copy()
@@ -687,38 +677,24 @@ class TemporalBallTracker:
                 rejected_candidates=0,
                 reset_velocity=True,
                 reacquired=self.reacquire_enabled,
-                source=(
-                    "detector_reacquired"
-                    if self.reacquire_enabled
-                    else "detector_associated"
-                ),
+                source="detector_reacquired" if self.reacquire_enabled else "detector_associated",
             )
 
         predicted_center = self._predict_center(frame_id)
         assert predicted_center is not None
         diagonal = self._frame_diagonal(frame_shape)
         gate_norm = self._gate(dt)
-
         candidate_details = [
-            self._candidate_score_details(
-                candidate,
-                predicted_center,
-                diagonal,
-                gate_norm,
-            )
+            self._candidate_score_details(candidate, predicted_center, diagonal, gate_norm)
             for candidate in candidates
         ]
         scored: list[tuple[float, float, int, dict[str, Any]]] = [
             (details.score, details.distance_norm, index, candidate)
-            for index, (candidate, details) in enumerate(
-                zip(candidates, candidate_details)
-            )
+            for index, (candidate, details) in enumerate(zip(candidates, candidate_details))
             if details.plausible
         ]
 
         if scored:
-            # v3a+ invariant: supported direct evidence always wins and cancels
-            # the independent recovery hypothesis before it can poison the track.
             scored.sort(key=lambda item: item[0], reverse=True)
             score, distance_norm, index, candidate = scored[0]
             self._reset_challenger()
@@ -736,6 +712,7 @@ class TemporalBallTracker:
             candidates=candidates,
             candidate_details=candidate_details,
             frame_id=frame_id,
+            frame_shape=frame_shape,
             diagonal=diagonal,
         )
         if reacquire is not None:
@@ -753,11 +730,7 @@ class TemporalBallTracker:
                 velocity_override=recovery_velocity,
             )
 
-        hold = self._predicted_hold(
-            frame_id,
-            frame_shape,
-            rejected_candidates=len(candidates),
-        )
+        hold = self._predicted_hold(frame_id, frame_shape, rejected_candidates=len(candidates))
         if hold is not None:
             return hold
 
