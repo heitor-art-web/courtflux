@@ -5,7 +5,7 @@ footer:has(img[alt*="CourtFlux"]) {
 }
 
 footer:has(img[alt*="CourtFlux"]) img[alt*="CourtFlux"] {
-  content: url("/brand/light_logo_safe_crop.png");
+  content: url("/brand/horizontal_logo_safe_crop.png");
 }
 
 footer:has(img[alt*="CourtFlux"]) a {
