@@ -2,6 +2,7 @@ import type { Metadata, Viewport } from "next";
 import "./globals.css";
 import "./accessibility.css";
 import "./homepage-light.css";
+import "./footer-brand-fix.css";
 import { getSiteUrl } from "@/lib/site";
 import { getRequestLocale } from "@/lib/i18n/request";
 import { LanguageSwitcher } from "./language-switcher";
