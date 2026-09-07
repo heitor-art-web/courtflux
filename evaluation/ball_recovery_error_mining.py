@@ -9,7 +9,7 @@ if str(ROOT) not in sys.path:
 
 # Backward-compatible public surface: existing imports/tests can keep using this module.
 from evaluation.ball_recovery_error_mining_base import *  # noqa: F401,F403,E402
-from evaluation.ball_recovery_error_mining_extended import main  # noqa: E402
+from evaluation.ball_recovery_error_mining_reporting import main  # noqa: E402
 
 
 if __name__ == "__main__":
