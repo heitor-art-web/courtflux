@@ -1,0 +1,21 @@
+footer:has(img[alt*="CourtFlux"]) {
+  background: #071421;
+  border-top-color: #17283a !important;
+  color: #aeb9c6;
+}
+
+footer:has(img[alt*="CourtFlux"]) img[alt*="CourtFlux"] {
+  content: url("/brand/light_logo_safe_crop.png");
+}
+
+footer:has(img[alt*="CourtFlux"]) a {
+  color: #dce8f4 !important;
+}
+
+footer:has(img[alt*="CourtFlux"]) a:hover {
+  color: #ffffff !important;
+}
+
+footer:has(img[alt*="CourtFlux"]) [class*="footerMeta"] {
+  color: #9fb0c0 !important;
+}

@@ -1,7 +1,8 @@
 "use client";
 
-import { useState } from "react";
-import { useRouter } from "next/navigation";
+import { useEffect, useState } from "react";
+import { createPortal } from "react-dom";
+import { usePathname, useRouter } from "next/navigation";
 import type { Locale } from "@/lib/i18n/config";
 import styles from "./language-switcher.module.css";
 
@@ -39,7 +40,16 @@ function targetPath(pathname: string, locale: Locale) {
 
 export function LanguageSwitcher({ initialLocale }: { initialLocale: Locale }) {
   const router = useRouter();
+  const pathname = usePathname();
   const [locale, setLocale] = useState(initialLocale);
+  const [host, setHost] = useState<HTMLElement | null>(null);
+
+  useEffect(() => {
+    const frame = window.requestAnimationFrame(() => {
+      setHost(document.querySelector<HTMLElement>("#main-content header"));
+    });
+    return () => window.cancelAnimationFrame(frame);
+  }, [pathname]);
 
   function changeLanguage(nextLocale: Locale) {
     setLocale(nextLocale);
@@ -49,9 +59,9 @@ export function LanguageSwitcher({ initialLocale }: { initialLocale: Locale }) {
     router.refresh();
   }
 
-  const label = locale === "en" ? "Language" : "Idioma";
+  const label = locale === "en" ? "Language" : locale === "pt-PT" ? "Língua" : "Idioma";
 
-  return (
+  const control = (
     <label className={styles.switcher} data-i18n-ignore>
       <span>{label}</span>
       <select
@@ -65,4 +75,6 @@ export function LanguageSwitcher({ initialLocale }: { initialLocale: Locale }) {
       </select>
     </label>
   );
+
+  return host ? createPortal(control, host) : null;
 }
