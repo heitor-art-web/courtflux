@@ -47,7 +47,8 @@ def tracker() -> TemporalBallTracker:
         reacquire_confirm_frames=2,
         reacquire_radius_norm=0.04,
         reacquire_min_size_similarity=0.25,
-        reacquire_min_unsupported_frames=3,
+        reacquire_min_unsupported_frames=2,
+        reacquire_promotion_frames=3,
     )
 
 
@@ -56,15 +57,19 @@ def test_wrong_size_challenger_is_rejected() -> None:
     subject.select([candidate(100, 100, 0.60)], 0, FRAME_SHAPE)
 
     decisions = [
-        subject.select([candidate(500 + frame_id, 500, 0.95, size=80)], frame_id, FRAME_SHAPE)
-        for frame_id in (1, 2, 3)
+        subject.select(
+            [candidate(500 + frame_id, 500, 0.95, size=80)],
+            frame_id,
+            FRAME_SHAPE,
+        )
+        for frame_id in (1, 2, 3, 4)
     ]
 
     assert not any(decision.reacquired for decision in decisions)
     assert all(decision.source != "detector_reacquired" for decision in decisions)
 
 
-def test_short_unsupported_gap_cannot_recover() -> None:
+def test_confirmed_challenger_is_provisional_before_promotion() -> None:
     subject = tracker()
     subject.select([candidate(100, 100, 0.60)], 0, FRAME_SHAPE)
 
@@ -72,25 +77,62 @@ def test_short_unsupported_gap_cannot_recover() -> None:
     second = subject.select([candidate(505, 500, 0.35)], 2, FRAME_SHAPE)
 
     assert first.source == "predicted_hold"
-    assert first.track_state == "REACQUIRING"
     assert first.challenger_streak == 1
+    assert first.recovery_provisional is False
     assert second.source == "predicted_hold"
     assert second.reacquired is False
     assert second.challenger_streak == 2
+    assert second.recovery_provisional is True
 
 
-def test_degraded_track_can_recover_after_cooldown() -> None:
+def test_provisional_recovery_does_not_mutate_active_state() -> None:
+    subject = tracker()
+    subject.select([candidate(100, 100, 0.60)], 0, FRAME_SHAPE)
+    original_center = subject.last_center.copy()
+    original_velocity = subject.velocity.copy()
+
+    subject.select([candidate(500, 500, 0.35)], 1, FRAME_SHAPE)
+    provisional = subject.select([candidate(505, 500, 0.35)], 2, FRAME_SHAPE)
+
+    assert provisional.recovery_provisional is True
+    assert subject.last_frame_id == 0
+    assert subject.last_center is not None
+    assert (subject.last_center == original_center).all()
+    assert (subject.velocity == original_velocity).all()
+
+
+def test_provisional_recovery_promotes_after_additional_support() -> None:
     subject = tracker()
     subject.select([candidate(100, 100, 0.60)], 0, FRAME_SHAPE)
 
-    first = subject.select([candidate(500, 500, 0.35)], 1, FRAME_SHAPE)
+    subject.select([candidate(500, 500, 0.35)], 1, FRAME_SHAPE)
     second = subject.select([candidate(505, 500, 0.35)], 2, FRAME_SHAPE)
     third = subject.select([candidate(510, 500, 0.35)], 3, FRAME_SHAPE)
 
-    assert first.source == "predicted_hold"
     assert second.source == "predicted_hold"
+    assert second.recovery_provisional is True
     assert third.source == "detector_reacquired"
     assert third.reacquired is True
+    assert third.challenger_streak == 3
+    assert third.recovery_provisional is True
+
+
+def test_promoted_recovery_uses_challenger_velocity() -> None:
+    subject = tracker()
+    subject.select([candidate(100, 100, 0.60)], 0, FRAME_SHAPE)
+
+    subject.select([candidate(500, 500, 0.35)], 1, FRAME_SHAPE)
+    subject.select([candidate(510, 500, 0.35)], 2, FRAME_SHAPE)
+    promoted = subject.select([candidate(520, 500, 0.35)], 3, FRAME_SHAPE)
+    hold = subject.select([], 4, FRAME_SHAPE)
+
+    assert promoted.source == "detector_reacquired"
+    assert promoted.challenger_velocity is not None
+    assert promoted.challenger_velocity[0] > 0.0
+    assert subject.velocity[0] > 0.0
+    assert hold.source == "predicted_hold"
+    assert hold.ball is not None
+    assert float(hold.ball["center"][0]) > 520.0
 
 
 def test_plausible_association_has_absolute_priority() -> None:
@@ -117,27 +159,28 @@ def test_plausible_association_has_absolute_priority() -> None:
     assert subject.track_state == "TRACKED"
 
 
-def test_plausible_association_cancels_pending_challenger() -> None:
+def test_plausible_association_cancels_provisional_recovery() -> None:
     subject = tracker()
     subject.select([candidate(100, 100, 0.60)], 0, FRAME_SHAPE)
 
-    first = subject.select([candidate(500, 500, 0.35)], 1, FRAME_SHAPE)
+    subject.select([candidate(500, 500, 0.35)], 1, FRAME_SHAPE)
+    provisional = subject.select([candidate(505, 500, 0.35)], 2, FRAME_SHAPE)
     supported = subject.select(
         [
             candidate(102, 100, 0.55),
-            candidate(505, 500, 0.95),
+            candidate(510, 500, 0.95),
         ],
-        2,
+        3,
         FRAME_SHAPE,
     )
-    after_reset = subject.select([candidate(510, 500, 0.35)], 3, FRAME_SHAPE)
+    after_reset = subject.select([candidate(515, 500, 0.35)], 4, FRAME_SHAPE)
 
-    assert first.source == "predicted_hold"
-    assert first.challenger_streak == 1
+    assert provisional.recovery_provisional is True
     assert supported.source == "detector_associated"
     assert supported.selected_index == 0
     assert supported.reacquired is False
     assert supported.challenger_streak == 0
+    assert subject._challenger_provisional is False
     assert after_reset.source == "predicted_hold"
     assert after_reset.reacquired is False
     assert after_reset.challenger_streak == 1
@@ -149,21 +192,27 @@ def test_pending_challenger_survives_one_detector_gap() -> None:
 
     first = subject.select([candidate(500, 500, 0.35)], 1, FRAME_SHAPE)
     gap = subject.select([], 2, FRAME_SHAPE)
-    recovered = subject.select([candidate(508, 500, 0.35)], 3, FRAME_SHAPE)
+    second = subject.select([candidate(508, 500, 0.35)], 3, FRAME_SHAPE)
+    promoted = subject.select([candidate(512, 500, 0.35)], 4, FRAME_SHAPE)
 
     assert first.challenger_streak == 1
     assert gap.challenger_streak == 1
-    assert recovered.source == "detector_reacquired"
-    assert recovered.reacquired is True
+    assert second.source == "predicted_hold"
+    assert second.challenger_streak == 2
+    assert second.recovery_provisional is True
+    assert promoted.source == "detector_reacquired"
+    assert promoted.reacquired is True
 
 
 def main() -> None:
     tests = [
         test_wrong_size_challenger_is_rejected,
-        test_short_unsupported_gap_cannot_recover,
-        test_degraded_track_can_recover_after_cooldown,
+        test_confirmed_challenger_is_provisional_before_promotion,
+        test_provisional_recovery_does_not_mutate_active_state,
+        test_provisional_recovery_promotes_after_additional_support,
+        test_promoted_recovery_uses_challenger_velocity,
         test_plausible_association_has_absolute_priority,
-        test_plausible_association_cancels_pending_challenger,
+        test_plausible_association_cancels_provisional_recovery,
         test_pending_challenger_survives_one_detector_gap,
     ]
     for test in tests:
