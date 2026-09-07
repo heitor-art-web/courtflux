@@ -102,8 +102,8 @@ export default function LabPage() {
     async function poll() {
       try {
         const [jobResponse, logResponse] = await Promise.all([
-          fetch(`/api/jobs/${jobId}`, { cache: "no-store" }),
-          fetch(`/api/jobs/${jobId}/log?tail=120`, { cache: "no-store" }),
+          fetch(`/api/lab/jobs/${jobId}`, { cache: "no-store" }),
+          fetch(`/api/lab/jobs/${jobId}/log?tail=120`, { cache: "no-store" }),
         ]);
 
         if (!cancelled) {
@@ -149,7 +149,7 @@ export default function LabPage() {
 
     setSubmitting(true);
     try {
-      const response = await fetch("/api/jobs", {
+      const response = await fetch("/api/lab/jobs", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
