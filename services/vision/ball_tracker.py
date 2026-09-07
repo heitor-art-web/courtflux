@@ -50,12 +50,12 @@ class TemporalBallTracker:
     Association weights and the high-confidence gate extension are configurable so they
     can be benchmarked offline without changing the production defaults.
 
-    Optional controlled reacquisition provides an escape hatch when the active trajectory
-    is no longer supported. It never widens the normal gate. Instead, an out-of-gate
-    challenger must be sufficiently confident, remain size-compatible with the active
-    ball hypothesis, and persist consistently across multiple frames before it can replace
-    the active trajectory. Recovery is deliberately more conservative while a normal
-    in-gate track is still healthy and becomes less restrictive after the track degrades.
+    Optional controlled reacquisition provides an escape hatch only when the active
+    trajectory has no plausible normal association. It never widens the normal gate.
+    Instead, an out-of-gate challenger must be sufficiently confident, remain
+    size-compatible with the active ball hypothesis, and persist consistently across
+    multiple frames. Any plausible in-gate association has absolute priority and cancels
+    a pending challenger before it can replace supported direct evidence.
     """
 
     def __init__(
@@ -147,7 +147,7 @@ class TemporalBallTracker:
         self.reacquire_min_size_similarity = max(
             0.0, min(float(reacquire_min_size_similarity), 1.0)
         )
-        self.reacquire_policy = "state_aware_v2"
+        self.reacquire_policy = "state_aware_v3a"
 
         if os.getenv("BASKETBALL_BALL_REACQUIRE") is not None:
             print(
@@ -522,11 +522,9 @@ class TemporalBallTracker:
 
         self._expire_challenger(frame_id)
 
-        # While the normal gate is still producing a healthy TRACKED observation,
-        # reacquisition must clear the full confidence bar and survive one extra frame.
-        # Once the active hypothesis has degraded, remove the confidence margin from the
-        # absolute floor and use the configured confirmation window. This makes recovery
-        # state-aware without globally widening the gate or changing score weights.
+        # v3a only calls this method after normal association has found no plausible
+        # candidate. Keep the state-aware lower floor used by v2 for degraded recovery;
+        # supported direct evidence is handled earlier and has absolute priority.
         active_supported = selected_confidence is not None and self.track_state == "TRACKED"
         minimum_confidence = self.reacquire_min_confidence
         if not active_supported:
@@ -657,41 +655,13 @@ class TemporalBallTracker:
         ]
 
         if scored:
+            # state_aware_v3a invariant: supported direct evidence always wins. A pending
+            # out-of-gate challenger is cancelled as soon as normal association finds at
+            # least one plausible candidate, so recovery cannot poison a healthy track.
             scored.sort(key=lambda item: item[0], reverse=True)
             score, distance_norm, index, candidate = scored[0]
-            selected_confidence = float(candidate.get("confidence", 0.0))
-            reacquire = self._reacquire_candidate(
-                candidates=candidates,
-                candidate_details=candidate_details,
-                selected_confidence=selected_confidence,
-                frame_id=frame_id,
-                diagonal=diagonal,
-            )
-            if reacquire is not None:
-                reacquire_index, reacquire_candidate, details = reacquire
-                return self._direct_ball(
-                    reacquire_candidate,
-                    frame_id,
-                    reacquire_index,
-                    score=details.confidence,
-                    distance_norm=details.distance_norm,
-                    gate_norm=gate_norm,
-                    rejected_candidates=max(len(candidates) - len(scored), 0),
-                    source="detector_reacquired",
-                    reset_velocity=True,
-                    reacquired=True,
-                )
-
-            if self._challenger_streak > 0:
-                self.track_state = "REACQUIRING"
-                challenger_streak = self._challenger_streak
-                challenger_confidence = self._challenger_confidence
-            else:
-                self.track_state = "TRACKED"
-                challenger_streak = 0
-                challenger_confidence = None
-
-            decision = self._direct_ball(
+            self._reset_challenger()
+            return self._direct_ball(
                 candidate,
                 frame_id,
                 index,
@@ -699,14 +669,7 @@ class TemporalBallTracker:
                 distance_norm,
                 gate_norm,
                 rejected_candidates=max(len(candidates) - len(scored), 0),
-                clear_challenger=challenger_streak <= 0,
             )
-            if challenger_streak > 0:
-                decision.track_state = "REACQUIRING"
-                decision.challenger_streak = challenger_streak
-                decision.challenger_confidence = challenger_confidence
-                self.track_state = "REACQUIRING"
-            return decision
 
         reacquire = self._reacquire_candidate(
             candidates=candidates,
