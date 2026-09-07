@@ -32,8 +32,8 @@ _supabase_store = SupabaseRunStore()
 
 app = FastAPI(
     title="CourtFlux Worker",
-    version="0.4.0",
-    description="Authenticated CourtFlux analysis worker with Supabase run persistence.",
+    version="0.4.1",
+    description="CourtFlux analysis worker with loopback-first local development defaults.",
 )
 
 
@@ -81,7 +81,16 @@ def normalize_uuid(value: str | None, field_name: str) -> str | None:
 def require_worker_token(authorization: str | None = Header(default=None)) -> None:
     expected = os.getenv("WORKER_API_TOKEN", "").strip()
     if not expected:
-        raise HTTPException(status_code=503, detail="WORKER_API_TOKEN is not configured on the worker")
+        host = os.getenv("WORKER_HOST", "127.0.0.1").strip().lower()
+        if host in {"127.0.0.1", "localhost", "::1"}:
+            return
+        raise HTTPException(
+            status_code=503,
+            detail=(
+                "WORKER_API_TOKEN is required when WORKER_HOST is not loopback. "
+                "Use the default 127.0.0.1 host for local development."
+            ),
+        )
     prefix = "Bearer "
     if not authorization or not authorization.startswith(prefix):
         raise HTTPException(status_code=401, detail="Missing worker bearer token")
