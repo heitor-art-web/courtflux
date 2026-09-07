@@ -167,6 +167,56 @@ class PerformanceDetector(P0PerformanceDetector):
         return traces
 
     @staticmethod
+    def _same_box(a: dict[str, Any], b: dict[str, Any]) -> bool:
+        box_a = a.get("box")
+        box_b = b.get("box")
+        if not isinstance(box_a, (list, tuple)) or not isinstance(box_b, (list, tuple)):
+            return False
+        if len(box_a) != 4 or len(box_b) != 4:
+            return False
+        return all(abs(float(left) - float(right)) <= 1.0 for left, right in zip(box_a, box_b))
+
+    def _preserve_full_frame_candidates(
+        self,
+        raw_candidates: list[dict[str, Any]],
+        enhanced: list[dict[str, Any]],
+        *,
+        frame_state: Any,
+    ) -> tuple[list[dict[str, Any]], int]:
+        """Guarantee that smart processing cannot reduce full-frame candidate recall."""
+        pipeline = self.smart_ball_pipeline
+        if pipeline is None:
+            return enhanced, 0
+
+        restored = 0
+        output = list(enhanced)
+        frame_id = int(getattr(frame_state, "frame_id", 0))
+        for raw in raw_candidates:
+            present = any(
+                str(candidate.get("source", "")) == "full_frame"
+                and self._same_box(raw, candidate)
+                for candidate in output
+            )
+            if present:
+                continue
+            item = dict(raw)
+            item["source"] = "full_frame"
+            item["detector_confidence"] = float(item.get("confidence", 0.0))
+            item.setdefault("verification_score", None)
+            output.append(
+                pipeline._rank_candidate(
+                    item,
+                    tracker=self.ball_tracker,
+                    frame_id=frame_id,
+                    frame_shape=frame_state.frame.shape,
+                )
+            )
+            restored += 1
+
+        output.sort(key=lambda candidate: float(candidate.get("rank_score", 0.0)), reverse=True)
+        return output, restored
+
+    @staticmethod
     def _association_candidates(
         candidates: list[dict[str, Any]],
     ) -> list[dict[str, Any]]:
@@ -192,6 +242,14 @@ class PerformanceDetector(P0PerformanceDetector):
             frame_id=frame_id,
             tracker=self.ball_tracker,
         )
+        enhanced, restored = self._preserve_full_frame_candidates(
+            candidates,
+            enhanced,
+            frame_state=frame_state,
+        )
+        smart_diag["full_frame_candidates_restored"] = int(restored)
+        smart_diag["output_candidate_count"] = len(enhanced)
+
         association_candidates = self._association_candidates(enhanced)
         ball, association = super()._select_ball(association_candidates, frame_state)
         selected_index = association.get("selected_index")
