@@ -55,7 +55,9 @@ class TemporalBallTracker:
     Instead, an out-of-gate challenger must be sufficiently confident, remain
     size-compatible with the active ball hypothesis, and persist consistently across
     multiple frames. Any plausible in-gate association has absolute priority and cancels
-    a pending challenger before it can replace supported direct evidence.
+    a pending challenger before it can replace supported direct evidence. Recovery can
+    collect challenger evidence during a short direct-observation gap, but v3b prevents
+    confirmation until direct support has been absent for a minimum number of frames.
     """
 
     def __init__(
@@ -77,6 +79,7 @@ class TemporalBallTracker:
         reacquire_confirm_frames: int | None = None,
         reacquire_radius_norm: float | None = None,
         reacquire_min_size_similarity: float | None = None,
+        reacquire_min_unsupported_frames: int | None = None,
     ) -> None:
         self.max_hold_frames = max(0, int(max_hold_frames))
         self.reset_after_frames = max(self.max_hold_frames + 1, int(reset_after_frames))
@@ -135,6 +138,11 @@ class TemporalBallTracker:
             if reacquire_min_size_similarity is None
             else float(reacquire_min_size_similarity)
         )
+        reacquire_min_unsupported_frames = (
+            self._env_int("BASKETBALL_BALL_REACQUIRE_MIN_UNSUPPORTED_FRAMES", 3)
+            if reacquire_min_unsupported_frames is None
+            else int(reacquire_min_unsupported_frames)
+        )
 
         self.reacquire_min_confidence = max(
             0.0, min(float(reacquire_min_confidence), 1.0)
@@ -147,7 +155,10 @@ class TemporalBallTracker:
         self.reacquire_min_size_similarity = max(
             0.0, min(float(reacquire_min_size_similarity), 1.0)
         )
-        self.reacquire_policy = "state_aware_v3a"
+        self.reacquire_min_unsupported_frames = max(
+            1, int(reacquire_min_unsupported_frames)
+        )
+        self.reacquire_policy = "state_aware_v3b"
 
         if os.getenv("BASKETBALL_BALL_REACQUIRE") is not None:
             print(
@@ -157,6 +168,7 @@ class TemporalBallTracker:
                 f"min_conf={self.reacquire_min_confidence:.2f} "
                 f"margin={self.reacquire_confidence_margin:.2f} "
                 f"confirm={self.reacquire_confirm_frames}f "
+                f"min_unsupported={self.reacquire_min_unsupported_frames}f "
                 f"radius={self.reacquire_radius_norm:.3f}diag "
                 f"min_size_sim={self.reacquire_min_size_similarity:.2f}",
                 flush=True,
@@ -522,9 +534,10 @@ class TemporalBallTracker:
 
         self._expire_challenger(frame_id)
 
-        # v3a only calls this method after normal association has found no plausible
-        # candidate. Keep the state-aware lower floor used by v2 for degraded recovery;
-        # supported direct evidence is handled earlier and has absolute priority.
+        # v3b only calls this method after normal association has found no plausible
+        # candidate. Challenger evidence may accumulate immediately, but confirmation is
+        # suppressed until the active direct observation is old enough. This protects
+        # short detector gaps without discarding a coherent recovery hypothesis.
         active_supported = selected_confidence is not None and self.track_state == "TRACKED"
         minimum_confidence = self.reacquire_min_confidence
         if not active_supported:
@@ -546,9 +559,6 @@ class TemporalBallTracker:
             # used by _update_challenger().
             return None
 
-        # Prefer confidence only after accounting for compatibility with the active
-        # ball's size. This prevents a persistent, high-confidence wrong-size object from
-        # winning purely because it has the largest detector score.
         outside.sort(
             key=lambda item: (
                 item[2].confidence * item[2].size_similarity,
@@ -573,6 +583,14 @@ class TemporalBallTracker:
             diagonal=diagonal,
             required_streak=required_streak,
         )
+
+        unsupported_age = (
+            self.reacquire_min_unsupported_frames
+            if self.last_frame_id is None
+            else max(int(frame_id) - int(self.last_frame_id), 0)
+        )
+        if unsupported_age < self.reacquire_min_unsupported_frames:
+            return None
         if not confirmed:
             return None
         return index, candidate, details
@@ -655,7 +673,7 @@ class TemporalBallTracker:
         ]
 
         if scored:
-            # state_aware_v3a invariant: supported direct evidence always wins. A pending
+            # v3a/v3b invariant: supported direct evidence always wins. A pending
             # out-of-gate challenger is cancelled as soon as normal association finds at
             # least one plausible candidate, so recovery cannot poison a healthy track.
             scored.sort(key=lambda item: item[0], reverse=True)
