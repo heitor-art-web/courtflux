@@ -68,6 +68,8 @@ export BASKETBALL_HF_DEVICE=cpu
 # or mps / cuda when supported by the local Torch build and model
 ```
 
+Apple Silicon should be attempted on `mps` first. Current Hugging Face/PyTorch support is good but MPS still does not implement every operator. For a diagnostic smoke test only, `PYTORCH_ENABLE_MPS_FALLBACK=1` can fall back to CPU kernels. Do not compare FPS from a fallback run against a native MPS/CUDA run without labeling it explicitly.
+
 ## Important metric semantics
 
 Do not compare Hugging Face/Roboflow mAP or dataset recall directly with the CourtFlux Quality Gate.
@@ -85,17 +87,37 @@ Promotion is decided only by the frozen CourtFlux benchmark:
 
 The YOLO `--imgsz 960` operating point remains frozen for the YOLO baseline and player tracker. A Hugging Face DETR-family backend uses its model image processor rather than Ultralytics `imgsz`; this is recorded in run metadata as `image_size_semantics=model_processor` and must be considered in performance comparisons.
 
-## Experiment RF1 — detector-only challenger
+## Experiment RF1 — detector-only challengers
 
-First isolate the detector. Keep reacquire OFF and disable the smart crop/ranking layer:
+First isolate the detector. Keep reacquire OFF and disable the smart crop/ranking layer.
+
+### RF1-A — official generic RF-DETR Medium
+
+This tests the RF-DETR architecture with the official COCO-style model. It is **not** basketball fine-tuned.
 
 ```bash
 export BASKETBALL_BALL_REACQUIRE=0
 export BASKETBALL_BALL_DETECTOR_BACKEND=huggingface
 export BASKETBALL_HF_BALL_MODEL='Roboflow/rf-detr-medium'
 export BASKETBALL_HF_BALL_LABELS='sports ball'
+unset BASKETBALL_HF_MODEL_REVISION
 export BASKETBALL_SMART_BALL_PIPELINE=0
 ```
+
+### RF1-B — basketball-specific community RF-DETR
+
+There is also a Transformers-native community checkpoint fine-tuned on the Roboflow basketball dataset used by the reference basketball project:
+
+```bash
+export BASKETBALL_BALL_REACQUIRE=0
+export BASKETBALL_BALL_DETECTOR_BACKEND=huggingface
+export BASKETBALL_HF_BALL_MODEL='koppolusameer/rfdetr-basketball-player-ball-referee-detection'
+export BASKETBALL_HF_BALL_LABELS='ball'
+unset BASKETBALL_HF_MODEL_REVISION
+export BASKETBALL_SMART_BALL_PIPELINE=0
+```
+
+Treat RF1-B as an external challenger, not a trusted production dependency. Its model card reports that it was fine-tuned from RF-DETR Nano on the public basketball dataset and explicitly notes that tiny balls remain difficult and that the source data is not very diverse. CourtFlux still decides promotion only through V1–V5.
 
 Then run the same five frozen clips with the existing analyzer commands (`--conf 0.10 --imgsz 960 --device mps --detection-only --no-jersey --no-persist`). The `--imgsz` still applies to player YOLO; the HF ball model uses its processor-native image sizing.
 
@@ -104,6 +126,13 @@ Use `evaluation/smart_ball_benchmark.py` with each new run mapped to the origina
 ### RF1 decision
 
 Do not promote RF-DETR because it has better generic mAP. Promote it only if the CourtFlux metrics improve materially, especially micro recall and worst-video recall, with tolerable candidate noise and runtime.
+
+RF1-A and RF1-B answer different questions:
+
+- RF1-A: does a stronger/different generic architecture already help our domain?
+- RF1-B: does basketball-specific fine-tuning transfer to our five cameras/domains?
+
+The best next CourtFlux checkpoint may ultimately be neither of them; they are probes that tell us whether architecture, domain training, or both are required.
 
 ## Experiment RF2 — HF detector + current smart pipeline
 
@@ -145,6 +174,8 @@ When we start fine-tuning, build the first CourtFlux dataset version from the ex
 - hard negative candidates from wrong objects;
 - not-visible frames with false detections;
 - especially V2 representation failures and V4 high-noise cases.
+
+The current CourtFlux one-click GT is point-based. Do **not** fabricate RF-DETR bounding boxes by assigning arbitrary fixed-size boxes around those points. Before fine-tuning an object detector, use defensible boxes (manual boxes on a targeted subset or a separately validated pseudo-label procedure). Point GT remains the authoritative evaluation target.
 
 Keep dataset version, training config, model checkpoint/revision, Git commit, and frozen CourtFlux benchmark together for every experiment.
 
