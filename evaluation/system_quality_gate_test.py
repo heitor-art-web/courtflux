@@ -1,10 +1,15 @@
 from __future__ import annotations
 
 import json
+import sys
 import tempfile
 from pathlib import Path
 
 import numpy as np
+
+ROOT = Path(__file__).resolve().parents[1]
+if str(ROOT) not in sys.path:
+    sys.path.insert(0, str(ROOT))
 
 from evaluation.ball_track_coverage_eval import evaluate_pair
 from services.vision.court_geometry import estimate_homography, project_image_point_to_court
