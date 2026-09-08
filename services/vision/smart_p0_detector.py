@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from typing import Any
 
+from services.vision.ball_candidate_filter import filter_smart_candidates
 from services.vision.ball_candidate_pipeline import (
     SmartBallCandidatePipeline,
     SmartBallPipelineConfig,
@@ -12,9 +13,9 @@ from services.vision.p0_association_detector import PerformanceDetector as P0Per
 class PerformanceDetector(P0PerformanceDetector):
     """P0 detector with conservative smart candidate generation before association.
 
-    Full-frame ball detections remain the primary observations. A same-checkpoint crop
-    pass can verify/refine ambiguous candidates, and a temporal prior may request one
-    additional crop search when the full-frame stream has no plausible observation.
+    Full-frame candidates are always preserved. Same-checkpoint crop verification can
+    contribute ranking evidence, while temporal state may request one additional crop
+    search. Smart-only proposals are filtered conservatively before association.
     Temporal state never creates a ball by itself.
 
     Set ``BASKETBALL_SMART_BALL_PIPELINE=0`` to restore the previous P0 candidate path.
@@ -27,6 +28,16 @@ class PerformanceDetector(P0PerformanceDetector):
         self.smart_ball_pipeline_enabled = self._env_bool(
             "BASKETBALL_SMART_BALL_PIPELINE",
             True,
+        )
+        self.smart_emit_refinements = self._env_bool(
+            "BASKETBALL_BALL_EMIT_REFINEMENTS",
+            False,
+        )
+        self.smart_zoom_min_geometry = self._env_float(
+            "BASKETBALL_BALL_ZOOM_MIN_GEOMETRY",
+            0.60,
+            0.0,
+            1.0,
         )
 
         if (
@@ -84,6 +95,8 @@ class PerformanceDetector(P0PerformanceDetector):
                 "🏀 Smart ball pipeline: on "
                 f"verify={'on' if config.verify_enabled else 'off'} "
                 f"selective_zoom={'on' if config.zoom_enabled else 'off'} "
+                f"emit_refinements={'on' if self.smart_emit_refinements else 'off'} "
+                f"zoom_min_geometry={self.smart_zoom_min_geometry:.2f} "
                 f"crop={config.crop_size}px "
                 f"rank=({config.detector_weight:.2f},"
                 f"{config.verifier_weight:.2f},"
@@ -98,9 +111,7 @@ class PerformanceDetector(P0PerformanceDetector):
         config = super()._tracker_config()
         pipeline = getattr(self, "smart_ball_pipeline", None)
         if pipeline is None:
-            config["smart_candidate_pipeline"] = {
-                "enabled": False,
-            }
+            config["smart_candidate_pipeline"] = {"enabled": False}
             return config
 
         smart = pipeline.config
@@ -114,6 +125,8 @@ class PerformanceDetector(P0PerformanceDetector):
             "verify_match_px": round(float(smart.verify_match_px), 6),
             "zoom_trigger_rank": round(float(smart.zoom_trigger_rank), 6),
             "temporal_zoom_max_age": int(smart.temporal_zoom_max_age),
+            "emit_refinement_candidates": bool(self.smart_emit_refinements),
+            "zoom_min_geometry": round(float(self.smart_zoom_min_geometry), 6),
             "rank_weights": {
                 "detector": round(float(pipeline.weights[0]), 6),
                 "verifier": round(float(pipeline.weights[1]), 6),
@@ -160,7 +173,9 @@ class PerformanceDetector(P0PerformanceDetector):
                 if candidate.get("geometry_score") is None
                 else round(float(candidate["geometry_score"]), 6)
             )
-            trace["source"] = str(candidate.get("candidate_source", candidate.get("source", "full_frame")))
+            trace["source"] = str(
+                candidate.get("candidate_source", candidate.get("source", "full_frame"))
+            )
             trace["merged_sources"] = list(candidate.get("merged_sources") or [])
             trace["zoom_reason"] = candidate.get("zoom_reason")
             trace["crop_box"] = candidate.get("crop_box")
@@ -174,7 +189,10 @@ class PerformanceDetector(P0PerformanceDetector):
             return False
         if len(box_a) != 4 or len(box_b) != 4:
             return False
-        return all(abs(float(left) - float(right)) <= 1.0 for left, right in zip(box_a, box_b))
+        return all(
+            abs(float(left) - float(right)) <= 1.0
+            for left, right in zip(box_a, box_b)
+        )
 
     def _preserve_full_frame_candidates(
         self,
@@ -213,7 +231,10 @@ class PerformanceDetector(P0PerformanceDetector):
             )
             restored += 1
 
-        output.sort(key=lambda candidate: float(candidate.get("rank_score", 0.0)), reverse=True)
+        output.sort(
+            key=lambda candidate: float(candidate.get("rank_score", 0.0)),
+            reverse=True,
+        )
         return output, restored
 
     @staticmethod
@@ -223,7 +244,9 @@ class PerformanceDetector(P0PerformanceDetector):
         association_candidates: list[dict[str, Any]] = []
         for candidate in candidates:
             scored = dict(candidate)
-            detector_conf = float(candidate.get("detector_confidence", candidate.get("confidence", 0.0)))
+            detector_conf = float(
+                candidate.get("detector_confidence", candidate.get("confidence", 0.0))
+            )
             scored["detector_confidence"] = detector_conf
             scored["candidate_source"] = str(candidate.get("source", "full_frame"))
             scored["confidence"] = float(candidate.get("rank_score", detector_conf))
@@ -242,6 +265,14 @@ class PerformanceDetector(P0PerformanceDetector):
             frame_id=frame_id,
             tracker=self.ball_tracker,
         )
+        enhanced, filter_diag = filter_smart_candidates(
+            enhanced,
+            emit_refinements=self.smart_emit_refinements,
+            zoom_min_geometry=self.smart_zoom_min_geometry,
+        )
+        smart_diag.update(filter_diag)
+        smart_diag["post_filter_candidate_count"] = len(enhanced)
+
         enhanced, restored = self._preserve_full_frame_candidates(
             candidates,
             enhanced,
@@ -277,13 +308,7 @@ class PerformanceDetector(P0PerformanceDetector):
         return ball, association
 
     def process(self, frame_state: Any):
-        """Expose smart candidate cost separately from core parse cost.
-
-        The parent P0 detector times the entire parse stage, which now contains the smart
-        candidate pass. Reclassify that measured time after processing so the shared
-        profiler reports Detector/parse and Detector/smart_ball without double-counting.
-        This changes profiling only; detection and association behavior are untouched.
-        """
+        """Expose smart candidate cost separately from core parse cost."""
         frame_state = super().process(frame_state)
         detector = frame_state.diagnostics.get("detector", {}) or {}
         association = detector.get("ball_association", {}) or {}
