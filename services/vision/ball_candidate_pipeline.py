@@ -29,13 +29,12 @@ class SmartBallPipelineConfig:
 class SmartBallCandidatePipeline:
     """Conservative detect -> verify -> selectively zoom -> rank pipeline.
 
-    The full-frame detector candidates are never removed. Verification and zoom use the
-    same detector checkpoint at the same confidence/imgsz operating point. The pipeline
-    can therefore add evidence and candidate proposals without silently changing the
-    frozen full-frame detector threshold.
+    Full-frame detector candidates are never intentionally removed. Verification and
+    selective zoom reuse the active ball-candidate backend, so YOLO and Hugging Face
+    challengers can be evaluated through the same candidate/association contract.
 
-    Temporal state is used only to propose a search ROI and to contribute a soft ranking
-    prior. It never creates a ball observation by itself.
+    Temporal state is used only to propose a search ROI and contribute a soft ranking
+    prior. It never creates a ball observation without detector confirmation.
     """
 
     def __init__(
@@ -49,6 +48,7 @@ class SmartBallCandidatePipeline:
         max_det: int,
         device: str,
         config: SmartBallPipelineConfig,
+        candidate_backend: Any | None = None,
     ) -> None:
         self.model = model
         self.ball_class_ids = list(ball_class_ids)
@@ -57,6 +57,8 @@ class SmartBallCandidatePipeline:
         self.imgsz = int(imgsz)
         self.max_det = int(max_det)
         self.device = str(device)
+        self.candidate_backend = candidate_backend
+        self.candidate_device = str(getattr(candidate_backend, "device", self.device))
         self.config = config
 
         weights = [
@@ -127,7 +129,11 @@ class SmartBallCandidatePipeline:
         frame_h, frame_w = frame_shape[:2]
         frame_min = max(float(min(frame_w, frame_h)), 1.0)
         relative_max_side = max(width, height) / frame_min
-        size_score = 1.0 if relative_max_side <= 0.08 else max(0.0, 1.0 - (relative_max_side - 0.08) / 0.22)
+        size_score = (
+            1.0
+            if relative_max_side <= 0.08
+            else max(0.0, 1.0 - (relative_max_side - 0.08) / 0.22)
+        )
         return float(0.65 * aspect_score + 0.35 * size_score)
 
     @staticmethod
@@ -143,7 +149,9 @@ class SmartBallCandidatePipeline:
         velocity = getattr(tracker, "velocity", None)
         if velocity is None:
             velocity = np.zeros(2, dtype=np.float64)
-        predicted = np.asarray(last_center, dtype=np.float64) + np.asarray(velocity, dtype=np.float64) * float(age)
+        predicted = np.asarray(last_center, dtype=np.float64) + np.asarray(
+            velocity, dtype=np.float64
+        ) * float(age)
         return (float(predicted[0]), float(predicted[1])), int(age)
 
     @staticmethod
@@ -173,11 +181,26 @@ class SmartBallCandidatePipeline:
         frame_shape: tuple[int, ...],
     ) -> dict[str, Any]:
         ranked = dict(candidate)
-        detector_conf = max(0.0, min(float(ranked.get("detector_confidence", ranked.get("confidence", 0.0))), 1.0))
+        detector_conf = max(
+            0.0,
+            min(
+                float(
+                    ranked.get(
+                        "detector_confidence",
+                        ranked.get("confidence", 0.0),
+                    )
+                ),
+                1.0,
+            ),
+        )
         ranked["detector_confidence"] = detector_conf
 
         verification = ranked.get("verification_score")
-        verifier_score = detector_conf if verification is None else max(0.0, min(float(verification), 1.0))
+        verifier_score = (
+            detector_conf
+            if verification is None
+            else max(0.0, min(float(verification), 1.0))
+        )
         temporal_score, plausible = self._temporal_score(
             ranked,
             tracker=tracker,
@@ -198,17 +221,21 @@ class SmartBallCandidatePipeline:
         ranked["geometry_score"] = float(geometry_score)
         return ranked
 
-    def _predict_crop(
-        self,
-        frame: Any,
-        *,
-        crop_box: tuple[int, int, int, int],
-        source: str,
-        reason: str,
-    ) -> list[dict[str, Any]]:
-        x1, y1, x2, y2 = crop_box
-        crop = frame[y1:y2, x1:x2]
-        if getattr(crop, "size", 0) == 0:
+    def _backend_crop_candidates(self, crop: Any) -> list[dict[str, Any]]:
+        backend = self.candidate_backend
+        if backend is None:
+            return []
+        return backend.predict(
+            crop,
+            conf=self.conf,
+            iou=self.iou,
+            imgsz=self.imgsz,
+            max_det=self.max_det,
+            device=self.candidate_device,
+        )
+
+    def _legacy_crop_candidates(self, crop: Any) -> list[dict[str, Any]]:
+        if self.model is None:
             return []
         results = self.model.predict(
             crop,
@@ -226,26 +253,68 @@ class SmartBallCandidatePipeline:
         for box in results[0].boxes:
             conf = float(box.conf[0])
             bx1, by1, bx2, by2 = [float(value) for value in box.xyxy[0].tolist()]
-            global_box = [bx1 + x1, by1 + y1, bx2 + x1, by2 + y1]
-            if global_box[2] <= global_box[0] or global_box[3] <= global_box[1]:
+            if bx2 <= bx1 or by2 <= by1:
                 continue
-            center = (
-                (global_box[0] + global_box[2]) / 2.0,
-                (global_box[1] + global_box[3]) / 2.0,
-            )
             candidates.append(
                 {
-                    "box": [int(round(value)) for value in global_box],
-                    "center": center,
+                    "box": [
+                        int(round(bx1)),
+                        int(round(by1)),
+                        int(round(bx2)),
+                        int(round(by2)),
+                    ],
+                    "center": ((bx1 + bx2) / 2.0, (by1 + by2) / 2.0),
                     "confidence": conf,
                     "detector_confidence": conf,
-                    "verification_score": conf,
-                    "source": source,
-                    "zoom_reason": reason,
-                    "crop_box": [int(value) for value in crop_box],
                     "interpolated": False,
                 }
             )
+        return candidates
+
+    def _predict_crop(
+        self,
+        frame: Any,
+        *,
+        crop_box: tuple[int, int, int, int],
+        source: str,
+        reason: str,
+    ) -> list[dict[str, Any]]:
+        x1, y1, x2, y2 = crop_box
+        crop = frame[y1:y2, x1:x2]
+        if getattr(crop, "size", 0) == 0:
+            return []
+
+        local_candidates = (
+            self._backend_crop_candidates(crop)
+            if self.candidate_backend is not None
+            else self._legacy_crop_candidates(crop)
+        )
+        candidates: list[dict[str, Any]] = []
+        for local in local_candidates:
+            box = local.get("box") or []
+            if len(box) != 4:
+                continue
+            bx1, by1, bx2, by2 = [float(value) for value in box]
+            global_box = [bx1 + x1, by1 + y1, bx2 + x1, by2 + y1]
+            if global_box[2] <= global_box[0] or global_box[3] <= global_box[1]:
+                continue
+            item = dict(local)
+            item["box"] = [int(round(value)) for value in global_box]
+            item["center"] = (
+                (global_box[0] + global_box[2]) / 2.0,
+                (global_box[1] + global_box[3]) / 2.0,
+            )
+            detector_conf = float(
+                item.get("detector_confidence", item.get("confidence", 0.0))
+            )
+            item["confidence"] = detector_conf
+            item["detector_confidence"] = detector_conf
+            item["verification_score"] = detector_conf
+            item["source"] = source
+            item["zoom_reason"] = reason
+            item["crop_box"] = [int(value) for value in crop_box]
+            item["interpolated"] = False
+            candidates.append(item)
         return candidates
 
     def _verify_candidates(
@@ -258,11 +327,23 @@ class SmartBallCandidatePipeline:
 
         ordered = sorted(
             enumerate(candidates),
-            key=lambda item: float(item[1].get("detector_confidence", item[1].get("confidence", 0.0))),
+            key=lambda item: float(
+                item[1].get(
+                    "detector_confidence",
+                    item[1].get("confidence", 0.0),
+                )
+            ),
             reverse=True,
         )
-        top_conf = float(ordered[0][1].get("detector_confidence", ordered[0][1].get("confidence", 0.0)))
-        ambiguous = len(candidates) > 1 or top_conf < float(self.config.verify_trigger_conf)
+        top_conf = float(
+            ordered[0][1].get(
+                "detector_confidence",
+                ordered[0][1].get("confidence", 0.0),
+            )
+        )
+        ambiguous = len(candidates) > 1 or top_conf < float(
+            self.config.verify_trigger_conf
+        )
         if not ambiguous:
             return candidates, [], 0
 
@@ -317,7 +398,12 @@ class SmartBallCandidatePipeline:
             match_radius = max(float(self.config.verify_match_px), 1.5 * seed_scale)
             matched = distance <= match_radius
             verified[index]["verification_score"] = (
-                float(nearest.get("detector_confidence", nearest.get("confidence", 0.0)))
+                float(
+                    nearest.get(
+                        "detector_confidence",
+                        nearest.get("confidence", 0.0),
+                    )
+                )
                 if matched
                 else 0.0
             )
@@ -342,11 +428,20 @@ class SmartBallCandidatePipeline:
         if not self.config.zoom_enabled:
             return False, None, None
         predicted, age = self._temporal_prediction(tracker, frame_id)
-        if predicted is None or age is None or age <= 0 or age > int(self.config.temporal_zoom_max_age):
+        if (
+            predicted is None
+            or age is None
+            or age <= 0
+            or age > int(self.config.temporal_zoom_max_age)
+        ):
             return False, None, predicted
         if not candidates:
             return True, "no_full_frame_candidate", predicted
-        plausible = [candidate for candidate in candidates if candidate.get("temporal_plausible") is True]
+        plausible = [
+            candidate
+            for candidate in candidates
+            if candidate.get("temporal_plausible") is True
+        ]
         if not plausible:
             return True, "no_temporally_plausible_candidate", predicted
         best_rank = max(float(candidate.get("rank_score", 0.0)) for candidate in plausible)
@@ -355,7 +450,11 @@ class SmartBallCandidatePipeline:
         return False, None, predicted
 
     def _dedupe(self, candidates: list[dict[str, Any]]) -> list[dict[str, Any]]:
-        ordered = sorted(candidates, key=lambda candidate: float(candidate.get("rank_score", 0.0)), reverse=True)
+        ordered = sorted(
+            candidates,
+            key=lambda candidate: float(candidate.get("rank_score", 0.0)),
+            reverse=True,
+        )
         kept: list[dict[str, Any]] = []
         for candidate in ordered:
             center = self._candidate_center(candidate)
@@ -386,7 +485,10 @@ class SmartBallCandidatePipeline:
                 kept.append(item)
                 continue
             existing = kept[duplicate_index]
-            sources = list(existing.get("merged_sources") or [str(existing.get("source") or "unknown")])
+            sources = list(
+                existing.get("merged_sources")
+                or [str(existing.get("source") or "unknown")]
+            )
             source = str(candidate.get("source") or "unknown")
             if source not in sources:
                 sources.append(source)
@@ -418,11 +520,17 @@ class SmartBallCandidatePipeline:
         for candidate in candidates:
             item = dict(candidate)
             item.setdefault("source", "full_frame")
-            item.setdefault("detector_confidence", float(item.get("confidence", 0.0)))
+            item.setdefault(
+                "detector_confidence",
+                float(item.get("confidence", 0.0)),
+            )
             item.setdefault("verification_score", None)
             normalized.append(item)
 
-        verified, refinements, verify_attempts = self._verify_candidates(frame, normalized)
+        verified, refinements, verify_attempts = self._verify_candidates(
+            frame,
+            normalized,
+        )
         ranked = [
             self._rank_candidate(
                 candidate,
@@ -465,12 +573,20 @@ class SmartBallCandidatePipeline:
             )
 
         merged = self._dedupe(ranked)
-        merged.sort(key=lambda candidate: float(candidate.get("rank_score", 0.0)), reverse=True)
+        merged.sort(
+            key=lambda candidate: float(candidate.get("rank_score", 0.0)),
+            reverse=True,
+        )
         elapsed_ms = (perf_counter() - started) * 1000.0
         diagnostics = {
             "enabled": True,
+            "backend": str(
+                getattr(self.candidate_backend, "name", "legacy_yolo")
+            ),
             "raw_candidate_count": len(candidates),
-            "verified_candidate_count": sum(1 for candidate in verified if candidate.get("verified") is True),
+            "verified_candidate_count": sum(
+                1 for candidate in verified if candidate.get("verified") is True
+            ),
             "verify_attempts": int(verify_attempts),
             "refinement_candidate_count": len(refinements),
             "zoom_triggered": bool(zoom_triggered),
@@ -479,8 +595,14 @@ class SmartBallCandidatePipeline:
             "zoom_crop_box": list(zoom_crop_box) if zoom_crop_box is not None else None,
             "output_candidate_count": len(merged),
             "sources": {
-                source: sum(1 for candidate in merged if str(candidate.get("source")) == source)
-                for source in sorted({str(candidate.get("source")) for candidate in merged})
+                source: sum(
+                    1
+                    for candidate in merged
+                    if str(candidate.get("source")) == source
+                )
+                for source in sorted(
+                    {str(candidate.get("source")) for candidate in merged}
+                )
             },
             "timing_ms": round(elapsed_ms, 4),
         }
