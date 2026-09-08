@@ -66,6 +66,11 @@ def main() -> None:
     parser.add_argument("--keypoint-map", default="")
     parser.add_argument("--anchor-conf", type=float, default=0.5)
     parser.add_argument("--max-rmse-px", type=float, default=12.0)
+    parser.add_argument(
+        "--api-url",
+        default=os.getenv("ROBOFLOW_INFERENCE_API_URL", "https://serverless.roboflow.com"),
+        help="Roboflow inference endpoint. Current hosted default is https://serverless.roboflow.com",
+    )
     parser.add_argument("--output", default="evaluation/court_calibration_benchmark")
     args = parser.parse_args()
 
@@ -80,7 +85,7 @@ def main() -> None:
             "Install optional dependencies first: python3 -m pip install -r requirements-roboflow.txt"
         ) from exc
 
-    client = InferenceHTTPClient(api_url="https://detect.roboflow.com", api_key=api_key)
+    client = InferenceHTTPClient(api_url=args.api_url, api_key=api_key)
     keypoint_map = load_keypoint_map(args.keypoint_map or None)
     cap = cv2.VideoCapture(str(Path(args.video)))
     if not cap.isOpened():
@@ -159,6 +164,7 @@ def main() -> None:
         "end_sec": args.end,
         "fps": fps,
         "model_id": args.model_id,
+        "api_url": args.api_url,
         "keypoint_map_size": len(keypoint_map),
         "anchor_confidence": args.anchor_conf,
         "max_reprojection_rmse_px": args.max_rmse_px,
