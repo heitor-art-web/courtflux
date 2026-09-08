@@ -244,6 +244,8 @@ def main(
             "mode": "detection_only" if detection_only else "full",
             "persist_results": persist_results,
         }
+        if detection_only and hasattr(detector, "ball_candidate_backend_metadata"):
+            extra["ball_detector_backend"] = detector.ball_candidate_backend_metadata()
         if engine is not None:
             metrics_path = engine.metrics.export()
             extra["legacy_metrics_file"] = str(metrics_path)
