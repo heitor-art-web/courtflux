@@ -13,7 +13,10 @@ def normalize_label(value: Any) -> str:
     return " ".join(text.split())
 
 
-def parse_label_set(raw: str | None, fallback: tuple[str, ...] = ("sports ball", "ball", "basketball")) -> set[str]:
+def parse_label_set(
+    raw: str | None,
+    fallback: tuple[str, ...] = ("sports ball", "ball", "basketball"),
+) -> set[str]:
     values = raw.split(",") if raw and raw.strip() else list(fallback)
     return {normalize_label(value) for value in values if normalize_label(value)}
 
@@ -87,7 +90,11 @@ class YOLOBallCandidateBackend:
     def _class_ids(model: Any, predicate: Callable[[str], bool]) -> list[int]:
         names = getattr(model, "names", {}) or {}
         items = names.items() if isinstance(names, dict) else enumerate(names)
-        return [int(class_id) for class_id, name in items if predicate(str(name).lower())]
+        return [
+            int(class_id)
+            for class_id, name in items
+            if predicate(str(name).lower())
+        ]
 
     def predict(
         self,
@@ -117,10 +124,17 @@ class YOLOBallCandidateBackend:
         for box in results[0].boxes:
             class_id = int(box.cls[0])
             confidence = float(box.conf[0])
-            x1, y1, x2, y2 = map(int, box.xyxy[0].tolist())
+            x1, y1, x2, y2 = [float(value) for value in box.xyxy[0].tolist()]
             if x2 <= x1 or y2 <= y1:
                 continue
-            raw_label = names.get(class_id, class_id) if isinstance(names, dict) else names[class_id]
+            raw_label = (
+                names.get(class_id, class_id)
+                if isinstance(names, dict)
+                else names[class_id]
+            )
+            # Keep detector coordinates as floats here. The full-frame P0 handoff
+            # truncates them exactly as before, while smart crop passes add the crop
+            # offset first and round afterwards, matching the pre-backend implementation.
             candidates.append(
                 {
                     "box": [x1, y1, x2, y2],
@@ -171,7 +185,11 @@ class HuggingFaceBallCandidateBackend:
 
         self.torch = torch
         self.model_id = str(model_id)
-        self.revision = str(revision).strip() if revision and str(revision).strip() else None
+        self.revision = (
+            str(revision).strip()
+            if revision and str(revision).strip()
+            else None
+        )
         self.device = str(device)
         self.allowed_labels = {normalize_label(label) for label in allowed_labels}
 
@@ -212,7 +230,7 @@ class HuggingFaceBallCandidateBackend:
         max_det: int,
         device: str | None = None,
     ) -> list[dict[str, Any]]:
-        del iou, imgsz  # DETR-family inference uses the model processor; no YOLO-style NMS/imgsz.
+        del iou, imgsz  # DETR-family inference uses model processor; no YOLO NMS/imgsz.
         from PIL import Image
 
         inference_device = str(device or self.device)
@@ -284,7 +302,10 @@ def create_ball_candidate_backend(
         )
 
     if backend in {"hf", "huggingface", "rf_detr", "rfdetr"}:
-        model_id = os.getenv("BASKETBALL_HF_BALL_MODEL", "Roboflow/rf-detr-medium").strip()
+        model_id = os.getenv(
+            "BASKETBALL_HF_BALL_MODEL",
+            "Roboflow/rf-detr-medium",
+        ).strip()
         revision = os.getenv("BASKETBALL_HF_MODEL_REVISION")
         hf_device = os.getenv("BASKETBALL_HF_DEVICE", device).strip() or device
         labels = parse_label_set(os.getenv("BASKETBALL_HF_BALL_LABELS"))
