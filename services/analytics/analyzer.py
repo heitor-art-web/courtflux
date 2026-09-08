@@ -34,6 +34,13 @@ from services.diagnostics import RunDiagnostics
 DEFAULT_MATCH_CONFIG_PATH = PROJECT_ROOT / "data" / "match_config.json"
 
 
+def _env_bool(name: str, fallback: bool = False) -> bool:
+    raw = os.getenv(name)
+    if raw is None or not raw.strip():
+        return bool(fallback)
+    return raw.strip().lower() not in {"0", "false", "no", "off"}
+
+
 def resolve_device(requested: str | None) -> str:
     if requested:
         requested = requested.lower().strip()
@@ -127,11 +134,17 @@ def main(
             raise RuntimeError(f"Unable to read frame at {start_time:.1f}s")
         session.cap.set(cv2.CAP_PROP_POS_MSEC, start_time * 1000)
 
+        court_calibration_enabled = _env_bool("BASKETBALL_COURT_CALIBRATION", False)
         if detection_only:
-            print("⚡ Detection-only mode: camera/homography and analytics engine disabled.", flush=True)
-            camera_tracker = None
-            court_polygon = None
             engine = None
+            if court_calibration_enabled:
+                print("📐 Detection-only mode: diagnostic court calibration enabled.", flush=True)
+                camera_tracker = CameraTracker(first_frame=first_frame)
+                court_polygon = camera_tracker.base_polygon
+            else:
+                print("⚡ Detection-only mode: camera/homography and analytics engine disabled.", flush=True)
+                camera_tracker = None
+                court_polygon = None
         else:
             print("📐 Calibrating court...", flush=True)
             camera_tracker = CameraTracker(first_frame=first_frame)
@@ -243,7 +256,15 @@ def main(
             "video_path": str(video_path),
             "mode": "detection_only" if detection_only else "full",
             "persist_results": persist_results,
+            "court_calibration_enabled": bool(camera_tracker is not None),
+            "court_calibration_diagnostic_only": bool(detection_only and camera_tracker is not None),
         }
+        if camera_tracker is not None:
+            extra["court_calibration"] = {
+                "model_id": getattr(camera_tracker, "model_id", None),
+                "keypoint_schema": getattr(camera_tracker, "keypoint_schema", None),
+                "keypoint_map_size": len(getattr(camera_tracker, "keypoint_map", {}) or {}),
+            }
         if detection_only and hasattr(detector, "ball_candidate_backend_metadata"):
             extra["ball_detector_backend"] = detector.ball_candidate_backend_metadata()
         if engine is not None:
@@ -310,7 +331,7 @@ if __name__ == "__main__":
     parser.add_argument("--tracker", type=str, default="botsort.yaml", choices=["botsort.yaml", "bytetrack.yaml"])
     parser.add_argument("--match-config", type=str, default=str(DEFAULT_MATCH_CONFIG_PATH), help="Match config JSON path")
     parser.add_argument("--reset-db", action="store_true", help="Reset SQLite before the run")
-    parser.add_argument("--detection-only", action="store_true", help="Skip camera/homography and tactical analytics")
+    parser.add_argument("--detection-only", action="store_true", help="Skip tactical analytics; court calibration can be enabled diagnostically via env")
     parser.add_argument("--no-jersey", action="store_true", help="Disable temporal jersey recognition")
     parser.add_argument("--jersey-interval", type=int, default=12, help="Frames between jersey attempts per tracked player")
     parser.add_argument("--db-batch-size", type=int, default=100, help="Frames buffered per SQLite commit")
