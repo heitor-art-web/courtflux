@@ -1,22 +1,24 @@
 from __future__ import annotations
 
 from dataclasses import asdict
+import os
 from time import perf_counter
 from typing import Any
 
-from ultralytics import YOLO
-
+from services.vision.ball_candidate_backend import create_ball_candidate_backend
 from services.vision.performance_detector import PerformanceDetector as BasePerformanceDetector
 
 
 class PerformanceDetector(BasePerformanceDetector):
     """P0.2-instrumented detector with independent raw ball candidate generation.
 
-    Player identities still come from ``YOLO.track``. Ball candidates come from a
-    second, detection-only YOLO instance so BoT-SORT cannot discard a valid ball
-    detection before CourtFlux association sees it.
+    Player identities still come from ``YOLO.track``. Ball candidates come from an
+    independent detector backend so BoT-SORT cannot discard a valid ball detection before
+    CourtFlux association sees it. The default backend remains the frozen YOLO path;
+    ``BASKETBALL_BALL_DETECTOR_BACKEND=huggingface`` enables an HF challenger while
+    preserving the downstream candidate contract and evaluation path.
 
-    ``BASKETBALL_SPLIT_BALL_DETECTION=0`` restores the legacy path for comparison.
+    ``BASKETBALL_SPLIT_BALL_DETECTION=0`` restores the legacy track path for comparison.
     Controlled reacquisition remains independently gated by ``BASKETBALL_BALL_REACQUIRE``.
     """
 
@@ -26,7 +28,12 @@ class PerformanceDetector(BasePerformanceDetector):
             "BASKETBALL_SPLIT_BALL_DETECTION",
             True,
         )
-        self.ball_candidate_model: YOLO | None = None
+        self.ball_candidate_backend_name = os.getenv(
+            "BASKETBALL_BALL_DETECTOR_BACKEND",
+            "yolo",
+        ).strip().lower() or "yolo"
+        self.ball_candidate_backend: Any | None = None
+        self.ball_candidate_model: Any | None = None
         self.ball_candidate_class_ids: list[int] = []
         self.player_tracking_class_ids = self._class_ids(self.model, self._is_player_class)
         self.ball_candidate_max_det = self._env_int(
@@ -38,27 +45,31 @@ class PerformanceDetector(BasePerformanceDetector):
 
         if self.split_ball_detection:
             model_path = self._resolve_model_path(self.model)
-            if not model_path:
-                raise RuntimeError(
-                    "Split ball detection requires a resolvable YOLO checkpoint path. "
-                    "Set BASKETBALL_SPLIT_BALL_DETECTION=0 to use the legacy track path."
-                )
-            self.ball_candidate_model = YOLO(model_path)
-            self.ball_candidate_model.to(self.device)
-            self.ball_candidate_class_ids = self._class_ids(
-                self.ball_candidate_model,
-                self._is_ball_class,
+            self.ball_candidate_backend = create_ball_candidate_backend(
+                backend_name=self.ball_candidate_backend_name,
+                yolo_model_path=model_path,
+                device=self.device,
+                ball_predicate=self._is_ball_class,
             )
-            if not self.ball_candidate_class_ids:
-                raise RuntimeError(
-                    "Split ball detection is enabled but the model exposes no ball class."
-                )
+            self.ball_candidate_backend_name = str(
+                getattr(self.ball_candidate_backend, "name", self.ball_candidate_backend_name)
+            )
+            self.ball_candidate_model = getattr(
+                self.ball_candidate_backend,
+                "raw_model",
+                None,
+            )
+            self.ball_candidate_class_ids = list(
+                getattr(self.ball_candidate_backend, "class_ids", []) or []
+            )
 
+        metadata = self.ball_candidate_backend_metadata()
         print(
             "🏀 P0.1→P0.2 candidate handoff: "
-            f"{'raw_predict' if self.split_ball_detection else 'legacy_yolo_track'} "
+            f"{self.ball_candidate_backend_name if self.split_ball_detection else 'legacy_yolo_track'} "
             f"ball_conf={self.ball_conf_thresh:.3f} "
-            f"ball_max_det={self.ball_candidate_max_det}",
+            f"ball_max_det={self.ball_candidate_max_det} "
+            f"model={metadata.get('model') if metadata else 'tracked_model'}",
             flush=True,
         )
 
@@ -87,6 +98,22 @@ class PerformanceDetector(BasePerformanceDetector):
             for class_id, name in items
             if predicate(str(name).lower())
         ]
+
+    def ball_candidate_backend_metadata(self) -> dict[str, Any]:
+        backend = getattr(self, "ball_candidate_backend", None)
+        if backend is None:
+            return {
+                "backend": "yolo_track",
+                "model": self._resolve_model_path(self.model),
+                "device": self.device,
+            }
+        metadata = getattr(backend, "metadata", None)
+        if callable(metadata):
+            return dict(metadata())
+        return {
+            "backend": str(getattr(backend, "name", "unknown")),
+            "device": str(getattr(backend, "device", self.device)),
+        }
 
     @staticmethod
     def _rounded_score(score: Any) -> dict[str, Any] | None:
@@ -135,7 +162,7 @@ class PerformanceDetector(BasePerformanceDetector):
                     getattr(self, "split_ball_detection", False)
                 ),
                 "source": (
-                    "raw_predict"
+                    str(getattr(self, "ball_candidate_backend_name", "yolo"))
                     if getattr(self, "split_ball_detection", False)
                     else "yolo_track"
                 ),
@@ -146,6 +173,7 @@ class PerformanceDetector(BasePerformanceDetector):
                 "ball_class_ids": list(
                     getattr(self, "ball_candidate_class_ids", [])
                 ),
+                "backend": self.ball_candidate_backend_metadata(),
             },
         }
 
@@ -202,19 +230,26 @@ class PerformanceDetector(BasePerformanceDetector):
         for index, (candidate, score) in enumerate(zip(candidates, scores)):
             center = candidate.get("center") or (None, None)
             box = candidate.get("box") or []
-            traces.append(
-                {
-                    "index": int(index),
-                    "box": [int(value) for value in box] if len(box) == 4 else None,
-                    "center": (
-                        [round(float(center[0]), 4), round(float(center[1]), 4)]
-                        if center[0] is not None and center[1] is not None
-                        else None
-                    ),
-                    "confidence": round(float(candidate.get("confidence", 0.0)), 6),
-                    "association": self._rounded_score(score),
-                }
-            )
+            trace = {
+                "index": int(index),
+                "box": [int(value) for value in box] if len(box) == 4 else None,
+                "center": (
+                    [round(float(center[0]), 4), round(float(center[1]), 4)]
+                    if center[0] is not None and center[1] is not None
+                    else None
+                ),
+                "confidence": round(float(candidate.get("confidence", 0.0)), 6),
+                "association": self._rounded_score(score),
+            }
+            for key in (
+                "detector_backend",
+                "detector_model",
+                "detector_class_id",
+                "detector_label",
+            ):
+                if candidate.get(key) is not None:
+                    trace[key] = candidate.get(key)
+            traces.append(trace)
         return traces
 
     @staticmethod
@@ -356,23 +391,50 @@ class PerformanceDetector(BasePerformanceDetector):
             kwargs["classes"] = self.player_tracking_class_ids
         return self.model.track(frame, **kwargs)
 
-    def _predict_ball_candidates(self, frame: Any):
-        if not self.split_ball_detection or self.ball_candidate_model is None:
+    def _predict_ball_candidates(self, frame: Any) -> list[dict[str, Any]] | None:
+        backend = getattr(self, "ball_candidate_backend", None)
+        if not self.split_ball_detection or backend is None:
             return None
-        return self.ball_candidate_model.predict(
+        backend_device = str(getattr(backend, "device", self.device))
+        return backend.predict(
             frame,
             conf=self.ball_conf_thresh,
             iou=self.iou,
             imgsz=self.imgsz,
             max_det=self.ball_candidate_max_det,
-            classes=self.ball_candidate_class_ids,
-            device=self.device,
-            verbose=False,
+            device=backend_device,
         )
+
+    def _legacy_tracked_ball_candidates(self, tracked_results: Any) -> list[dict[str, Any]]:
+        candidates: list[dict[str, Any]] = []
+        if not tracked_results or tracked_results[0].boxes is None:
+            return candidates
+        for box in tracked_results[0].boxes:
+            cls_id = int(box.cls[0])
+            conf = float(box.conf[0])
+            cls_name = str(self.model.names.get(cls_id, cls_id)).lower()
+            if not self._is_ball_class(cls_name):
+                continue
+            x1, y1, x2, y2 = map(int, box.xyxy[0].tolist())
+            if conf < self.ball_conf_thresh or x2 <= x1 or y2 <= y1:
+                continue
+            candidates.append(
+                {
+                    "box": [x1, y1, x2, y2],
+                    "center": ((x1 + x2) / 2.0, (y1 + y2) / 2.0),
+                    "confidence": conf,
+                    "detector_confidence": conf,
+                    "detector_backend": "yolo_track",
+                    "detector_class_id": cls_id,
+                    "detector_label": str(self.model.names.get(cls_id, cls_id)),
+                    "source": "full_frame",
+                    "interpolated": False,
+                }
+            )
+        return candidates
 
     def _parse(self, frame_state: Any, tracked_results: Any, ball_results: Any = None):
         players: list[dict[str, Any]] = []
-        ball_candidates: list[dict[str, Any]] = []
         class_counts: dict[str, int] = {}
         raw_total = 0
         raw_players = 0
@@ -409,44 +471,42 @@ class PerformanceDetector(BasePerformanceDetector):
                     }
                 )
 
-        ball_source_results = ball_results if ball_results is not None else tracked_results
-        ball_names = (
-            self.ball_candidate_model.names
-            if ball_results is not None and self.ball_candidate_model is not None
-            else self.model.names
+        ball_candidates = (
+            [dict(candidate) for candidate in ball_results]
+            if ball_results is not None
+            else self._legacy_tracked_ball_candidates(tracked_results)
         )
-        raw_balls = 0
-        accepted_ball_candidates = 0
-        raw_ball_max_conf = None
-        raw_ball_confidences: list[float] = []
+        raw_balls = len(ball_candidates)
+        raw_ball_confidences = [
+            float(candidate.get("detector_confidence", candidate.get("confidence", 0.0)))
+            for candidate in ball_candidates
+        ]
+        raw_ball_max_conf = max(raw_ball_confidences) if raw_ball_confidences else None
 
-        if ball_source_results and ball_source_results[0].boxes is not None:
-            for box in ball_source_results[0].boxes:
-                cls_id = int(box.cls[0])
-                conf = float(box.conf[0])
-                cls_name = str(ball_names.get(cls_id, cls_id)).lower()
-                if not self._is_ball_class(cls_name):
-                    continue
-
-                raw_balls += 1
-                raw_ball_confidences.append(conf)
-                raw_ball_max_conf = (
-                    conf if raw_ball_max_conf is None else max(raw_ball_max_conf, conf)
-                )
-
-                x1, y1, x2, y2 = map(int, box.xyxy[0].tolist())
-                if conf < self.ball_conf_thresh or x2 <= x1 or y2 <= y1:
-                    continue
-
-                accepted_ball_candidates += 1
-                ball_candidates.append(
-                    {
-                        "box": [x1, y1, x2, y2],
-                        "center": ((x1 + x2) / 2.0, (y1 + y2) / 2.0),
-                        "confidence": conf,
-                        "interpolated": False,
-                    }
-                )
+        accepted_candidates: list[dict[str, Any]] = []
+        for candidate in ball_candidates:
+            item = dict(candidate)
+            box = item.get("box") or []
+            confidence = float(
+                item.get("detector_confidence", item.get("confidence", 0.0))
+            )
+            if len(box) != 4 or confidence < self.ball_conf_thresh:
+                continue
+            x1, y1, x2, y2 = [int(value) for value in box]
+            if x2 <= x1 or y2 <= y1:
+                continue
+            item["box"] = [x1, y1, x2, y2]
+            item["center"] = item.get("center") or (
+                (x1 + x2) / 2.0,
+                (y1 + y2) / 2.0,
+            )
+            item["confidence"] = confidence
+            item["detector_confidence"] = confidence
+            item.setdefault("source", "full_frame")
+            item.setdefault("interpolated", False)
+            accepted_candidates.append(item)
+        ball_candidates = accepted_candidates
+        accepted_ball_candidates = len(ball_candidates)
 
         selected_ball, association = self._select_ball(ball_candidates, frame_state)
         ball_source = str(association.get("source") or "missing")
@@ -457,6 +517,7 @@ class PerformanceDetector(BasePerformanceDetector):
         frame_state.players = players
         frame_state.ball = selected_ball
         frame_state.diagnostics.setdefault("analytics", {})["ball_source"] = ball_source
+        backend_metadata = self.ball_candidate_backend_metadata()
         detector = {
             "raw_total": raw_total,
             "raw_class_counts": class_counts,
@@ -479,8 +540,11 @@ class PerformanceDetector(BasePerformanceDetector):
             "ball_source": ball_source,
             "ball_temporal_enabled": self.ball_temporal_enabled,
             "ball_candidate_source": (
-                "raw_predict" if ball_results is not None else "yolo_track"
+                str(backend_metadata.get("backend", self.ball_candidate_backend_name))
+                if ball_results is not None
+                else "yolo_track"
             ),
+            "ball_detector_backend": backend_metadata,
             "split_ball_detection": bool(self.split_ball_detection),
             "ball_predict_max_det": int(self.ball_candidate_max_det),
             "ball_predict_class_ids": list(self.ball_candidate_class_ids),
@@ -538,7 +602,11 @@ class PerformanceDetector(BasePerformanceDetector):
         if self.split_ball_detection:
             started = perf_counter()
             ball_results = self._predict_ball_candidates(frame_state.frame)
-            timings["yolo_predict_ball"] = (perf_counter() - started) * 1000.0
+            backend = getattr(self, "ball_candidate_backend", None)
+            timing_name = str(
+                getattr(backend, "timing_name", "ball_candidate_inference")
+            )
+            timings[timing_name] = (perf_counter() - started) * 1000.0
 
         started = perf_counter()
         self._parse(frame_state, tracked_results, ball_results)
