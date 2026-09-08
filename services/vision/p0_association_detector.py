@@ -496,7 +496,10 @@ class PerformanceDetector(BasePerformanceDetector):
             if x2 <= x1 or y2 <= y1:
                 continue
             item["box"] = [x1, y1, x2, y2]
-            item["center"] = item.get("center") or (
+            # Recompute from the normalized integer box. This preserves the historical
+            # full-frame YOLO candidate center exactly and prevents a sub-pixel backend
+            # abstraction change from moving the official <=40 px benchmark boundary.
+            item["center"] = (
                 (x1 + x2) / 2.0,
                 (y1 + y2) / 2.0,
             )
