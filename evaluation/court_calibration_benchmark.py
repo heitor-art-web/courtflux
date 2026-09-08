@@ -79,13 +79,15 @@ def main() -> None:
         raise RuntimeError("ROBOFLOW_API_KEY is required for hosted court calibration benchmark")
 
     try:
-        from inference_sdk import InferenceHTTPClient
+        from inference_sdk import InferenceConfiguration, InferenceHTTPClient
     except ImportError as exc:
         raise RuntimeError(
             "Install optional dependencies first: python3 -m pip install -r requirements-roboflow.txt"
         ) from exc
 
-    client = InferenceHTTPClient(api_url=args.api_url, api_key=api_key)
+    client = InferenceHTTPClient(api_url=args.api_url, api_key=api_key).configure(
+        InferenceConfiguration(api_key_transport="header")
+    )
     keypoint_map = load_keypoint_map(args.keypoint_map or None)
     cap = cv2.VideoCapture(str(Path(args.video)))
     if not cap.isOpened():
@@ -165,6 +167,7 @@ def main() -> None:
         "fps": fps,
         "model_id": args.model_id,
         "api_url": args.api_url,
+        "api_key_transport": "header",
         "keypoint_map_size": len(keypoint_map),
         "anchor_confidence": args.anchor_conf,
         "max_reprojection_rmse_px": args.max_rmse_px,
