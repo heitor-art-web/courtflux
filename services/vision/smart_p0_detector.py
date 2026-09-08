@@ -13,12 +13,12 @@ from services.vision.p0_association_detector import PerformanceDetector as P0Per
 class PerformanceDetector(P0PerformanceDetector):
     """P0 detector with conservative smart candidate generation before association.
 
-    Full-frame candidates are always preserved. Same-checkpoint crop verification can
-    contribute ranking evidence, while temporal state may request one additional crop
-    search. Smart-only proposals are filtered conservatively before association.
-    Temporal state never creates a ball by itself.
+    Full-frame candidates are always preserved. Verification and selective zoom reuse
+    whichever ball-candidate backend is active (YOLO or Hugging Face). Smart-only
+    proposals are filtered conservatively before association. Temporal state never
+    creates a ball by itself.
 
-    Set ``BASKETBALL_SMART_BALL_PIPELINE=0`` to restore the previous P0 candidate path.
+    Set ``BASKETBALL_SMART_BALL_PIPELINE=0`` to restore the plain P0 candidate path.
     ``BASKETBALL_BALL_REACQUIRE`` remains independent and defaults OFF.
     """
 
@@ -39,11 +39,18 @@ class PerformanceDetector(P0PerformanceDetector):
             0.0,
             1.0,
         )
+        self.smart_temporal_rescue_min_score = self._env_float(
+            "BASKETBALL_BALL_TEMPORAL_RESCUE_MIN_SCORE",
+            0.70,
+            0.0,
+            1.0,
+        )
 
+        backend = getattr(self, "ball_candidate_backend", None)
         if (
             self.smart_ball_pipeline_enabled
             and self.split_ball_detection
-            and self.ball_candidate_model is not None
+            and backend is not None
         ):
             config = SmartBallPipelineConfig(
                 enabled=True,
@@ -90,13 +97,16 @@ class PerformanceDetector(P0PerformanceDetector):
                 max_det=self.ball_candidate_max_det,
                 device=self.device,
                 config=config,
+                candidate_backend=backend,
             )
             print(
                 "🏀 Smart ball pipeline: on "
+                f"backend={getattr(backend, 'name', 'unknown')} "
                 f"verify={'on' if config.verify_enabled else 'off'} "
                 f"selective_zoom={'on' if config.zoom_enabled else 'off'} "
                 f"emit_refinements={'on' if self.smart_emit_refinements else 'off'} "
                 f"zoom_min_geometry={self.smart_zoom_min_geometry:.2f} "
+                f"temporal_rescue={self.smart_temporal_rescue_min_score:.2f} "
                 f"crop={config.crop_size}px "
                 f"rank=({config.detector_weight:.2f},"
                 f"{config.verifier_weight:.2f},"
@@ -117,6 +127,9 @@ class PerformanceDetector(P0PerformanceDetector):
         smart = pipeline.config
         config["smart_candidate_pipeline"] = {
             "enabled": True,
+            "backend": str(
+                getattr(getattr(self, "ball_candidate_backend", None), "name", "unknown")
+            ),
             "verify_enabled": bool(smart.verify_enabled),
             "zoom_enabled": bool(smart.zoom_enabled),
             "crop_size": int(smart.crop_size),
@@ -127,6 +140,9 @@ class PerformanceDetector(P0PerformanceDetector):
             "temporal_zoom_max_age": int(smart.temporal_zoom_max_age),
             "emit_refinement_candidates": bool(self.smart_emit_refinements),
             "zoom_min_geometry": round(float(self.smart_zoom_min_geometry), 6),
+            "temporal_rescue_min_score": round(
+                float(self.smart_temporal_rescue_min_score), 6
+            ),
             "rank_weights": {
                 "detector": round(float(pipeline.weights[0]), 6),
                 "verifier": round(float(pipeline.weights[1]), 6),
@@ -269,6 +285,7 @@ class PerformanceDetector(P0PerformanceDetector):
             enhanced,
             emit_refinements=self.smart_emit_refinements,
             zoom_min_geometry=self.smart_zoom_min_geometry,
+            temporal_rescue_min_score=self.smart_temporal_rescue_min_score,
         )
         smart_diag.update(filter_diag)
         smart_diag["post_filter_candidate_count"] = len(enhanced)
