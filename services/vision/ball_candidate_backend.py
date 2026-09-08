@@ -196,7 +196,7 @@ class RoboflowBallCandidateBackend:
 
     def __init__(self, *, model_id: str, allowed_labels: set[str]) -> None:
         try:
-            from inference_sdk import InferenceHTTPClient
+            from inference_sdk import InferenceConfiguration, InferenceHTTPClient
         except ImportError as exc:
             raise RuntimeError(
                 "Roboflow backend requires optional dependencies. Install: "
@@ -207,9 +207,11 @@ class RoboflowBallCandidateBackend:
             raise RuntimeError("Roboflow hosted inference requires ROBOFLOW_API_KEY.")
         self.model_id = str(model_id)
         self.allowed_labels = {normalize_label(label) for label in allowed_labels}
-        self.api_url = os.getenv("BASKETBALL_ROBOFLOW_API_URL", "https://detect.roboflow.com").strip()
+        self.api_url = os.getenv("BASKETBALL_ROBOFLOW_API_URL", "https://serverless.roboflow.com").strip()
         self.device = "roboflow_hosted_http"
-        self.client = InferenceHTTPClient(api_url=self.api_url, api_key=api_key)
+        self.client = InferenceHTTPClient(api_url=self.api_url, api_key=api_key).configure(
+            InferenceConfiguration(api_key_transport="header")
+        )
 
     @staticmethod
     def _prediction_value(prediction: Any, name: str, default: Any = None) -> Any:
@@ -257,7 +259,7 @@ class RoboflowBallCandidateBackend:
     def metadata(self) -> dict[str, Any]:
         return {
             "backend": self.name, "model": self.model_id, "labels": sorted(self.allowed_labels),
-            "device": self.device, "api_url": self.api_url,
+            "device": self.device, "api_url": self.api_url, "api_key_transport": "header",
             "threshold_semantics": "courtflux_postfilter_on_roboflow_hosted_predictions",
             "image_size_semantics": "hosted_model_managed",
             "roboflow_auth": "ROBOFLOW_API_KEY",
