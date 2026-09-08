@@ -4,10 +4,15 @@ import argparse
 import json
 import math
 import os
+import sys
 from pathlib import Path
 from typing import Any
 
 import cv2
+
+ROOT = Path(__file__).resolve().parents[1]
+if str(ROOT) not in sys.path:
+    sys.path.insert(0, str(ROOT))
 
 from services.vision.ball_candidate_backend import create_ball_candidate_backend, normalize_label
 
