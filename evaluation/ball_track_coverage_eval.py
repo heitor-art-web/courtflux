@@ -3,8 +3,13 @@ from __future__ import annotations
 import argparse
 import json
 import math
+import sys
 from pathlib import Path
 from typing import Any
+
+ROOT = Path(__file__).resolve().parents[1]
+if str(ROOT) not in sys.path:
+    sys.path.insert(0, str(ROOT))
 
 from evaluation.ball_error_review import (
     align_production_truth,
@@ -40,7 +45,6 @@ def best_direct_center(
         if isinstance(candidate, dict)
     ]
     matches: list[tuple[float, tuple[float, float]]] = []
-    gt_point = truth.get("point")
     for candidate in candidates:
         ok, distance = candidate_matches_truth(candidate, truth, radius_px, 0.25)
         center = candidate_center(candidate)
@@ -99,7 +103,6 @@ def evaluate_pair(
             missing = right_idx - left_idx - 1
             if missing <= 0 or missing > max_gap:
                 continue
-            # Do not bridge across frame discontinuities caused by skipped/non-gameplay frames.
             frame_span = rows[right_idx]["frame_id"] - rows[left_idx]["frame_id"]
             if frame_span != missing + 1:
                 continue
@@ -120,7 +123,6 @@ def evaluate_pair(
                 local_errors.append(error)
                 if error > radius_px:
                     all_correct = False
-            # Conservative bridge: count the gap only if every interpolated point is correct.
             if all_correct:
                 for offset in range(1, missing + 1):
                     idx = left_idx + offset
