@@ -1,10 +1,18 @@
 from __future__ import annotations
 
 import os
+from pathlib import Path
 from typing import Any, Callable
 
 import numpy as np
+from dotenv import load_dotenv
 from ultralytics import YOLO
+
+
+PROJECT_ROOT = Path(__file__).resolve().parents[2]
+# Local development reads <repo>/.env. In hosted/worker environments (including
+# Vercel), already-injected environment variables win because override=False.
+load_dotenv(PROJECT_ROOT / ".env", override=False)
 
 
 def normalize_label(value: Any) -> str:
@@ -197,9 +205,13 @@ class HuggingFaceBallCandidateBackend:
         if self.revision:
             load_kwargs["revision"] = self.revision
 
-        # Authentication is intentionally delegated to huggingface_hub. It reads HF_TOKEN
-        # from the environment or the user's local HF auth store; CourtFlux never stores or
-        # logs the token.
+        # HF_TOKEN is loaded from <repo>/.env for local development, or inherited
+        # directly from the worker/Vercel environment. Passing it explicitly makes
+        # private/gated model authentication deterministic while never logging it.
+        hf_token = os.getenv("HF_TOKEN", "").strip()
+        if hf_token:
+            load_kwargs["token"] = hf_token
+
         self.processor = AutoImageProcessor.from_pretrained(self.model_id, **load_kwargs)
         self.raw_model = AutoModelForObjectDetection.from_pretrained(
             self.model_id,
@@ -280,7 +292,7 @@ class HuggingFaceBallCandidateBackend:
             "device": self.device,
             "threshold_semantics": "transformers_post_process_threshold",
             "image_size_semantics": "model_processor",
-            "hf_token_source": "HF_TOKEN_or_local_auth_store",
+            "hf_auth": "HF_TOKEN" if bool(os.getenv("HF_TOKEN", "").strip()) else "local_auth_or_public",
         }
 
 
