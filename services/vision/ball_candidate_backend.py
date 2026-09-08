@@ -190,23 +190,26 @@ class HuggingFaceBallCandidateBackend:
 
 
 class RoboflowBallCandidateBackend:
-    """Optional challenger using a public/private Roboflow Inference model."""
+    """Hosted Roboflow challenger using the lightweight Inference HTTP SDK."""
     name = "roboflow"
     timing_name = "roboflow_predict_ball"
 
     def __init__(self, *, model_id: str, allowed_labels: set[str]) -> None:
         try:
-            from inference import get_model
+            from inference_sdk import InferenceHTTPClient
         except ImportError as exc:
             raise RuntimeError(
                 "Roboflow backend requires optional dependencies. Install: "
                 "python3 -m pip install -r requirements-roboflow.txt"
             ) from exc
+        api_key = os.getenv("ROBOFLOW_API_KEY", "").strip()
+        if not api_key:
+            raise RuntimeError("Roboflow hosted inference requires ROBOFLOW_API_KEY.")
         self.model_id = str(model_id)
         self.allowed_labels = {normalize_label(label) for label in allowed_labels}
-        self.device = "roboflow_inference"
-        # inference uses ROBOFLOW_API_KEY from the environment when model access needs it.
-        self.raw_model = get_model(model_id=self.model_id)
+        self.api_url = os.getenv("BASKETBALL_ROBOFLOW_API_URL", "https://detect.roboflow.com").strip()
+        self.device = "roboflow_hosted_http"
+        self.client = InferenceHTTPClient(api_url=self.api_url, api_key=api_key)
 
     @staticmethod
     def _prediction_value(prediction: Any, name: str, default: Any = None) -> Any:
@@ -216,16 +219,15 @@ class RoboflowBallCandidateBackend:
 
     def predict(self, frame: Any, *, conf: float, iou: float, imgsz: int, max_det: int, device: str | None = None) -> list[dict[str, Any]]:
         del iou, imgsz, device
-        raw = self.raw_model.infer(frame, confidence=float(conf))
+        if not isinstance(frame, np.ndarray) or frame.ndim < 2:
+            return []
+        raw = self.client.infer(frame, model_id=self.model_id)
         result = raw[0] if isinstance(raw, list) and raw else raw
         if result is None:
             return []
-        if isinstance(result, dict):
-            predictions = result.get("predictions", []) or []
-        else:
-            predictions = getattr(result, "predictions", []) or []
+        predictions = result.get("predictions", []) if isinstance(result, dict) else getattr(result, "predictions", [])
         candidates: list[dict[str, Any]] = []
-        for prediction in predictions:
+        for prediction in predictions or []:
             raw_label = self._prediction_value(prediction, "class_name", None)
             if raw_label is None:
                 raw_label = self._prediction_value(prediction, "class", "")
@@ -233,6 +235,8 @@ class RoboflowBallCandidateBackend:
             if label not in self.allowed_labels:
                 continue
             confidence = float(self._prediction_value(prediction, "confidence", 0.0) or 0.0)
+            if confidence < float(conf):
+                continue
             x = float(self._prediction_value(prediction, "x", 0.0) or 0.0)
             y = float(self._prediction_value(prediction, "y", 0.0) or 0.0)
             width = float(self._prediction_value(prediction, "width", 0.0) or 0.0)
@@ -253,9 +257,10 @@ class RoboflowBallCandidateBackend:
     def metadata(self) -> dict[str, Any]:
         return {
             "backend": self.name, "model": self.model_id, "labels": sorted(self.allowed_labels),
-            "device": self.device, "threshold_semantics": "roboflow_inference_confidence",
-            "image_size_semantics": "model_managed",
-            "roboflow_auth": "ROBOFLOW_API_KEY" if bool(os.getenv("ROBOFLOW_API_KEY", "").strip()) else "public_or_local_cache",
+            "device": self.device, "api_url": self.api_url,
+            "threshold_semantics": "courtflux_postfilter_on_roboflow_hosted_predictions",
+            "image_size_semantics": "hosted_model_managed",
+            "roboflow_auth": "ROBOFLOW_API_KEY",
         }
 
 
