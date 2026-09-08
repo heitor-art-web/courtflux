@@ -12,7 +12,7 @@ import cv2
 from services.vision.ball_candidate_backend import create_ball_candidate_backend, normalize_label
 
 
-def center_xyxy(box: list[float]) -> tuple[float, float]:
+def center_xywh(box: list[float]) -> tuple[float, float]:
     x, y, w, h = [float(v) for v in box]
     return x + w / 2.0, y + h / 2.0
 
@@ -35,11 +35,11 @@ def is_ball_label(name: str) -> bool:
 
 def main() -> None:
     parser = argparse.ArgumentParser(
-        description="Benchmark a CourtFlux ball backend on an external COCO detection dataset."
+        description="Benchmark a CourtFlux-compatible ball backend on an external COCO detection dataset."
     )
     parser.add_argument("--images", required=True, help="Directory containing COCO images")
     parser.add_argument("--annotations", required=True, help="COCO _annotations.coco.json")
-    parser.add_argument("--backend", choices=["yolo", "huggingface"], required=True)
+    parser.add_argument("--backend", choices=["yolo", "huggingface", "roboflow"], required=True)
     parser.add_argument("--yolo-model", default="weights/Model_v0.1.pt")
     parser.add_argument("--device", default="mps")
     parser.add_argument("--conf", type=float, default=0.10)
@@ -67,6 +67,8 @@ def main() -> None:
 
     if args.backend == "huggingface" and not os.getenv("BASKETBALL_HF_BALL_LABELS"):
         os.environ["BASKETBALL_HF_BALL_LABELS"] = "ball,sports ball,basketball"
+    if args.backend == "roboflow" and not os.getenv("BASKETBALL_ROBOFLOW_BALL_LABELS"):
+        os.environ["BASKETBALL_ROBOFLOW_BALL_LABELS"] = "ball"
 
     backend = create_ball_candidate_backend(
         backend_name=args.backend,
@@ -111,7 +113,7 @@ def main() -> None:
         matched_candidate_indices: set[int] = set()
 
         for gt in gts:
-            gt_center = center_xyxy(gt["bbox"])
+            gt_center = center_xywh(gt["bbox"])
             center_hits: list[tuple[float, int]] = []
             iou_hits: list[tuple[float, int]] = []
             for idx, candidate in enumerate(candidates):
@@ -137,15 +139,13 @@ def main() -> None:
         if center_matches_for_frame > 0:
             frames_with_center_match += 1
         false_candidates += max(0, len(candidates) - len(matched_candidate_indices))
-        rows.append(
-            {
-                "image_id": image_id,
-                "file_name": info["file_name"],
-                "gt_ball_instances": len(gts),
-                "candidate_count": len(candidates),
-                "center_matches": center_matches_for_frame,
-            }
-        )
+        rows.append({
+            "image_id": image_id,
+            "file_name": info["file_name"],
+            "gt_ball_instances": len(gts),
+            "candidate_count": len(candidates),
+            "center_matches": center_matches_for_frame,
+        })
 
     summary = {
         "scope": "external image-level ball detector benchmark",
