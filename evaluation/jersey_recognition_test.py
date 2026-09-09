@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import numpy as np
+
 from services.vision.roboflow_jersey_analyzer import RoboflowJerseyAnalyzer
 
 
@@ -7,6 +9,44 @@ def _expect(response, expected_number, expected_reason):
     number, reason = RoboflowJerseyAnalyzer.parse_number(response)
     assert number == expected_number, (response, number, expected_number)
     assert reason == expected_reason, (response, reason, expected_reason)
+
+
+class _FakeLMMClient:
+    def __init__(self) -> None:
+        self.calls = []
+
+    def infer_lmm(self, **kwargs):
+        self.calls.append(kwargs)
+        return {"response": {"text": "23"}}
+
+
+def _test_lmm_call_contract() -> None:
+    # Bypass __init__ so the test is deterministic and never needs a live Roboflow server.
+    analyzer = RoboflowJerseyAnalyzer.__new__(RoboflowJerseyAnalyzer)
+    analyzer.model_id = "basketball-jersey-numbers-ocr/7"
+    analyzer.api_url = "http://localhost:9001"
+    analyzer.prompt = "read jersey"
+    analyzer.client = _FakeLMMClient()
+    analyzer.track_crop_buffers = {
+        17: [np.zeros((72, 40, 3), dtype=np.uint8)],
+    }
+    analyzer.rosters = {
+        "Test Team": {
+            "roster": {
+                "23": {"name": "Test Player"},
+            }
+        }
+    }
+
+    result = analyzer.predict_jersey(17, "Test Team")
+    assert result["accepted"] is True
+    assert result["candidate_number"] == "23"
+    assert result["latency_ms"] >= 0.0
+    assert len(analyzer.client.calls) == 1
+    call = analyzer.client.calls[0]
+    assert call["model_id"] == "basketball-jersey-numbers-ocr/7"
+    assert call["model_id_in_path"] is True
+    assert call["max_new_tokens"] == 16
 
 
 def main() -> int:
@@ -37,6 +77,7 @@ def main() -> int:
 
     # Repeated equivalent evidence is unambiguous.
     _expect({"result": ["23", "jersey 23"]}, "23", "parsed")
+    _test_lmm_call_contract()
 
     print("jersey_recognition_test: PASS")
     return 0
