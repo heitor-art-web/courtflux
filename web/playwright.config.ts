@@ -4,10 +4,14 @@ export default defineConfig({
   testDir: "./e2e",
   fullyParallel: true,
   retries: process.env.CI ? 2 : 0,
-  reporter: process.env.CI ? "github" : "list",
+  reporter: process.env.CI
+    ? [["line"], ["html", { outputFolder: "playwright-report", open: "never" }]]
+    : "list",
+  outputDir: "test-results",
   use: {
     baseURL: "http://127.0.0.1:3000",
     trace: "retain-on-failure",
+    screenshot: "only-on-failure",
   },
   projects: [
     { name: "chromium-desktop", use: { ...devices["Desktop Chrome"] } },
