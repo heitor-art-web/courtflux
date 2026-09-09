@@ -1,0 +1,57 @@
+{
+  "schema_version": 1,
+  "phase": "P1.1",
+  "status": "pending_measurement",
+  "purpose": "Frozen player-tracking baseline contract before tracker tuning or RF-DETR promotion.",
+  "canonical_baseline": {
+    "model": "weights/model_v1.0.0.pt",
+    "detector": "YOLO",
+    "tracker": "botsort.yaml",
+    "imgsz": 960,
+    "player_confidence": 0.10,
+    "inference_confidence": 0.03,
+    "ball_confidence": 0.03,
+    "detection_only": true,
+    "jersey_enabled": false
+  },
+  "videos": [
+    {"label": "V1", "path": "data/hILf-ySowIo.mp4", "start_sec": 10, "end_sec": 40},
+    {"label": "V2", "path": "data/ULUpcQXsRII.mp4", "start_sec": 0, "end_sec": 30},
+    {"label": "V3", "path": "data/Vr4105n-cPM.mp4", "start_sec": 0, "end_sec": 30},
+    {"label": "V4", "path": "data/WMWTbS8J2ec.mp4", "start_sec": 0, "end_sec": 30},
+    {"label": "V5", "path": "data/C-JjAlX2Dyc.mp4", "start_sec": 10, "end_sec": 40}
+  ],
+  "required_artifacts": [
+    "run_config.json",
+    "summary.json",
+    "frames.jsonl",
+    "P1.1 tracking quality report"
+  ],
+  "measurable_without_player_identity_gt": [
+    "players per gameplay frame",
+    "unique track IDs",
+    "untracked observation rate",
+    "same-ID interruptions",
+    "track observed duration and span",
+    "short-track rate",
+    "high-IoU distinct-track duplicate proxy",
+    "team-label stability per track",
+    "court_xy continuity when homography is available",
+    "runtime / detector timing"
+  ],
+  "requires_targeted_ground_truth": [
+    "true player recall",
+    "true ID switches",
+    "true track fragmentation by physical player",
+    "true missing-player frames"
+  ],
+  "rules": [
+    "Measure this baseline before tuning the tracker.",
+    "Change one variable at a time.",
+    "RF-DETR remains a challenger until it beats the baseline quantitatively.",
+    "Do not change P0 ball policies or promote ball reacquisition.",
+    "Do not introduce new evaluation videos.",
+    "SAM2 remains deferred / contingency backlog."
+  ],
+  "baseline_run_ids": []
+}
