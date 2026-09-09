@@ -20,21 +20,37 @@ class _FakeTracker:
         return np.asarray([[0, 0, 10, 20, 42, 0.9, 0, 0]], dtype=np.float32)
 
 
-class _FakeDetections:
-    def __init__(self, class_names):
-        self.data = {"class_name": np.asarray(class_names, dtype=object)}
+def test_roboflow_response_filters_only_player():
+    response = {
+        "predictions": [
+            {"x": 50, "y": 60, "width": 20, "height": 40, "confidence": 0.91, "class": "player"},
+            {"x": 80, "y": 60, "width": 20, "height": 40, "confidence": 0.95, "class": "referee"},
+            {"x": 20, "y": 20, "width": 10, "height": 10, "confidence": 0.99, "class": "basketball"},
+            {"x": 120, "y": 60, "width": 20, "height": 40, "confidence": 0.05, "class": "player"},
+        ]
+    }
+    players = RFDETRPlayerDetector._players_from_roboflow_response(
+        response,
+        target_class="player",
+        player_threshold=0.10,
+    )
+    assert len(players) == 1
+    assert players[0].box == [40.0, 40.0, 60.0, 80.0]
+    assert players[0].confidence == 0.91
 
 
-def test_person_class_mapping():
-    assert RFDETRPlayerDetector._resolve_person_class_ids({1: "person", 2: "car"}) == {1}
-    # A contiguous class-name list can still expose person at index 0, but
-    # pretrained COCO predictions themselves use sparse category ID 1.
-    assert RFDETRPlayerDetector._resolve_person_class_ids(["person", "bicycle"]) == {0}
-
-
-def test_detection_class_name_metadata_is_preferred():
-    detections = _FakeDetections(["person", "car"])
-    assert RFDETRPlayerDetector._class_names_from_detections(detections, 2) == ["person", "car"]
+def test_invalid_boxes_are_rejected():
+    response = {
+        "predictions": [
+            {"x": 10, "y": 10, "width": 0, "height": 20, "confidence": 0.9, "class": "player"}
+        ]
+    }
+    players = RFDETRPlayerDetector._players_from_roboflow_response(
+        response,
+        target_class="player",
+        player_threshold=0.10,
+    )
+    assert players == []
 
 
 def test_unassigned_detections_are_preserved():
@@ -52,7 +68,7 @@ def test_unassigned_detections_are_preserved():
 
 
 if __name__ == "__main__":
-    test_person_class_mapping()
-    test_detection_class_name_metadata_is_preferred()
+    test_roboflow_response_filters_only_player()
+    test_invalid_boxes_are_rejected()
     test_unassigned_detections_are_preserved()
     print("rfdetr_challenger_test: PASS")
