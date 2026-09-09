@@ -39,80 +39,15 @@
     }
   },
   "videos": [
-    {
-      "label": "V1",
-      "path": "data/hILf-ySowIo.mp4",
-      "start_sec": 10,
-      "end_sec": 40,
-      "match_config": "evaluation/match_configs/unknown.json",
-      "team_context": "unknown_match",
-      "team_metrics_in_quality_gate": false
-    },
-    {
-      "label": "V2",
-      "path": "data/ULUpcQXsRII.mp4",
-      "start_sec": 0,
-      "end_sec": 30,
-      "match_config": "evaluation/match_configs/unknown.json",
-      "team_context": "unknown_match",
-      "team_metrics_in_quality_gate": false
-    },
-    {
-      "label": "V3",
-      "path": "data/Vr4105n-cPM.mp4",
-      "start_sec": 0,
-      "end_sec": 30,
-      "match_config": "evaluation/match_configs/unknown.json",
-      "team_context": "unknown_match",
-      "team_metrics_in_quality_gate": false
-    },
-    {
-      "label": "V4",
-      "path": "data/WMWTbS8J2ec.mp4",
-      "start_sec": 0,
-      "end_sec": 30,
-      "match_config": "evaluation/match_configs/unknown.json",
-      "team_context": "unknown_match",
-      "team_metrics_in_quality_gate": false
-    },
-    {
-      "label": "V5",
-      "path": "data/C-JjAlX2Dyc.mp4",
-      "start_sec": 10,
-      "end_sec": 40,
-      "match_config": "evaluation/match_configs/unknown.json",
-      "team_context": "unknown_match",
-      "team_metrics_in_quality_gate": false
-    }
+    {"label": "V1", "path": "data/hILf-ySowIo.mp4", "start_sec": 10, "end_sec": 40, "match_config": "evaluation/match_configs/unknown.json", "team_context": "unknown_match", "team_metrics_in_quality_gate": false},
+    {"label": "V2", "path": "data/ULUpcQXsRII.mp4", "start_sec": 0, "end_sec": 30, "match_config": "evaluation/match_configs/unknown.json", "team_context": "unknown_match", "team_metrics_in_quality_gate": false},
+    {"label": "V3", "path": "data/Vr4105n-cPM.mp4", "start_sec": 0, "end_sec": 30, "match_config": "evaluation/match_configs/unknown.json", "team_context": "unknown_match", "team_metrics_in_quality_gate": false},
+    {"label": "V4", "path": "data/WMWTbS8J2ec.mp4", "start_sec": 0, "end_sec": 30, "match_config": "evaluation/match_configs/unknown.json", "team_context": "unknown_match", "team_metrics_in_quality_gate": false},
+    {"label": "V5", "path": "data/C-JjAlX2Dyc.mp4", "start_sec": 10, "end_sec": 40, "match_config": "evaluation/match_configs/unknown.json", "team_context": "unknown_match", "team_metrics_in_quality_gate": false}
   ],
-  "required_artifacts": [
-    "run_config.json",
-    "summary.json",
-    "frames.jsonl",
-    "P1.1 tracking quality report"
-  ],
-  "measurable_without_player_identity_gt": [
-    "players per gameplay frame",
-    "players per analytics-eligible frame",
-    "detector-to-tracker assignment rate",
-    "frames where all player detections are untracked",
-    "unique track IDs",
-    "same-ID interruptions",
-    "track observed duration and span",
-    "short-track rate",
-    "FPS-normalized duration/gap/churn metrics",
-    "high-IoU distinct-track duplicate proxy",
-    "team-label stability only with correct match context",
-    "court_xy continuity only with valid plausible homography",
-    "runtime / detector timing"
-  ],
-  "requires_targeted_ground_truth": [
-    "true player recall",
-    "true ID switches",
-    "true track fragmentation by physical player",
-    "true missing-player frames",
-    "team classification accuracy"
-  ],
+  "required_artifacts": ["run_config.json", "summary.json", "frames.jsonl", "P1.1 tracking quality report"],
+  "measurable_without_player_identity_gt": ["players per gameplay frame", "players per analytics-eligible frame", "detector-to-tracker assignment rate", "frames where all player detections are untracked", "unique track IDs", "same-ID interruptions", "track observed duration and span", "short-track rate", "FPS-normalized duration/gap/churn metrics", "high-IoU distinct-track duplicate proxy", "team-label stability only with correct match context", "court_xy continuity only with valid plausible homography", "runtime / detector timing"],
+  "requires_targeted_ground_truth": ["true player recall", "true ID switches", "true track fragmentation by physical player", "true missing-player frames", "team classification accuracy"],
   "baseline_findings": {
     "analytics_eligible_players_per_frame_macro_mean": 7.72997,
     "tracker_assignment_rate_macro_pct": 98.716,
@@ -122,20 +57,6 @@
     "reference_video": "V4",
     "decision": "Proceed with RF-DETR as a challenger under the same downstream tracking/evaluation contract; do not replace YOLO without measured improvement."
   },
-  "rules": [
-    "Measure the baseline before tuning the tracker.",
-    "Change one variable at a time.",
-    "RF-DETR remains a challenger until it beats the baseline quantitatively.",
-    "Use FPS-normalized metrics for cross-video tracking comparisons.",
-    "Do not change P0 ball policies or promote ball reacquisition.",
-    "Do not introduce new evaluation videos.",
-    "SAM2 remains deferred / contingency backlog."
-  ],
-  "baseline_run_ids": [
-    "20260909_141241_298983",
-    "20260909_141357_697516",
-    "20260909_141716_977435",
-    "20260909_141840_536443",
-    "20260909_142218_576121"
-  ]
+  "rules": ["Measure the baseline before tuning the tracker.", "Change one variable at a time.", "RF-DETR remains a challenger until it beats the baseline quantitatively.", "Use FPS-normalized metrics for cross-video tracking comparisons.", "Do not change P0 ball policies or promote ball reacquisition.", "Do not introduce new evaluation videos.", "SAM2 remains deferred / contingency backlog."],
+  "baseline_run_ids": ["20260909_141241_298983", "20260909_141357_697516", "20260909_141716_977435", "20260909_141840_536443", "20260909_142218_576121"]
 }
