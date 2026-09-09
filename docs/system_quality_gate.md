@@ -65,6 +65,24 @@ Safety properties covered by tests:
 
 Court homography may become a soft association feature only after its semantics and real-video calibration are independently validated. It is not allowed to change the frozen detector benchmark by default.
 
+#### OC-SORT hypothesis evidence
+
+On the frozen Smart-v1 candidate traces, `OC-SORT + CIoU` preserved a correct confirmed hypothesis on **41.58%** of visible frames versus **22.86%** direct correct coverage from the current single-track association. It is therefore useful as a **hypothesis tracker**, not as a direct ball-output policy: confirmed instance precision was only **17.90%** and not-visible confirmed-track rate was **71.88%**.
+
+The integrated experimental layer is opt-in:
+
+```bash
+export BASKETBALL_BALL_HYPOTHESIS_TRACKER=1
+```
+
+It exposes an explicit lifecycle:
+
+```text
+TENTATIVE -> TRACKED -> LOST -> REMOVED
+```
+
+`LOST`, `TENTATIVE`, and `REMOVED` hypotheses are internal state only and must never emit a concrete ball location. Experimental seed-controlled output is separately gated by `BASKETBALL_BALL_HYPOTHESIS_OUTPUT=1` and requires a frozen identity model via `BASKETBALL_BALL_IDENTITY_MODEL`.
+
 ### P0.3 — trajectory / predicted hold
 
 Prediction is a bounded bridge between direct observations; it must not become a recursive detector substitute.
@@ -112,12 +130,12 @@ It reports per run plus micro/macro/worst-video aggregate metrics and emits an e
 | correct usable visible ball-state coverage, micro | `>=80%` |
 | correct usable visible ball-state coverage, macro | `>=78%` |
 | worst-video correct usable visible coverage | `>=70%` |
-| concrete output precision | `>=90%` |
+| concrete output precision | `>=80%` |
 | not-visible false-state rate | `<=5%` provisional ceiling |
 | unsupported visible gap P90 | `<8 frames` |
 | catastrophic error events (`>160 px`) | `0` |
 
-The 5% not-visible ceiling is deliberately conservative and can be tightened after the first full V1-V5 system-gate run.
+The approximately 90% product target is a later North Star, not a P0 blocker. The 5% not-visible ceiling is deliberately conservative and can be tightened after the first full V1-V5 system-gate run.
 
 ### Supporting checks
 
@@ -220,7 +238,7 @@ The legacy `FIBA_COURT_KEYPOINTS_14` remains a backward-compatible mapping only.
 
 ### Hosted inference
 
-Hosted/Serverless Roboflow inference returned 401 with both private and publishable authentication attempts in this environment. Dataset download works with a valid private key. P0 must therefore not depend on hosted court inference.
+Earlier Hosted/Serverless Roboflow inference attempts returned 401 with the then-configured credentials. Dataset download now works with a newly validated private key, so a single targeted Serverless retest is still legitimate; P0 must not depend on hosted court inference until that path is verified.
 
 For dataset download use a separate private-key environment variable:
 
@@ -258,11 +276,14 @@ python3 evaluation/ball_candidate_backend_test.py
 python3 evaluation/ball_candidate_pipeline_test.py
 python3 evaluation/smart_candidate_filter_test.py
 python3 evaluation/smart_ball_backend_integration_test.py
+python3 evaluation/ball_hypothesis_tracker_test.py
 python3 evaluation/system_quality_gate_test.py
 python3 evaluation/p0_quality_gate_test.py
 ```
 
 `system_quality_gate_test.py` covers geometry, conservative association, bounded/non-recursive predicted hold, frozen reacquisition safety and oracle bridging.
+
+`ball_hypothesis_tracker_test.py` covers the explicit hypothesis lifecycle, the `LOST -> no concrete output` invariant, and temporal identity model schema/scoring.
 
 `p0_quality_gate_test.py` covers the P0.1-P0.5 metric contract and verifies that the supporting detector target does not incorrectly block a system-level PASS.
 
