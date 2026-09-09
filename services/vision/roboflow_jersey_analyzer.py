@@ -66,9 +66,7 @@ class RoboflowJerseyAnalyzer(TeamOnlyAnalyzer):
 
         client = InferenceHTTPClient(api_url=self.api_url, api_key=self.api_key)
         try:
-            client = client.configure(
-                InferenceConfiguration(api_key_transport="header")
-            )
+            client = client.configure(InferenceConfiguration(api_key_transport="header"))
         except Exception:
             # Older/local inference servers may not expose this configuration field.
             pass
@@ -116,6 +114,7 @@ class RoboflowJerseyAnalyzer(TeamOnlyAnalyzer):
 
     @classmethod
     def _collect_text(cls, value: Any) -> list[str]:
+        """Read explicit output fields without interpreting metadata strings as OCR."""
         texts: list[str] = []
         if isinstance(value, str):
             if value.strip():
@@ -137,8 +136,11 @@ class RoboflowJerseyAnalyzer(TeamOnlyAnalyzer):
                     texts.extend(cls._collect_text(value[key]))
             if texts:
                 return texts
+            # Some SDK responses wrap output in unnamed nested containers. Traverse only
+            # structured children so metadata like model_id='.../7' cannot become OCR 7.
             for item in value.values():
-                texts.extend(cls._collect_text(item))
+                if isinstance(item, (dict, list, tuple)):
+                    texts.extend(cls._collect_text(item))
             return texts
         if isinstance(value, (list, tuple)):
             for item in value:
