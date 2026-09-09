@@ -64,7 +64,6 @@ def _run_one(video: dict, baseline: dict, device: str) -> Path:
     env["BASKETBALL_INFERENCE_CONF"] = str(baseline["inference_confidence"])
     env["BASKETBALL_BALL_CONF"] = str(baseline["ball_confidence"])
     env["BASKETBALL_BALL_REACQUIRE"] = "0"
-    # P1.1 needs court projection diagnostics while tactical analytics remains disabled.
     env["BASKETBALL_COURT_CALIBRATION"] = "1"
 
     print(
@@ -106,6 +105,7 @@ def main() -> int:
     contract = json.loads(contract_path.read_text(encoding="utf-8"))
     baseline = contract["canonical_baseline"]
     eligibility_proxy = contract.get("analytics_eligibility_proxy", {}) or {}
+    time_normalization = contract.get("time_normalization", {}) or {}
 
     run_entries = []
     reports = []
@@ -118,6 +118,7 @@ def main() -> int:
             "match_config": video.get("match_config"),
             "team_metrics_in_quality_gate": bool(video.get("team_metrics_in_quality_gate", False)),
             "analytics_eligibility_proxy": eligibility_proxy,
+            "time_normalization": time_normalization,
         }
         report = evaluate_run(run_dir, benchmark_context=benchmark_context)
         reports.append(report)
@@ -136,6 +137,7 @@ def main() -> int:
         "contract_schema_version": contract.get("schema_version"),
         "canonical_baseline": baseline,
         "analytics_eligibility_proxy": eligibility_proxy,
+        "time_normalization": time_normalization,
         "runs": run_entries,
         "reports": reports,
         "aggregate": aggregate_reports(reports),
@@ -143,7 +145,7 @@ def main() -> int:
     output = args.output
     if output is None:
         stamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-        output = ROOT / "evaluation" / "p1_tracking_reports" / f"baseline_v2_v1_v5_{stamp}.json"
+        output = ROOT / "evaluation" / "p1_tracking_reports" / f"baseline_v3_v1_v5_{stamp}.json"
     elif not output.is_absolute():
         output = (ROOT / output).resolve()
     output.parent.mkdir(parents=True, exist_ok=True)
