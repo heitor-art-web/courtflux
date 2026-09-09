@@ -1,0 +1,3 @@
+# Optional dependencies for the P1 RF-DETR challenger only.
+# Keep separate from requirements.txt so the canonical CourtFlux runtime is unchanged.
+rfdetr>=1.8,<2
