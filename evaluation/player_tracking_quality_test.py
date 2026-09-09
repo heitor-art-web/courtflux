@@ -21,10 +21,10 @@ def _player(track_id, box, *, team=None, court_xy=None, court_xy_valid=False, fr
     }
 
 
-def _frame(frame_id, players, timing=10.0, accepted=None):
+def _frame(frame_id, players, timing=10.0, accepted=None, fps=30.0):
     return {
         "frame_id": frame_id,
-        "timestamp_sec": frame_id / 30.0,
+        "timestamp_sec": frame_id / fps,
         "valid_gameplay": True,
         "accepted_player_candidates": len(players) if accepted is None else accepted,
         "team_predictions": players,
@@ -57,8 +57,8 @@ def test_tracking_metrics_and_gt_boundaries():
         ),
     ]
 
-    report = evaluate_frames(frames, short_track_frames=1)
-    assert report["schema_version"] == 2
+    report = evaluate_frames(frames, short_track_frames=1, video_fps=30.0)
+    assert report["schema_version"] == 3
     assert report["frames"]["gameplay_frames"] == 3
     assert report["frames"]["analytics_eligible_frames"] == 3
     assert report["tracking"]["unique_track_ids"] == 3
@@ -69,6 +69,8 @@ def test_tracking_metrics_and_gt_boundaries():
     assert report["team_stability"]["team_change_events"] == 1
     assert report["court_continuity"]["tracks_with_multiple_valid_court_samples"] == 1
     assert report["court_continuity"]["nonconsecutive_valid_pairs_skipped"] == 1
+    assert report["tracking"]["time_normalized"]["video_fps"] == 30.0
+    assert report["tracking"]["time_normalized"]["quality_gate_eligible"] is True
     assert report["ground_truth_status"]["true_id_switches"] == "requires_player_identity_ground_truth"
     assert report["ground_truth_status"]["true_track_fragmentation"] == "requires_player_identity_ground_truth"
 
@@ -129,9 +131,31 @@ def test_all_untracked_frame_and_invalid_court_are_separated():
     assert report["court_continuity"]["court_step_m_per_consecutive_frame_median"] is None
 
 
+def test_time_normalization_is_equivalent_across_fps():
+    frames_25 = [
+        _frame(index, [_player(1, [0, 0, 10, 20])], fps=25.0)
+        for index in range(1, 6)
+    ]
+    frames_50 = [
+        _frame(index, [_player(1, [0, 0, 10, 20])], fps=50.0)
+        for index in range(1, 11)
+    ]
+
+    report_25 = evaluate_frames(frames_25, video_fps=25.0, short_track_seconds=0.20)
+    report_50 = evaluate_frames(frames_50, video_fps=50.0, short_track_seconds=0.20)
+
+    temporal_25 = report_25["tracking"]["time_normalized"]
+    temporal_50 = report_50["tracking"]["time_normalized"]
+    assert temporal_25["short_tracks"] == 1
+    assert temporal_50["short_tracks"] == 1
+    assert temporal_25["observed_track_duration_median_sec"] == 0.2
+    assert temporal_50["observed_track_duration_median_sec"] == 0.2
+
+
 if __name__ == "__main__":
     test_tracking_metrics_and_gt_boundaries()
     test_duplicate_box_proxy_is_not_called_true_fragmentation()
     test_closeup_frames_are_not_analytics_eligible()
     test_all_untracked_frame_and_invalid_court_are_separated()
+    test_time_normalization_is_equivalent_across_fps()
     print("player_tracking_quality_test: PASS")
