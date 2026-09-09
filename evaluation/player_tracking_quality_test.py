@@ -11,52 +11,19 @@ from evaluation.player_tracking_quality import evaluate_frames
 
 
 def _player(track_id, box, *, team=None, court_xy=None, court_xy_valid=False, frame_height=100):
-    return {
-        "track_id": track_id,
-        "box": box,
-        "team": team,
-        "court_xy": court_xy,
-        "court_xy_valid": court_xy_valid,
-        "frame_height": frame_height,
-    }
+    return {"track_id": track_id, "box": box, "team": team, "court_xy": court_xy, "court_xy_valid": court_xy_valid, "frame_height": frame_height}
 
 
 def _frame(frame_id, players, timing=10.0, accepted=None, fps=30.0):
-    return {
-        "frame_id": frame_id,
-        "timestamp_sec": frame_id / fps,
-        "valid_gameplay": True,
-        "accepted_player_candidates": len(players) if accepted is None else accepted,
-        "team_predictions": players,
-        "timing_ms": {"track": timing},
-    }
+    return {"frame_id": frame_id, "timestamp_sec": frame_id / fps, "valid_gameplay": True, "accepted_player_candidates": len(players) if accepted is None else accepted, "team_predictions": players, "timing_ms": {"track": timing}}
 
 
 def test_tracking_metrics_and_gt_boundaries():
     frames = [
-        _frame(
-            1,
-            [
-                _player(7, [0, 0, 10, 20], team="A", court_xy=[1.0, 1.0], court_xy_valid=True),
-                _player(8, [20, 0, 30, 20], team="B", court_xy=[5.0, 1.0], court_xy_valid=True),
-            ],
-        ),
-        _frame(
-            2,
-            [
-                _player(7, [1, 0, 11, 20], team="A", court_xy=[1.2, 1.0], court_xy_valid=True),
-                _player(-1, [40, 0, 50, 20]),
-            ],
-        ),
-        _frame(
-            4,
-            [
-                _player(7, [3, 0, 13, 20], team="B", court_xy=[1.6, 1.0], court_xy_valid=True),
-                _player(9, [60, 0, 70, 20], team="A", court_xy=[8.0, 1.0], court_xy_valid=True),
-            ],
-        ),
+        _frame(1, [_player(7, [0, 0, 10, 20], team="A", court_xy=[1.0, 1.0], court_xy_valid=True), _player(8, [20, 0, 30, 20], team="B", court_xy=[5.0, 1.0], court_xy_valid=True)]),
+        _frame(2, [_player(7, [1, 0, 11, 20], team="A", court_xy=[1.2, 1.0], court_xy_valid=True), _player(-1, [40, 0, 50, 20])]),
+        _frame(4, [_player(7, [3, 0, 13, 20], team="B", court_xy=[1.6, 1.0], court_xy_valid=True), _player(9, [60, 0, 70, 20], team="A", court_xy=[8.0, 1.0], court_xy_valid=True)]),
     ]
-
     report = evaluate_frames(frames, short_track_frames=1, video_fps=30.0)
     assert report["schema_version"] == 3
     assert report["frames"]["gameplay_frames"] == 3
@@ -76,36 +43,15 @@ def test_tracking_metrics_and_gt_boundaries():
 
 
 def test_duplicate_box_proxy_is_not_called_true_fragmentation():
-    frames = [
-        _frame(
-            1,
-            [
-                _player(1, [0, 0, 100, 100], team="A", frame_height=200),
-                _player(2, [2, 2, 98, 98], team="A", frame_height=200),
-            ],
-        )
-    ]
+    frames = [_frame(1, [_player(1, [0, 0, 100, 100], team="A", frame_height=200), _player(2, [2, 2, 98, 98], team="A", frame_height=200)])]
     report = evaluate_frames(frames)
     assert report["tracking"]["high_iou_distinct_track_pairs"] == 1
     assert report["ground_truth_status"]["reported_duplicate_boxes"] == "high_iou_distinct_track_proxy_only"
 
 
 def test_closeup_frames_are_not_analytics_eligible():
-    closeup = _frame(
-        1,
-        [
-            _player(1, [0, 0, 100, 70], frame_height=100),
-            _player(2, [110, 0, 210, 80], frame_height=100),
-        ],
-    )
-    wide = _frame(
-        2,
-        [
-            _player(1, [0, 0, 50, 25], frame_height=100),
-            _player(2, [60, 0, 110, 30], frame_height=100),
-            _player(3, [120, 0, 170, 28], frame_height=100),
-        ],
-    )
+    closeup = _frame(1, [_player(1, [0, 0, 100, 70], frame_height=100), _player(2, [110, 0, 210, 80], frame_height=100)])
+    wide = _frame(2, [_player(1, [0, 0, 50, 25], frame_height=100), _player(2, [60, 0, 110, 30], frame_height=100), _player(3, [120, 0, 170, 28], frame_height=100)])
     report = evaluate_frames([closeup, wide])
     assert report["frames"]["gameplay_frames"] == 2
     assert report["frames"]["analytics_eligible_frames"] == 1
@@ -113,16 +59,7 @@ def test_closeup_frames_are_not_analytics_eligible():
 
 
 def test_all_untracked_frame_and_invalid_court_are_separated():
-    frames = [
-        _frame(
-            1,
-            [
-                _player(-1, [0, 0, 20, 20], court_xy=[1000.0, 700.0], court_xy_valid=False),
-                _player(-1, [30, 0, 50, 20], court_xy=[-800.0, 80.0], court_xy_valid=False),
-            ],
-            accepted=2,
-        )
-    ]
+    frames = [_frame(1, [_player(-1, [0, 0, 20, 20], court_xy=[1000.0, 700.0], court_xy_valid=False), _player(-1, [30, 0, 50, 20], court_xy=[-800.0, 80.0], court_xy_valid=False)], accepted=2)]
     report = evaluate_frames(frames)
     bridge = report["detector_tracker_bridge"]
     assert bridge["frames_all_detections_untracked"] == 1
@@ -132,18 +69,10 @@ def test_all_untracked_frame_and_invalid_court_are_separated():
 
 
 def test_time_normalization_is_equivalent_across_fps():
-    frames_25 = [
-        _frame(index, [_player(1, [0, 0, 10, 20])], fps=25.0)
-        for index in range(1, 6)
-    ]
-    frames_50 = [
-        _frame(index, [_player(1, [0, 0, 10, 20])], fps=50.0)
-        for index in range(1, 11)
-    ]
-
+    frames_25 = [_frame(index, [_player(1, [0, 0, 10, 20])], fps=25.0) for index in range(1, 6)]
+    frames_50 = [_frame(index, [_player(1, [0, 0, 10, 20])], fps=50.0) for index in range(1, 11)]
     report_25 = evaluate_frames(frames_25, video_fps=25.0, short_track_seconds=0.20)
     report_50 = evaluate_frames(frames_50, video_fps=50.0, short_track_seconds=0.20)
-
     temporal_25 = report_25["tracking"]["time_normalized"]
     temporal_50 = report_50["tracking"]["time_normalized"]
     assert temporal_25["short_tracks"] == 1
