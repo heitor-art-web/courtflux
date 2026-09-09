@@ -150,6 +150,14 @@ class BallContextFeatureEnricher:
             rmse_value = None if rmse is None else float(rmse)
         except (TypeError, ValueError):
             rmse_value = None
+        try:
+            keypoint_age = (
+                None
+                if camera.get("keypoint_age_frames") is None
+                else int(camera.get("keypoint_age_frames"))
+            )
+        except (TypeError, ValueError):
+            keypoint_age = None
         anchors = int(camera.get("anchor_count", 0) or 0)
         inliers = int(camera.get("inlier_count", 0) or 0)
         inlier_ratio = float(inliers / anchors) if anchors > 0 else None
@@ -185,6 +193,7 @@ class BallContextFeatureEnricher:
                 "homography_rmse_px": (
                     None if rmse_value is None else round(rmse_value, 6)
                 ),
+                "homography_keypoint_age_frames": keypoint_age,
                 "apparent_court_xy": (
                     None
                     if court_xy is None
@@ -226,6 +235,7 @@ class BallContextFeatureEnricher:
             "decision_effect": "diagnostic_only",
             "enriched": int(enriched),
             "homography_valid": homography_valid,
+            "homography_keypoint_age_frames": keypoint_age,
             "player_count": int(len(players)),
             "ball_projection_semantics": "planar_apparent_not_ground_truth",
         }
