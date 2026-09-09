@@ -4,11 +4,11 @@ Status: **P0 FOUNDATION COMPLETE**
 
 Date: 2026-09-09
 
-This snapshot freezes the technical foundation that CourtFlux will carry into P1. It does **not** mean that basketball detection/tracking is solved, nor that the ball-quality maturity gate has passed.
+This snapshot freezes the technical foundation that CourtFlux carries into P1. It does **not** mean that basketball detection/tracking is solved, nor that the Ball Quality Maturity Gate has passed.
 
 ## Product boundary
 
-P0 is complete when the vision foundation is safe, measurable, modular, and capable of supporting higher-level basketball analytics. P1 may therefore proceed while ball quality continues to improve in parallel.
+P0 is complete because the vision foundation is safe, measurable, modular, and capable of supporting higher-level basketball analytics. P1 may therefore proceed while ball quality continues to improve in parallel.
 
 The ball subsystem is classified as:
 
@@ -17,7 +17,7 @@ The ball subsystem is classified as:
 - allowed to abstain / emit unknown state;
 - **not a blocking dependency for P1**.
 
-The system-level ball quality gate remains a separate product-maturity milestone.
+The system-level Ball Quality Maturity Gate remains a separate product-quality milestone.
 
 ## Frozen ball benchmark contract
 
@@ -59,7 +59,7 @@ Direct visible candidate recall:
 
 Oracle short-gap coverage using GT-validated linear bridges reaches **72.81% micro at gap <=8**. This is an oracle upper bound, not production tracking quality.
 
-## Current production ball-state baseline
+## Historical production ball-state baseline
 
 Frozen P0 system-gate baseline:
 
@@ -78,136 +78,117 @@ These values are retained as the historical production-state baseline. They are 
 
 `OC-SORT + CIoU` is retained as the experimental multi-hypothesis tracker.
 
-Offline evidence on the frozen Smart-v1 candidate traces:
+Frozen offline evidence:
 
-- confirmed true-hypothesis recall: **41.58%**
-- candidate-to-confirmed-truth efficiency: **73.54%**
-- confirmed instance precision: **17.90%**
-- not-visible confirmed frames: **71.88%**
+- correct confirmed-hypothesis presence on visible frames: **41.58%**;
+- current single-track direct correct coverage reference: **22.86%**;
+- confirmed instance precision in the offline benchmark: **17.90%**;
+- not-visible confirmed-track rate: **71.88%**.
 
-Interpretation: OC-SORT is valuable for preserving hypotheses, but confirmed tracks must **not** be emitted directly as the basketball.
+Therefore OC-SORT is retained to preserve hypotheses, not to emit all confirmed tracks as balls.
 
-## Safe lifecycle
-
-The experimental ball-hypothesis layer exposes:
+Explicit lifecycle:
 
 ```text
 TENTATIVE -> TRACKED -> LOST -> REMOVED
 ```
 
-Safety invariants:
+Safety invariant:
 
-- `LOST` is internal recovery state and never emits a concrete ball location;
-- `TENTATIVE` never emits a concrete ball location;
-- `REMOVED` never emits a concrete ball location;
-- hard reacquisition remains OFF by default;
-- concrete hypothesis output is opt-in and identity-gated.
+```text
+LOST / TENTATIVE / REMOVED
+-> never emit a concrete ball location
+```
+
+Hard reacquisition remains OFF by default.
 
 ## Temporal Ball Identity evidence
 
-Temporal/detector-only multivariate LOVO research showed that useful identity signal exists, but calibration is not robust enough across all cameras to serve as a standalone product output policy.
+Temporal/detector features produced useful ranking signal but did not generalize strongly enough to become the sole production identity policy.
 
-The later context-enabled LOVO benchmark, calibrated to the P0 engineering precision target, reported:
+The role of the temporal arbiter at the P0 boundary is therefore:
 
-### Temporal-only, target 80% precision on training folds
-
-- held-out AUC macro: **0.7656**
-- output precision micro: **73.09%**
-- visible coverage micro: **37.72%**
-- not-visible false-state micro: **15.63%**
-
-### Temporal + court/player context
-
-- held-out AUC macro: **0.7232**
-- output precision micro: **72.25%**
-- visible coverage micro: **39.10%**
-- not-visible false-state micro: **16.09%**
-
-Context delta versus temporal-only:
-
-- AUC: **-0.0424**
-- precision: **-0.84 pp**
-- visible coverage: **+1.38 pp**
-- not-visible false-state: **+0.46 pp**
-
-Decision: generic court/player context is retained as infrastructure and diagnostics but is **not promoted into the production ball identity policy** at the P0 boundary.
+- high-confidence supporting signal / seed;
+- optional experimental identity layer;
+- allowed to abstain;
+- not a requirement for every frame.
 
 ## Court geometry / homography foundation
 
-CourtFlux now has:
+Implemented:
 
-- versioned Roboflow basketball-court v19 / 33-landmark -> FIBA mapping;
-- Serverless Roboflow keypoint inference through the lightweight SDK;
-- image-pixel -> court-metre homography;
-- anchors, RANSAC inliers, reprojection RMSE and calibration diagnostics;
-- periodic keypoint refresh with optical-flow hold between refreshes;
-- player foot projection to `court_xy`;
-- explicitly planar/apparent ball court projection.
+- reusable FIBA court geometry;
+- versioned Roboflow basketball-court v19 33-landmark -> FIBA mapping;
+- lightweight Serverless inference backend;
+- RANSAC anchors / inliers / reprojection RMSE diagnostics;
+- periodic keypoint refresh plus optical-flow hold;
+- player feet -> `court_xy`;
+- ball center -> explicitly planar/apparent court projection.
 
-A real V3 frame using `basketball-court-detection-2/19` produced:
+Real v19 validation example:
 
-- source: `direct_keypoints`
-- backend: `serverless`
-- anchors: **12**
-- inliers: **6**
-- reprojection RMSE: **1.5261 px**
-- valid: **True**
-- identity homography: **False**
+```text
+model      basketball-court-detection-2/19
+source     direct_keypoints
+anchors    12
+inliers     6
+RMSE       1.5261 px
+valid      True
+identity H False
+```
 
-The homography is therefore accepted as P0 infrastructure. Airborne ball projection remains soft/apparent evidence, never a hard physical constraint.
+Ball court coordinates are soft context only because an airborne ball does not lie on the ground plane.
 
-## Ball quality maturity gate
+## Court/player context research
 
-The following targets remain active, but are now a **parallel ball-quality milestone rather than a P1 entry gate**:
+Held-out LOVO comparison at the 80% training-precision target:
 
-| Metric | Ball quality target |
+| Profile | Held-out AUC | Output precision | Visible coverage | NV false |
+| --- | ---: | ---: | ---: | ---: |
+| temporal-only | 0.7656 | 73.09% | 37.72% | 15.63% |
+| temporal + court/player context | 0.7232 | 72.25% | 39.10% | 16.09% |
+
+Engineering delta from generic context:
+
+- AUC: **-0.0424**;
+- output precision: **-0.84 pp**;
+- visible coverage: **+1.38 pp**;
+- not-visible false-state: **+0.46 pp**.
+
+Conclusion: generic court/player context is not promoted into the production Ball Identity policy at the P0 boundary. The underlying court/player features remain useful infrastructure for P1.
+
+## Ball Quality Maturity Gate
+
+The following targets remain active, measurable, and parallel to P1:
+
+| Metric | Target |
 | --- | ---: |
-| correct usable visible coverage, micro | `>=80%` |
-| correct usable visible coverage, macro | `>=78%` |
-| worst-video usable visible coverage | `>=70%` |
+| usable visible coverage micro | `>=80%` |
+| usable visible coverage macro | `>=78%` |
+| worst-video usable coverage | `>=70%` |
 | concrete output precision | `>=80%` |
 | not-visible false-state | `<=5%` |
 | unsupported visible gap P90 | `<8 frames` |
 | catastrophic errors (`>160 px`) | `0` |
 
-Approximately 90% remains a later product North Star.
+Approximately **90%** remains the later product North Star.
 
-## What P0 has established
-
-P0 Foundation Complete means CourtFlux now has:
-
-- frozen detector and GT benchmarks;
-- repeatable system-level evaluation;
-- safe uncertainty semantics;
-- multi-hypothesis ball tracking infrastructure;
-- conservative lifecycle rules;
-- homography and court-coordinate infrastructure;
-- evidence about what temporal and court/player context can and cannot currently do;
-- a clear, measurable backlog for future ball-quality work.
-
-It does **not** mean:
-
-- ball tracking is solved;
-- the 80% ball-quality milestone has passed;
-- P1 events should force a ball location when confidence is low.
+These targets do **not** block P1 entry.
 
 ## P1 entry contract
 
-P1 may use:
+P1 may build on:
 
 - player tracks;
 - team assignments;
-- court geometry and `court_xy`;
-- timestamps and frame diagnostics;
-- ball hypotheses / high-confidence ball evidence when available.
+- court geometry / `court_xy`;
+- temporal state;
+- timestamps and diagnostics;
+- ball evidence only when sufficiently reliable.
 
-P1 must tolerate:
+P1 must tolerate missing / unknown ball state and must not force possession or event output from low-confidence ball evidence.
 
-- missing or unknown ball state;
-- abstention from the ball subsystem;
-- ball confidence varying by camera and sequence.
-
-The intended architecture is therefore:
+Intended architecture:
 
 ```text
 players + teams + court + temporal state
@@ -217,4 +198,22 @@ players + teams + court + temporal state
        ball when sufficiently reliable
 ```
 
-Future ball-quality work continues in parallel and can improve P1 confidence without blocking P1 development.
+## Next phase
+
+P1 starts with:
+
+```text
+P1.1 — Player Tracking Quality
+```
+
+Primary focus:
+
+- track fragmentation;
+- ID switches;
+- track duration;
+- players per gameplay frame;
+- team-label stability;
+- court-position continuity;
+- per-video robustness.
+
+This snapshot is the reference point for future comparisons against the end of the P0 foundation phase.
