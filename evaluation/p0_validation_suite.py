@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+import json
 import subprocess
 import sys
 from pathlib import Path
@@ -75,6 +76,7 @@ def main() -> None:
             raise SystemExit(2)
         return
 
+    output = (ROOT / args.output).resolve()
     command = [
         sys.executable,
         "evaluation/p0_quality_gate.py",
@@ -87,13 +89,19 @@ def main() -> None:
         "--catastrophic-radius-px",
         "160",
         "--output",
-        args.output,
+        str(output),
     ]
     for run_id, gt_id in FROZEN_PAIRS:
         command.extend(["--pair", f"{run_id}={gt_id}"])
 
     run_command(command)
-    print("\n[P0 VALIDATION] COMPLETE", flush=True)
+
+    summary_path = output / "summary.json"
+    summary = json.loads(summary_path.read_text(encoding="utf-8"))
+    status = str((summary.get("gate") or {}).get("status") or "UNKNOWN")
+    print(f"\n[P0 VALIDATION] {status} {summary_path}", flush=True)
+    if status != "PASS":
+        raise SystemExit(1)
 
 
 if __name__ == "__main__":
