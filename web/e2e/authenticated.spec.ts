@@ -48,7 +48,7 @@ test.describe("authenticated CourtFlux flows", () => {
     await youtube.click();
     await expect(upload).toHaveAttribute("aria-pressed", "false");
     await expect(youtube).toHaveAttribute("aria-pressed", "true");
-    await expect(page.getByRole("textbox").filter({ has: page.locator("[placeholder*='YouTube']") })).toHaveCount(0).catch(() => undefined);
+    await expect(page.locator('input[type="url"], input[placeholder*="YouTube"]')).toBeVisible();
 
     await upload.click();
     const fileInput = page.locator("#video-file");
@@ -84,6 +84,8 @@ test.describe("authenticated CourtFlux flows", () => {
       await tabs.first().focus();
       await page.keyboard.press("ArrowRight");
       await expect(tabs.nth(1)).toBeFocused();
+      await expect(tabs.nth(1)).toHaveAttribute("aria-controls");
+      await expect(page.getByRole("tabpanel")).toBeVisible();
     }
   });
 });
