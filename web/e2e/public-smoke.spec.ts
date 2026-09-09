@@ -1,14 +1,21 @@
 import { expect, test } from "@playwright/test";
 
-test("homepage exposes primary beta CTA and keyboard focus", async ({ page }) => {
+test("Homepage → Start free beta opens signup with keyboard focus preserved", async ({ page }) => {
   await page.goto("/");
   const main = page.locator("#main-content");
   await expect(main).toBeVisible();
 
-  const cta = page.getByRole("link", { name: /start|beta|analysis/i }).first();
+  const cta = page.getByRole("link", { name: "Start free beta" }).first();
   await expect(cta).toBeVisible();
   await cta.focus();
   await expect(cta).toBeFocused();
+  await cta.click();
+
+  await expect(page).toHaveURL(/\/login\?mode=signup/);
+  await expect(page.getByRole("heading", { name: "Create account" })).toBeVisible();
+  await expect(page.getByLabel("Full name")).toBeVisible();
+  await expect(page.getByLabel("Email")).toBeVisible();
+  await expect(page.getByLabel("Password")).toBeVisible();
 });
 
 test("language selector switches public route to Portuguese and Spanish", async ({ page }) => {
