@@ -20,9 +20,21 @@ class _FakeTracker:
         return np.asarray([[0, 0, 10, 20, 42, 0.9, 0, 0]], dtype=np.float32)
 
 
+class _FakeDetections:
+    def __init__(self, class_names):
+        self.data = {"class_name": np.asarray(class_names, dtype=object)}
+
+
 def test_person_class_mapping():
-    assert RFDETRPlayerDetector._resolve_person_class_ids({0: "person", 1: "car"}) == {0}
+    assert RFDETRPlayerDetector._resolve_person_class_ids({1: "person", 2: "car"}) == {1}
+    # A contiguous class-name list can still expose person at index 0, but
+    # pretrained COCO predictions themselves use sparse category ID 1.
     assert RFDETRPlayerDetector._resolve_person_class_ids(["person", "bicycle"]) == {0}
+
+
+def test_detection_class_name_metadata_is_preferred():
+    detections = _FakeDetections(["person", "car"])
+    assert RFDETRPlayerDetector._class_names_from_detections(detections, 2) == ["person", "car"]
 
 
 def test_unassigned_detections_are_preserved():
@@ -41,5 +53,6 @@ def test_unassigned_detections_are_preserved():
 
 if __name__ == "__main__":
     test_person_class_mapping()
+    test_detection_class_name_metadata_is_preferred()
     test_unassigned_detections_are_preserved()
     print("rfdetr_challenger_test: PASS")
