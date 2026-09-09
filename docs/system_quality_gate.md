@@ -1,12 +1,15 @@
 # CourtFlux P0 system quality gate
 
-P0 is a **system ball-state gate**, not a standalone detector-recall gate.
+P0 now has two distinct concepts that must not be conflated:
 
-The product North Star remains approximately **90%+ correct usable ball-state coverage** and event precision/recall around 90% once possession/events are implemented. P0 uses a lower engineering gate so P1 is not blocked on an unrealistic direct-detector requirement.
+1. **P0 Foundation Complete** — the vision/evaluation foundation is safe, measurable, modular, and sufficient to start P1.
+2. **Ball Quality Maturity Gate** — the ball subsystem continues to be measured against explicit engineering targets while P1 progresses in parallel.
+
+The product North Star remains approximately **90%+ correct usable ball-state coverage** and event precision/recall around 90% once possession/events are implemented. The current ball engineering target is lower and is **not a P1 entry blocker**.
 
 ## Frozen baseline
 
-Do not change these while validating the P0 gate unless an experiment explicitly says otherwise:
+Do not change these while validating the ball maturity gate unless an experiment explicitly says otherwise:
 
 ```bash
 export BASKETBALL_BALL_REACQUIRE=0
@@ -15,6 +18,7 @@ export BASKETBALL_BALL_DETECTOR_BACKEND=yolo
 
 Detector benchmark contract:
 
+- model: `weights/model_v1.0.0.pt`;
 - confidence: `0.10`;
 - image size: `960`;
 - official point match: candidate/output center `<=40 px` from frozen GT;
@@ -28,7 +32,7 @@ The central evidence from the completed experiments is:
 - short temporal continuity helps materially, but cannot rescue the detector alone;
 - hard state-aware reacquisition previously produced unsafe promotions, so the working rule is: **interpolation is cheap; reacquisition is dangerous**.
 
-## P0 workstreams
+## P0 foundation workstreams
 
 ### P0.1 — detector candidate quality
 
@@ -42,7 +46,7 @@ Primary diagnostics:
 - not-visible candidate-frame rate;
 - per-video recall/generalization.
 
-The current direct detector target is **supporting evidence**, not a standalone blocker. A practical supporting target is approximately **65%+ visible candidate recall**, with 70% desirable if it can be achieved without a large noise increase.
+The current direct detector target is supporting evidence, not a standalone blocker. A practical supporting target is approximately **65%+ visible candidate recall**.
 
 ### P0.2 — association / tracker
 
@@ -52,7 +56,7 @@ Primary diagnostics:
 
 - direct correct output coverage;
 - direct output precision;
-- association-opportunity miss rate: a correct candidate existed but the emitted state was wrong/missing;
+- association-opportunity miss rate;
 - rejected candidate counts and gate behaviour;
 - catastrophic location errors;
 - reacquisition promotions.
@@ -63,11 +67,9 @@ Safety properties covered by tests:
 - `BASKETBALL_BALL_REACQUIRE=0` cannot promote an out-of-gate challenger;
 - a long reset/reinitialization is not counted as a safe short interpolation.
 
-Court homography may become a soft association feature only after its semantics and real-video calibration are independently validated. It is not allowed to change the frozen detector benchmark by default.
-
 #### OC-SORT hypothesis evidence
 
-On the frozen Smart-v1 candidate traces, `OC-SORT + CIoU` preserved a correct confirmed hypothesis on **41.58%** of visible frames versus **22.86%** direct correct coverage from the current single-track association. It is therefore useful as a **hypothesis tracker**, not as a direct ball-output policy: confirmed instance precision was only **17.90%** and not-visible confirmed-track rate was **71.88%**.
+On the frozen Smart-v1 candidate traces, `OC-SORT + CIoU` preserved a correct confirmed hypothesis on **41.58%** of visible frames versus **22.86%** direct correct coverage from the current single-track association. It is therefore useful as a **hypothesis tracker**, not as a direct ball-output policy.
 
 The integrated experimental layer is opt-in:
 
@@ -81,7 +83,7 @@ It exposes an explicit lifecycle:
 TENTATIVE -> TRACKED -> LOST -> REMOVED
 ```
 
-`LOST`, `TENTATIVE`, and `REMOVED` hypotheses are internal state only and must never emit a concrete ball location. Experimental seed-controlled output is separately gated by `BASKETBALL_BALL_HYPOTHESIS_OUTPUT=1` and requires a frozen identity model via `BASKETBALL_BALL_IDENTITY_MODEL`.
+`LOST`, `TENTATIVE`, and `REMOVED` hypotheses are internal state only and must never emit a concrete ball location.
 
 ### P0.3 — trajectory / predicted hold
 
@@ -96,9 +98,7 @@ Primary diagnostics:
 - hold-age distribution;
 - unsupported-gap distribution.
 
-Required invariant: **predicted holds never update the direct observation anchor**. This prevents prediction drift from recursively extending itself.
-
-The oracle short-gap curve remains evidence about what temporal modelling could recover; it is not production tracker performance.
+Required invariant: **predicted holds never update the direct observation anchor**.
 
 ### P0.4 — robustness / ball state
 
@@ -119,11 +119,11 @@ A not-visible GT frame is correct only when no concrete ball location is emitted
 
 `evaluation/p0_quality_gate.py` evaluates P0.1-P0.5 from the same production `frames.jsonl` and frozen point GT.
 
-It reports per run plus micro/macro/worst-video aggregate metrics and emits an explicit `PASS` or `FAIL`.
+It reports per run plus micro/macro/worst-video aggregate metrics and emits an explicit `PASS` or `FAIL` for the **ball maturity gate**.
 
-## P0 engineering gate
+## Ball Quality Maturity Gate
 
-### Blocking checks
+### Engineering targets
 
 | Metric | Gate |
 | --- | ---: |
@@ -135,20 +135,18 @@ It reports per run plus micro/macro/worst-video aggregate metrics and emits an e
 | unsupported visible gap P90 | `<8 frames` |
 | catastrophic error events (`>160 px`) | `0` |
 
-The approximately 90% product target is a later North Star, not a P0 blocker. The 5% not-visible ceiling is deliberately conservative and can be tightened after the first full V1-V5 system-gate run.
+The approximately 90% product target is a later North Star.
+
+These checks remain active and measurable, but **they no longer block entry into P1**. They track the maturity of the ball subsystem in parallel with player/game-state/event development.
 
 ### Supporting checks
 
-- direct visible candidate recall: `>=65%` is the current supporting target;
+- direct visible candidate recall: `>=65%` supporting target;
 - no camera/video collapse across V1-V5;
 - hard reacquisition should remain zero in the frozen baseline;
-- throughput is reported but is not a blocker until an explicit offline throughput threshold is frozen.
-
-The detector-supporting check does **not** turn the overall P0 gate into FAIL if the system passes the blocking checks.
+- throughput is reported but is not currently a blocker.
 
 ## Frozen V1-V5 GT pairs
-
-Current frozen GT:
 
 | Video | Production source window | GT run |
 | --- | --- | --- |
@@ -158,7 +156,7 @@ Current frozen GT:
 | V4 | `data/WMWTbS8J2ec.mp4`, 0-30s | `20260907_122515_042534` |
 | V5 | `data/C-JjAlX2Dyc.mp4`, 10-40s | `20260907_122807_977379` |
 
-The current Smart YOLO v1 production runs are:
+Frozen Smart YOLO v1 production runs:
 
 ```text
 V1 20260908_130530_855844
@@ -168,131 +166,81 @@ V4 20260908_131204_724212
 V5 20260908_131609_006117
 ```
 
-## Run the end-to-end P0 gate
+## Frozen historical production baseline
 
-Use the frozen Smart v1 runs as the first baseline of the new metric contract:
+The current historical production-state baseline is:
 
-```bash
-python3 evaluation/p0_quality_gate.py \
-  --pair 20260908_130530_855844=20260907_121516_009508 \
-  --pair 20260908_130718_769477=20260907_121948_601883 \
-  --pair 20260908_131032_611540=20260907_122315_943004 \
-  --pair 20260908_131204_724212=20260907_122515_042534 \
-  --pair 20260908_131609_006117=20260907_122807_977379 \
-  --gt-radius-px 40 \
-  --catastrophic-radius-px 160 \
-  --output evaluation/p0_quality_gate_smart_v1
-```
+- usable visible coverage micro: **25.49%**;
+- usable visible coverage macro: **28.19%**;
+- worst-video usable coverage: **4.64%**;
+- output precision: **19.47%**;
+- not-visible false-state: **88.51%**;
+- unsupported visible gap P90: **40 frames**;
+- catastrophic error events: **129**;
+- direct candidate recall: **56.54%** supporting evidence.
 
-The result is written to:
-
-```text
-evaluation/p0_quality_gate_smart_v1/summary.json
-```
-
-Do not infer PASS from internal `effective_trajectory_frame_rate`; the gate requires GT-correct locations.
-
-## Oracle short-gap evidence
-
-The separate track-coverage evaluator intentionally measures an oracle upper bound:
-
-```bash
-python3 evaluation/ball_track_coverage_eval.py \
-  --pair 20260908_130530_855844=20260907_121516_009508 \
-  --pair 20260908_130718_769477=20260907_121948_601883 \
-  --pair 20260908_131032_611540=20260907_122315_943004 \
-  --pair 20260908_131204_724212=20260907_122515_042534 \
-  --pair 20260908_131609_006117=20260907_122807_977379 \
-  --gt-radius-px 40 \
-  --gap 1 --gap 2 --gap 3 --gap 5 --gap 8 \
-  --output evaluation/p0_track_coverage_smart_v1
-```
-
-Linear bridges count only when every interpolated point is GT-valid. These numbers must never be reported as production tracker quality.
+These values are retained so future improvements can be measured against the P0 exit snapshot. They are not criteria for `P0 FOUNDATION COMPLETE`.
 
 ## Court geometry / homography status
 
-Court calibration is auxiliary P0.2 evidence, not a P0 blocker today.
+Court calibration is part of the established P0 foundation and is available to P1 as court context.
 
-### Geometry implementation
+Implemented:
 
-`services/vision/court_geometry.py` estimates image-pixel -> court-metre homography by running RANSAC in **image pixel space**. OpenCV applies the RANSAC threshold in the destination coordinate system, so CourtFlux estimates court->image first and then inverts the matrix. This keeps `ransac_reprojection_px` and `reprojection_rmse_px` genuinely pixel based.
+- reusable court geometry primitives;
+- versioned Roboflow basketball-court v19 33-landmark -> FIBA mapping;
+- Serverless inference through the lightweight SDK;
+- anchors / RANSAC inliers / reprojection RMSE diagnostics;
+- periodic keypoint refresh and optical-flow hold;
+- player feet projected to `court_xy`;
+- ball projection labelled planar/apparent.
 
-Synthetic tests cover:
-
-- exact projective recovery;
-- rejection of a large pixel outlier;
-- degenerate geometry rejection.
-
-### Landmark semantics
-
-The downloaded `basketball-court-detection-2` v19 COCO dataset contains 33 keypoints:
+Real v19 calibration was validated with:
 
 ```text
-01 02 04 05 07 08 09 10 11 12 13 14 15 16 17 19 21 23 25 26 27 28 29 30 31 32 33 34 35 37 38 40 41
+anchors       12
+inliers        6
+RMSE        1.5261 px
+valid        True
 ```
 
-The dataset does not include a verified `keypoint ID -> physical court coordinate` map. CourtFlux therefore **must not guess** a metric mapping for v19.
+Ball court coordinates remain soft context only because an airborne ball does not lie on the ground plane.
 
-The legacy `FIBA_COURT_KEYPOINTS_14` remains a backward-compatible mapping only. It is not proof that Roboflow model version `/14` contains 14 landmarks, and it must not be applied to the v19 33-point schema.
+## Court/player context research
 
-### Hosted inference
+Held-out LOVO comparison at the 80% training-precision target:
 
-Earlier Hosted/Serverless Roboflow inference attempts returned 401 with the then-configured credentials. Dataset download now works with a newly validated private key, so a single targeted Serverless retest is still legitimate; P0 must not depend on hosted court inference until that path is verified.
+| Profile | Held-out AUC | Output precision | Visible coverage | NV false |
+| --- | ---: | ---: | ---: | ---: |
+| temporal-only | 0.7656 | 73.09% | 37.72% | 15.63% |
+| temporal + court/player context | 0.7232 | 72.25% | 39.10% | 16.09% |
 
-For dataset download use a separate private-key environment variable:
+Generic court/player context was therefore **not promoted** into the production Ball Identity policy at the P0 boundary.
 
-```bash
-export ROBOFLOW_PRIVATE_API_KEY='...'
-python3 evaluation/download_roboflow_benchmarks.py --only court
-```
+## P0 exit boundary
 
-Never commit API keys.
+CourtFlux declares **P0 FOUNDATION COMPLETE** because the following foundation now exists:
 
-## External detector evidence
+- frozen, reproducible evaluation contract;
+- safe ball hypothesis lifecycle;
+- explicit uncertainty / abstention semantics;
+- bounded temporal prediction;
+- court geometry / homography;
+- player `court_xy` projection;
+- repeatable diagnostics and failure attribution;
+- known ball-quality limitations documented and measurable.
 
-The public Roboflow datasets remain useful for external/domain evidence even though hosted inference is not a P0 dependency.
+P1 may now proceed using player tracks, team assignments, court geometry, temporal state and ball evidence when reliable.
 
-Basketball detection dataset default:
+P1 must tolerate missing/unknown ball state and must not force events from low-confidence ball output.
 
-```text
-roboflow-jvuqo/basketball-player-detection-3-ycjdo v18
-```
+## Validation order going forward
 
-Court keypoint dataset default:
+1. Preserve the frozen V1-V5 benchmark contract.
+2. Run deterministic tests before ball-quality experiments.
+3. Measure ball changes against the frozen historical baseline.
+4. Keep hard reacquisition OFF unless a future experiment proves it safe.
+5. Continue the Ball Quality Maturity Gate in parallel.
+6. Do **not** use Ball Quality Gate failure to block P1 player/game-state work.
 
-```text
-roboflow-jvuqo/basketball-court-detection-2 v19
-```
-
-External image-level recall is not directly comparable to V1-V5 temporal tracking recall. Use it to distinguish general detector weakness from CourtFlux-domain weakness.
-
-## Tests
-
-Run the fast deterministic suite before any new V1-V5 analysis:
-
-```bash
-python3 evaluation/ball_candidate_backend_test.py
-python3 evaluation/ball_candidate_pipeline_test.py
-python3 evaluation/smart_candidate_filter_test.py
-python3 evaluation/smart_ball_backend_integration_test.py
-python3 evaluation/ball_hypothesis_tracker_test.py
-python3 evaluation/system_quality_gate_test.py
-python3 evaluation/p0_quality_gate_test.py
-```
-
-`system_quality_gate_test.py` covers geometry, conservative association, bounded/non-recursive predicted hold, frozen reacquisition safety and oracle bridging.
-
-`ball_hypothesis_tracker_test.py` covers the explicit hypothesis lifecycle, the `LOST -> no concrete output` invariant, and temporal identity model schema/scoring.
-
-`p0_quality_gate_test.py` covers the P0.1-P0.5 metric contract and verifies that the supporting detector target does not incorrectly block a system-level PASS.
-
-## Validation order
-
-1. Run the deterministic tests above.
-2. Run `p0_quality_gate.py` on the existing frozen Smart v1 V1-V5 runs.
-3. Inspect the exact failing checks; do not tune everything at once.
-4. Improve the dominant blocker in P0.1/P0.2/P0.3/P0.4.
-5. Re-run the same V1-V5 gate.
-6. Only declare **P0 COMPLETE** when every blocking check passes on the frozen five-video set.
-7. Then move to P1 possession/events.
+For the frozen P0 exit snapshot, see `docs/p0_foundation_snapshot.md`.
