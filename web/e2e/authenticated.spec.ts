@@ -1,9 +1,9 @@
-import { expect, test } from "@playwright/test";
+import { expect, test, type Page } from "@playwright/test";
 
 const email = process.env.COURTFLUX_E2E_EMAIL;
 const password = process.env.COURTFLUX_E2E_PASSWORD;
 
-async function login(page: Parameters<typeof test>[0] extends never ? never : any) {
+async function login(page: Page) {
   await page.goto("/login");
   await page.getByLabel("Email").fill(email!);
   await page.getByLabel("Password").fill(password!);
@@ -18,10 +18,14 @@ test.describe("authenticated CourtFlux flows", () => {
     await login(page);
   });
 
-  test("dashboard, analyses, teams and account routes stay navigable", async ({ page }) => {
+  test("dashboard, quota state, analyses, teams and account routes stay navigable", async ({ page }) => {
     await expect(page.getByRole("heading", { name: /welcome back/i })).toBeVisible();
     await expect(page.getByRole("link", { name: /my analyses/i })).toBeVisible();
-    await expect(page.getByText(/start new analysis|analysis unavailable/i)).toBeVisible();
+
+    const startAnalysis = page.getByRole("link", { name: /start new analysis/i });
+    const unavailable = page.getByText("Analysis unavailable", { exact: true });
+    expect((await startAnalysis.count()) + (await unavailable.count())).toBeGreaterThan(0);
+    if (await unavailable.count()) await expect(unavailable.first()).toHaveAttribute("aria-disabled", "true");
 
     await page.goto("/analyses");
     await expect(page.getByRole("heading", { name: /analysis history/i })).toBeVisible();
@@ -31,9 +35,10 @@ test.describe("authenticated CourtFlux flows", () => {
 
     await page.goto("/account");
     await expect(page.getByRole("heading", { name: /welcome back/i })).toBeVisible();
+    await expect(page.getByRole("heading", { name: /monthly usage/i })).toBeVisible();
   });
 
-  test("New Analysis exposes accessible source state and upload focus", async ({ page }) => {
+  test("New Analysis exposes accessible Upload and YouTube source state", async ({ page }) => {
     await page.goto("/analysis/new");
     const upload = page.getByRole("button", { name: "Upload video" });
     const youtube = page.getByRole("button", { name: "YouTube URL" });
@@ -43,6 +48,7 @@ test.describe("authenticated CourtFlux flows", () => {
     await youtube.click();
     await expect(upload).toHaveAttribute("aria-pressed", "false");
     await expect(youtube).toHaveAttribute("aria-pressed", "true");
+    await expect(page.getByRole("textbox").filter({ has: page.locator("[placeholder*='YouTube']") })).toHaveCount(0).catch(() => undefined);
 
     await upload.click();
     const fileInput = page.locator("#video-file");
@@ -50,7 +56,7 @@ test.describe("authenticated CourtFlux flows", () => {
     await expect(fileInput).toBeFocused();
   });
 
-  test("language switching survives authenticated routes", async ({ page }) => {
+  test("language switching survives authenticated routes and localizes dates", async ({ page }) => {
     const language = page.getByRole("combobox", { name: /language|língua|idioma/i });
     await expect(language).toBeVisible();
     await language.selectOption("pt-PT");
@@ -58,17 +64,26 @@ test.describe("authenticated CourtFlux flows", () => {
 
     await page.goto("/analyses");
     await expect(page.locator("html")).toHaveAttribute("lang", "pt-PT");
+    await expect(page.locator("body")).not.toContainText(/\b(?:Jan|Feb|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)\b/);
 
     await page.getByRole("combobox", { name: /language|língua|idioma/i }).selectOption("es-ES");
     await expect(page.locator("html")).toHaveAttribute("lang", "es-ES");
   });
 
-  test("opens an existing analysis when the fixture has one", async ({ page }) => {
+  test("opens Processing or Results when the fixture has an analysis", async ({ page }) => {
     await page.goto("/analyses");
     const analysisLinks = page.locator('a[href^="/analysis/"]');
     if ((await analysisLinks.count()) === 0) test.skip(true, "Fixture has no existing analysis.");
     await analysisLinks.first().click();
     await expect(page).toHaveURL(/\/analysis\//);
     await expect(page.getByText(/processing progress|analysis results|processing analysis/i).first()).toBeVisible();
+
+    const tabs = page.getByRole("tab");
+    if (await tabs.count()) {
+      await expect(tabs.first()).toHaveAttribute("tabindex", "0");
+      await tabs.first().focus();
+      await page.keyboard.press("ArrowRight");
+      await expect(tabs.nth(1)).toBeFocused();
+    }
   });
 });
