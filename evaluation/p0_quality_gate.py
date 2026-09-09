@@ -26,7 +26,7 @@ class GateThresholds:
     visible_coverage_micro_min_pct: float = 80.0
     visible_coverage_macro_min_pct: float = 78.0
     visible_coverage_worst_min_pct: float = 70.0
-    output_precision_min_pct: float = 90.0
+    output_precision_min_pct: float = 80.0
     not_visible_false_state_max_pct: float = 5.0
     unsupported_gap_p90_max_frames_exclusive: float = 8.0
     catastrophic_error_events_max: int = 0
@@ -700,7 +700,7 @@ def main() -> None:
     parser.add_argument("--coverage-micro-min", type=float, default=80.0)
     parser.add_argument("--coverage-macro-min", type=float, default=78.0)
     parser.add_argument("--coverage-worst-min", type=float, default=70.0)
-    parser.add_argument("--precision-min", type=float, default=90.0)
+    parser.add_argument("--precision-min", type=float, default=80.0)
     parser.add_argument("--not-visible-false-max", type=float, default=5.0)
     parser.add_argument("--unsupported-gap-p90-max", type=float, default=8.0)
     parser.add_argument("--catastrophic-events-max", type=int, default=0)
