@@ -1,3 +1,6 @@
 # Optional dependencies for the P1 RF-DETR challenger only.
 # Keep separate from requirements.txt so the canonical CourtFlux runtime is unchanged.
+# RF-DETR package is retained for the local COCO diagnostic backend only.
 rfdetr>=1.8,<2
+# Hosted/public Roboflow model client. Pinned to the current verified release used by P1.1.
+inference-sdk==1.5.2
