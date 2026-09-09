@@ -89,6 +89,18 @@ class DiagnosticPreview:
             return canvas
         return cv2.resize(canvas, (even_width, even_height), interpolation=cv2.INTER_AREA)
 
+    @staticmethod
+    def _ffmpeg_executable() -> str | None:
+        system_ffmpeg = shutil.which("ffmpeg")
+        if system_ffmpeg:
+            return system_ffmpeg
+        try:
+            import imageio_ffmpeg
+
+            return imageio_ffmpeg.get_ffmpeg_exe()
+        except Exception:
+            return None
+
     def _write_video_frame(self, canvas: np.ndarray, timestamp: float) -> None:
         if self._working_video_path is None or self._closed:
             return
@@ -124,7 +136,7 @@ class DiagnosticPreview:
         if not self._working_video_path.exists() or self._working_video_path.stat().st_size == 0:
             return
 
-        ffmpeg = shutil.which("ffmpeg")
+        ffmpeg = self._ffmpeg_executable()
         if ffmpeg:
             finalizing_path = self.video_output_path.with_name(
                 f"{self.video_output_path.stem}.finalizing{self.video_output_path.suffix}"
