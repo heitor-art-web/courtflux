@@ -1,8 +1,8 @@
 {
-  "schema_version": 1,
+  "schema_version": 2,
   "phase": "P1.1",
-  "status": "pending_measurement",
-  "purpose": "Frozen player-tracking baseline contract before tracker tuning or RF-DETR promotion.",
+  "status": "baseline_v1_measured_baseline_v2_pending",
+  "purpose": "Frozen player-tracking baseline contract before tracker tuning or RF-DETR promotion. Schema v2 separates broadcast framing, detector-to-tracker assignment and valid court projections.",
   "canonical_baseline": {
     "model": "weights/model_v1.0.0.pt",
     "detector": "YOLO",
@@ -14,12 +14,67 @@
     "detection_only": true,
     "jersey_enabled": false
   },
+  "analytics_eligibility_proxy": {
+    "purpose": "Diagnostic scope only; does not change GameplayFilter or production policy.",
+    "minimum_player_boxes": 2,
+    "median_player_box_height_ratio_max": 0.45,
+    "semantics": "wide-view proxy for separating broadcast close-ups from frames suitable for multi-player analytics"
+  },
   "videos": [
-    {"label": "V1", "path": "data/hILf-ySowIo.mp4", "start_sec": 10, "end_sec": 40},
-    {"label": "V2", "path": "data/ULUpcQXsRII.mp4", "start_sec": 0, "end_sec": 30},
-    {"label": "V3", "path": "data/Vr4105n-cPM.mp4", "start_sec": 0, "end_sec": 30},
-    {"label": "V4", "path": "data/WMWTbS8J2ec.mp4", "start_sec": 0, "end_sec": 30},
-    {"label": "V5", "path": "data/C-JjAlX2Dyc.mp4", "start_sec": 10, "end_sec": 40}
+    {
+      "label": "V1",
+      "path": "data/hILf-ySowIo.mp4",
+      "start_sec": 10,
+      "end_sec": 40,
+      "match_config": "evaluation/match_configs/unknown.json",
+      "team_context": "unknown_match",
+      "team_metrics_in_quality_gate": false
+    },
+    {
+      "label": "V2",
+      "path": "data/ULUpcQXsRII.mp4",
+      "start_sec": 0,
+      "end_sec": 30,
+      "match_config": "evaluation/match_configs/unknown.json",
+      "team_context": "unknown_match",
+      "team_metrics_in_quality_gate": false
+    },
+    {
+      "label": "V3",
+      "path": "data/Vr4105n-cPM.mp4",
+      "start_sec": 0,
+      "end_sec": 30,
+      "match_config": "evaluation/match_configs/unknown.json",
+      "team_context": "unknown_match",
+      "team_metrics_in_quality_gate": false
+    },
+    {
+      "label": "V4",
+      "path": "data/WMWTbS8J2ec.mp4",
+      "start_sec": 0,
+      "end_sec": 30,
+      "match_config": "evaluation/match_configs/unknown.json",
+      "team_context": "unknown_match",
+      "team_metrics_in_quality_gate": false
+    },
+    {
+      "label": "V5",
+      "path": "data/C-JjAlX2Dyc.mp4",
+      "start_sec": 10,
+      "end_sec": 40,
+      "match_config": "evaluation/match_configs/unknown.json",
+      "team_context": "unknown_match",
+      "team_metrics_in_quality_gate": false
+    }
+  ],
+  "known_match_configs": [
+    {
+      "video_id": "OwiQgAMqyUs",
+      "match_config": "data/match_config.json",
+      "home_team": "FC Porto",
+      "away_team": "Ovarense",
+      "included_in_frozen_v1_v5": false
+    }
   ],
   "required_artifacts": [
     "run_config.json",
@@ -28,30 +83,45 @@
     "P1.1 tracking quality report"
   ],
   "measurable_without_player_identity_gt": [
-    "players per gameplay frame",
+    "players per all gameplay frame",
+    "players per analytics-eligible wide-view proxy frame",
+    "detected vs tracked player observations",
+    "frames with all player detections untracked",
     "unique track IDs",
     "untracked observation rate",
     "same-ID interruptions",
     "track observed duration and span",
     "short-track rate",
     "high-IoU distinct-track duplicate proxy",
-    "team-label stability per track",
-    "court_xy continuity when homography is available",
+    "team-label stability only when the match config is known",
+    "court_xy continuity only from explicitly valid and plausible homography projections",
     "runtime / detector timing"
   ],
   "requires_targeted_ground_truth": [
     "true player recall",
     "true ID switches",
     "true track fragmentation by physical player",
-    "true missing-player frames"
+    "true missing-player frames",
+    "team classification accuracy"
   ],
   "rules": [
-    "Measure this baseline before tuning the tracker.",
+    "Measure this corrected baseline before tuning the tracker.",
     "Change one variable at a time.",
     "RF-DETR remains a challenger until it beats the baseline quantitatively.",
+    "Do not reuse data/match_config.json for videos other than OwiQgAMqyUs.",
+    "Unknown match configuration must produce UNKNOWN team evidence instead of forced labels.",
+    "Analytics eligibility is a diagnostic proxy and must not silently change GameplayFilter policy.",
+    "Court continuity remains diagnostic-only until homography validity gating is verified across videos.",
     "Do not change P0 ball policies or promote ball reacquisition.",
     "Do not introduce new evaluation videos.",
     "SAM2 remains deferred / contingency backlog."
   ],
-  "baseline_run_ids": []
+  "baseline_v1_run_ids": [
+    "20260909_132625_725136",
+    "20260909_132742_912152",
+    "20260909_133008_232561",
+    "20260909_133133_025951",
+    "20260909_133512_766121"
+  ],
+  "baseline_v2_run_ids": []
 }
