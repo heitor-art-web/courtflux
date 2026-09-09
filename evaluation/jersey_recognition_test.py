@@ -1,5 +1,8 @@
 from __future__ import annotations
 
+import json
+import tempfile
+
 import numpy as np
 
 from services.vision.roboflow_jersey_analyzer import RoboflowJerseyAnalyzer
@@ -49,6 +52,23 @@ def _test_lmm_call_contract() -> None:
     assert call["max_new_tokens"] == 16
 
 
+def _test_serverless_rejected() -> None:
+    config = {"metadata": {}, "teams": {}}
+    with tempfile.NamedTemporaryFile(mode="w", suffix=".json", encoding="utf-8") as handle:
+        json.dump(config, handle)
+        handle.flush()
+        try:
+            RoboflowJerseyAnalyzer(
+                profiling_path=handle.name,
+                api_url="https://serverless.roboflow.com",
+                api_key="placeholder",
+            )
+        except RuntimeError as exc:
+            assert "Serverless/Hosted" in str(exc)
+        else:
+            raise AssertionError("serverless jersey endpoint should be rejected")
+
+
 def main() -> int:
     _expect({"text": "23"}, "23", "parsed")
     _expect({"output": {"text": "Jersey number: 7"}}, "7", "parsed")
@@ -78,6 +98,7 @@ def main() -> int:
     # Repeated equivalent evidence is unambiguous.
     _expect({"result": ["23", "jersey 23"]}, "23", "parsed")
     _test_lmm_call_contract()
+    _test_serverless_rejected()
 
     print("jersey_recognition_test: PASS")
     return 0
