@@ -23,7 +23,7 @@ permissions:
 jobs:
   quality:
     runs-on: ubuntu-latest
-    timeout-minutes: 25
+    timeout-minutes: 30
 
     steps:
       - name: Checkout
@@ -54,13 +54,26 @@ jobs:
       - name: Install Chromium
         run: npx playwright install --with-deps chromium
 
-      - name: Browser and accessibility tests
+      - name: Public flow smoke tests
+        run: npx playwright test --config web/playwright.config.ts public-smoke.spec.ts
+
+      - name: Axe accessibility smoke tests
+        if: always()
+        run: npx playwright test --config web/playwright.config.ts accessibility.spec.ts
+
+      - name: Authenticated flow tests
+        if: always()
         env:
           COURTFLUX_E2E_EMAIL: ${{ secrets.COURTFLUX_E2E_EMAIL }}
           COURTFLUX_E2E_PASSWORD: ${{ secrets.COURTFLUX_E2E_PASSWORD }}
+        run: npx playwright test --config web/playwright.config.ts authenticated.spec.ts
+
+      - name: Onboarding keyboard tests
+        if: always()
+        env:
           COURTFLUX_E2E_ONBOARDING_EMAIL: ${{ secrets.COURTFLUX_E2E_ONBOARDING_EMAIL }}
           COURTFLUX_E2E_ONBOARDING_PASSWORD: ${{ secrets.COURTFLUX_E2E_ONBOARDING_PASSWORD }}
-        run: npx playwright test --config web/playwright.config.ts
+        run: npx playwright test --config web/playwright.config.ts onboarding.spec.ts
 
       - name: Upload Playwright diagnostics
         if: failure()
