@@ -18,11 +18,25 @@ function setupTabs(tab: HTMLElement) {
   if (!parent.hasAttribute("role")) parent.setAttribute("role", "tablist");
 
   const tabs = Array.from(parent.querySelectorAll<HTMLElement>(':scope > [role="tab"]'));
+  const selectedIndex = Math.max(0, tabs.findIndex((item) => item.getAttribute("aria-selected") === "true"));
   tabs.forEach((item, index) => {
-    const selected = item.getAttribute("aria-selected") === "true";
-    item.tabIndex = selected ? 0 : -1;
-    if (!item.id) item.id = `courtflux-tab-${index}-${Math.random().toString(36).slice(2, 8)}`;
+    item.tabIndex = index === selectedIndex ? 0 : -1;
+    if (!item.id) item.id = `courtflux-tab-${index}`;
   });
+
+  const activeTab = tabs[selectedIndex];
+  const panel = parent.nextElementSibling;
+  if (activeTab && panel instanceof HTMLElement) {
+    const panelId = `courtflux-tabpanel-${selectedIndex}`;
+    panel.id = panelId;
+    panel.setAttribute("role", "tabpanel");
+    panel.setAttribute("aria-labelledby", activeTab.id);
+    panel.tabIndex = 0;
+    activeTab.setAttribute("aria-controls", panelId);
+    tabs.forEach((item, index) => {
+      if (index !== selectedIndex) item.removeAttribute("aria-controls");
+    });
+  }
 }
 
 function setupSourceSelector(group: HTMLElement) {
@@ -54,6 +68,8 @@ export function InteractionA11yBridge() {
         let next = index;
         if (event.key === "ArrowRight" || event.key === "ArrowDown") next = (index + 1) % radios.length;
         else if (event.key === "ArrowLeft" || event.key === "ArrowUp") next = (index - 1 + radios.length) % radios.length;
+        else if (event.key === "Home") next = 0;
+        else if (event.key === "End") next = radios.length - 1;
         else return;
         event.preventDefault();
         radios[next]?.focus();
@@ -77,7 +93,7 @@ export function InteractionA11yBridge() {
         event.preventDefault();
         tabs[next]?.focus();
         tabs[next]?.click();
-        tabs.forEach((item, itemIndex) => { item.tabIndex = itemIndex === next ? 0 : -1; });
+        setupTabs(tabs[next]);
       }
     };
 
