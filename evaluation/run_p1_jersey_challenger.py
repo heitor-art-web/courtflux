@@ -76,6 +76,12 @@ def main() -> int:
     parser.add_argument("--imgsz", type=int, default=960)
     parser.add_argument("--player-conf", type=float, default=0.10)
     parser.add_argument("--inference-conf", type=float, default=0.03)
+    parser.add_argument(
+        "--max-ocr-attempts",
+        type=int,
+        default=0,
+        help="Stop after this many LMM calls; 0 means unlimited. Useful for smoke tests.",
+    )
     parser.add_argument("--output", type=Path, default=None)
     args = parser.parse_args()
 
@@ -99,6 +105,7 @@ def main() -> int:
     start_sec = _parse_time(args.start)
     end_sec = _parse_time(args.end)
     interval = max(1, int(args.interval))
+    max_ocr_attempts = max(0, int(args.max_ocr_attempts))
     cap = cv2.VideoCapture(str(video_path))
     if not cap.isOpened():
         raise RuntimeError(f"Unable to open {video_path}")
@@ -126,6 +133,7 @@ def main() -> int:
     latencies_ms: list[float] = []
     consistency_comparisons = 0
     consistency_matches = 0
+    stop_requested = False
 
     try:
         while True:
@@ -183,33 +191,36 @@ def main() -> int:
                         "latency_ms": latency_ms,
                     }
                     state["predictions"].append(record)
-                    if not prediction.get("accepted"):
+                    if prediction.get("accepted"):
+                        accepted += 1
+                        state["accepted"] += 1
+                        number = str(prediction.get("candidate_number"))
+
+                        previous_accepted = state["previous_accepted_number"]
+                        if previous_accepted is not None:
+                            state["consistency_comparisons"] += 1
+                            consistency_comparisons += 1
+                            if number == previous_accepted:
+                                state["consistency_matches"] += 1
+                                consistency_matches += 1
+                        state["previous_accepted_number"] = number
+
+                        if number == state["last_number"]:
+                            state["consecutive"] += 1
+                        else:
+                            state["last_number"] = number
+                            state["consecutive"] = 1
+
+                        if state["consecutive"] >= analyzer.identity_confirmations_required:
+                            state["locked_number"] = number
+                            state["locked_team"] = team
+                    else:
                         state["last_number"] = None
                         state["consecutive"] = 0
-                        continue
 
-                    accepted += 1
-                    state["accepted"] += 1
-                    number = str(prediction.get("candidate_number"))
-
-                    previous_accepted = state["previous_accepted_number"]
-                    if previous_accepted is not None:
-                        state["consistency_comparisons"] += 1
-                        consistency_comparisons += 1
-                        if number == previous_accepted:
-                            state["consistency_matches"] += 1
-                            consistency_matches += 1
-                    state["previous_accepted_number"] = number
-
-                    if number == state["last_number"]:
-                        state["consecutive"] += 1
-                    else:
-                        state["last_number"] = number
-                        state["consecutive"] = 1
-
-                    if state["consecutive"] >= analyzer.identity_confirmations_required:
-                        state["locked_number"] = number
-                        state["locked_team"] = team
+                    if max_ocr_attempts and attempts >= max_ocr_attempts:
+                        stop_requested = True
+                        break
 
             if processed % 100 == 0:
                 locks = sum(1 for item in track_state.values() if item["locked_number"] is not None)
@@ -217,6 +228,8 @@ def main() -> int:
                     f"[PROGRESS] frames={processed} attempts={attempts} accepted={accepted} locks={locks}",
                     flush=True,
                 )
+            if stop_requested:
+                break
             frame_index += 1
     finally:
         cap.release()
