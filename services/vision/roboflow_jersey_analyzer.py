@@ -12,19 +12,23 @@ from services.vision.team_only_analyzer import TeamOnlyAnalyzer
 
 DEFAULT_JERSEY_MODEL_ID = "basketball-jersey-numbers-ocr/7"
 DEFAULT_JERSEY_API_URL = "http://localhost:9001"
+DEFAULT_JERSEY_PROMPT = (
+    "Read the basketball jersey number in this crop. Return only the number from 0 to 99, "
+    "including 00 when visible. If the number is not readable, return UNKNOWN."
+)
 
 
 class RoboflowJerseyAnalyzer(TeamOnlyAnalyzer):
     """Track-aware jersey OCR using Roboflow's basketball jersey multimodal model.
 
-    The Roboflow Universe model is trained on jersey-number crops. CourtFlux therefore
-    sends a conservative central torso crop, keeps several recent observations per track,
-    and selects the sharpest recent crop for each OCR attempt. Identity locking remains a
-    downstream temporal decision; one VLM response is never treated as a stable identity.
+    CourtFlux sends a conservative central torso crop to the fine-tuned multimodal model,
+    keeps several recent observations per track, and selects the sharpest recent crop for
+    each OCR attempt. Identity locking remains a downstream temporal decision; one VLM
+    response is never treated as stable identity.
 
-    The current SmolVLM2 LoRA model does not support Roboflow Serverless Hosted API.
-    Point ROBOFLOW_JERSEY_API_URL at a local Roboflow Inference server or a compatible
-    dedicated deployment. API keys are read only from the environment.
+    The endpoint is configurable because multimodal deployments may run on a self-hosted
+    Roboflow Inference server, a Dedicated Deployment, or another compatible endpoint.
+    API keys are read only from the environment.
     """
 
     identity_confirmations_required = 3
@@ -37,6 +41,7 @@ class RoboflowJerseyAnalyzer(TeamOnlyAnalyzer):
         api_url: str | None = None,
         model_id: str | None = None,
         api_key: str | None = None,
+        prompt: str | None = None,
         crop_buffer_size: int = 5,
     ) -> None:
         super().__init__(profiling_path=profiling_path)
@@ -47,15 +52,11 @@ class RoboflowJerseyAnalyzer(TeamOnlyAnalyzer):
             model_id or os.getenv("ROBOFLOW_JERSEY_MODEL_ID") or DEFAULT_JERSEY_MODEL_ID
         )
         self.api_key = api_key if api_key is not None else os.getenv("ROBOFLOW_API_KEY")
+        self.prompt = str(
+            prompt or os.getenv("ROBOFLOW_JERSEY_PROMPT") or DEFAULT_JERSEY_PROMPT
+        )
         self.crop_buffer_size = max(1, min(int(crop_buffer_size), 12))
         self.track_crop_buffers: dict[int, list[np.ndarray]] = {}
-
-        if "serverless.roboflow.com" in self.api_url.lower():
-            raise RuntimeError(
-                f"{self.model_id} is a multimodal LoRA model that is not supported by "
-                "Roboflow Serverless Hosted API. Set ROBOFLOW_JERSEY_API_URL to a local "
-                "Roboflow Inference server or compatible dedicated deployment."
-            )
 
         try:
             from inference_sdk import InferenceHTTPClient, InferenceConfiguration
@@ -70,6 +71,10 @@ class RoboflowJerseyAnalyzer(TeamOnlyAnalyzer):
         except Exception:
             # Older/local inference servers may not expose this configuration field.
             pass
+        if not hasattr(client, "infer_lmm"):
+            raise RuntimeError(
+                "Installed inference-sdk does not expose infer_lmm(); upgrade requirements-roboflow.txt."
+            )
         self.client = client
 
     @staticmethod
@@ -194,7 +199,12 @@ class RoboflowJerseyAnalyzer(TeamOnlyAnalyzer):
             return {"accepted": False, "rejection_reason": "crop_not_ready"}
 
         crop = max(crops, key=self._crop_quality)
-        response = self.client.infer(crop, model_id=self.model_id)
+        response = self.client.infer_lmm(
+            inference_input=crop,
+            model_id=self.model_id,
+            prompt=self.prompt,
+            max_new_tokens=16,
+        )
         number, parse_reason = self.parse_number(response)
 
         if number is None:
@@ -217,7 +227,7 @@ class RoboflowJerseyAnalyzer(TeamOnlyAnalyzer):
             "candidate_margin": 1.0 if accepted else 0.0,
             "team": team_name,
             "model_id": self.model_id,
-            "backend": "roboflow_multimodal",
+            "backend": "roboflow_multimodal_lmm",
             "api_url": self.api_url,
             "crop_buffer_size": len(crops),
             "parse_reason": parse_reason,
