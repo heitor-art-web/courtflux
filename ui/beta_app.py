@@ -7,6 +7,8 @@ import subprocess
 import sys
 from pathlib import Path
 
+import cv2
+import numpy as np
 import pandas as pd
 import streamlit as st
 
@@ -20,11 +22,10 @@ RUNS_DIR = ROOT / "evaluation" / "runs"
 MATCH_CONFIG_PATH = ROOT / "data" / "match_config.json"
 LIVE_PREVIEW_PATH = RUNS_DIR / "_live_preview.jpg"
 DEFAULT_VIDEO = "https://www.youtube.com/watch?v=OwiQgAMqyUs"
-configured_model = ROOT / settings.model
-fallback_model = ROOT / "weights" / "Model_v0.1.pt"
-DEFAULT_MODEL = settings.model if configured_model.exists() else (
-    "weights/Model_v0.1.pt" if fallback_model.exists() else settings.model
-)
+CANONICAL_MODEL = "weights/model_v1.0.0.pt"
+canonical_model = ROOT / CANONICAL_MODEL
+DEFAULT_MODEL = CANONICAL_MODEL if canonical_model.exists() else settings.model
+MAX_PREVIEW_VIDEO_FRAMES = 600
 
 st.set_page_config(page_title="CourtFlux — Basketball Intelligence from Video", page_icon="🏀", layout="wide")
 
@@ -34,6 +35,36 @@ def load_summary(path: Path) -> dict:
         return json.loads(path.read_text(encoding="utf-8"))
     except Exception:
         return {}
+
+
+def write_analysis_preview_video(frames: list[bytes], output_path: Path, fps: float) -> bool:
+    """Encode sampled annotated JPEG previews into a lightweight MP4."""
+    decoded = []
+    for payload in frames:
+        image = cv2.imdecode(np.frombuffer(payload, dtype=np.uint8), cv2.IMREAD_COLOR)
+        if image is not None and image.size:
+            decoded.append(image)
+    if not decoded:
+        return False
+
+    height, width = decoded[0].shape[:2]
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    writer = cv2.VideoWriter(
+        str(output_path),
+        cv2.VideoWriter_fourcc(*"mp4v"),
+        max(float(fps), 1.0),
+        (int(width), int(height)),
+    )
+    if not writer.isOpened():
+        return False
+    try:
+        for image in decoded:
+            if image.shape[:2] != (height, width):
+                image = cv2.resize(image, (width, height), interpolation=cv2.INTER_AREA)
+            writer.write(image)
+    finally:
+        writer.release()
+    return output_path.exists() and output_path.stat().st_size > 0
 
 
 def validate_match_config(config: dict) -> list[str]:
@@ -123,6 +154,7 @@ def render_summary(path: Path) -> None:
     st.subheader("Latest results")
     st.caption(
         f"Run: {summary.get('run_id')} · mode: {(summary.get('extra', {}) or {}).get('mode', 'unknown')} · "
+        f"model: {summary.get('model')} · "
         f"thresholds infer/player/ball: "
         f"{summary.get('inference_conf', summary.get('detector_conf'))} / "
         f"{summary.get('player_conf', summary.get('detector_conf'))} / "
@@ -131,10 +163,19 @@ def render_summary(path: Path) -> None:
     if (summary.get("extra", {}) or {}).get("status") == "failed":
         st.error((summary.get("extra", {}) or {}).get("error", "Run failed"))
 
+    analysis_video = run_dir / "analysis_preview.mp4"
+    if analysis_video.exists():
+        st.markdown("**Analysis video preview**")
+        st.caption(
+            "Sampled diagnostic video from the live annotated preview — player track, predicted team, "
+            "jersey when available, and ball confidence. It is a visual QA artifact, not a metric."
+        )
+        st.video(str(analysis_video))
+
     preview_path = run_dir / "latest_preview.jpg"
     if preview_path.exists():
-        st.markdown("**Diagnostic preview**")
-        st.caption("Lightweight detector preview only — player track, predicted team, jersey when available, and ball confidence. No court/homography rendering.")
+        st.markdown("**Final diagnostic frame**")
+        st.caption("Final sampled detector preview from this run.")
         st.image(preview_path.read_bytes(), use_container_width=True)
 
     a, b, c, d = st.columns(4)
@@ -187,17 +228,25 @@ def render_summary(path: Path) -> None:
         ]
         st.dataframe(pd.DataFrame(stage_rows), width="stretch", hide_index=True)
 
-    cols = st.columns(4)
     files = [
         (path, "summary.json", "application/json"),
         (run_dir / "frames.jsonl", "frames.jsonl", "application/x-ndjson"),
         (run_dir / "console.log", "console.log", "text/plain"),
         (run_dir / "match_config.json", "match_config.json", "application/json"),
+        (analysis_video, "analysis_preview.mp4", "video/mp4"),
     ]
-    for col, (file_path, label, mime) in zip(cols, files):
-        if file_path.exists():
+    available_files = [item for item in files if item[0].exists()]
+    if available_files:
+        cols = st.columns(len(available_files))
+        for col, (file_path, label, mime) in zip(cols, available_files):
             with col:
-                st.download_button(label, data=file_path.read_bytes(), file_name=f"{summary.get('run_id', 'run')}_{label}", mime=mime, width="stretch")
+                st.download_button(
+                    label,
+                    data=file_path.read_bytes(),
+                    file_name=f"{summary.get('run_id', 'run')}_{label}",
+                    mime=mime,
+                    width="stretch",
+                )
 
 
 st.title("🏀 CourtFlux")
@@ -238,9 +287,13 @@ with st.sidebar:
     video_source = st.text_input("YouTube URL / local video", value=DEFAULT_VIDEO)
     start_time = st.text_input("Start", value="00:00")
     end_time = st.text_input("End", value="01:00")
-    model_path = st.text_input("Model", value=DEFAULT_MODEL)
+    model_path = st.text_input(
+        "Model",
+        value=DEFAULT_MODEL,
+        help="Canonical CourtFlux checkpoint: weights/model_v1.0.0.pt",
+    )
     detector_conf = st.slider("Player confidence", 0.01, 0.60, 0.10, 0.01)
-    imgsz = st.selectbox("Inference image size", [640, 768, 960, 1280], index=0)
+    imgsz = st.selectbox("Inference image size", [640, 768, 960, 1280], index=2)
     device_options = ["mps", "cpu", "cuda"]
     default_device = settings.device if settings.device in device_options else "mps"
     device = st.selectbox("Device", device_options, index=device_options.index(default_device))
@@ -273,10 +326,10 @@ with st.sidebar:
 
     st.divider()
     live_preview = st.toggle(
-        "Live diagnostic preview",
+        "Live diagnostic preview + video",
         value=True,
         disabled=not detection_only,
-        help="Shows player/team/jersey/ball overlays without enabling camera or court analytics.",
+        help="Shows annotated snapshots while processing and saves a sampled MP4 preview with the run.",
     )
     preview_interval = st.number_input(
         "Preview interval (frames)",
@@ -285,7 +338,7 @@ with st.sidebar:
         value=15,
         step=5,
         disabled=not live_preview or not detection_only,
-        help="Higher values reduce JPEG/display overhead. 15 is roughly 1.7 updates per second of source video.",
+        help="Higher values reduce JPEG/display overhead. The saved video uses the same sampled annotated frames.",
     )
 
     if not config_ready:
@@ -339,7 +392,9 @@ if run_clicked:
         preview_box = st.empty()
         preview_caption = st.empty()
         if live_preview and detection_only:
-            preview_caption.caption("Live diagnostic preview — refreshes on analyzer progress output; rendering cost is measured separately.")
+            preview_caption.caption(
+                "Live diagnostic preview — sampled annotated frames will also be saved as analysis_preview.mp4."
+            )
         else:
             preview_caption.caption("Live diagnostic preview disabled for this run.")
     with run_cols[1]:
@@ -356,6 +411,7 @@ if run_clicked:
         bufsize=1,
     )
     captured = []
+    preview_frames: list[bytes] = []
     run_dir = None
     summary_path = None
     preview_mtime = None
@@ -376,7 +432,10 @@ if run_clicked:
                 current_mtime = LIVE_PREVIEW_PATH.stat().st_mtime_ns
                 if current_mtime != preview_mtime:
                     preview_mtime = current_mtime
-                    preview_box.image(LIVE_PREVIEW_PATH.read_bytes(), use_container_width=True)
+                    payload = LIVE_PREVIEW_PATH.read_bytes()
+                    preview_box.image(payload, use_container_width=True)
+                    if len(preview_frames) < MAX_PREVIEW_VIDEO_FRAMES:
+                        preview_frames.append(payload)
             except Exception:
                 pass
 
@@ -389,9 +448,18 @@ if run_clicked:
                 final_preview = run_dir / "latest_preview.jpg"
                 shutil.copy2(LIVE_PREVIEW_PATH, final_preview)
                 preview_box.image(final_preview.read_bytes(), use_container_width=True)
-                preview_caption.caption("Final diagnostic preview saved with this run.")
+
+                analysis_video = run_dir / "analysis_preview.mp4"
+                sampled_fps = max(1.0, 30.0 / max(int(preview_interval), 1))
+                video_ok = write_analysis_preview_video(preview_frames, analysis_video, sampled_fps)
+                if video_ok:
+                    preview_caption.caption(
+                        f"Final diagnostic frame + sampled analysis video saved ({len(preview_frames)} frames)."
+                    )
+                else:
+                    preview_caption.caption("Final diagnostic frame saved; sampled MP4 could not be encoded.")
             except Exception as exc:
-                preview_caption.caption(f"Preview completed, but the final image could not be copied: {exc}")
+                preview_caption.caption(f"Preview completed, but final artifacts could not be saved: {exc}")
     if summary_path and summary_path.exists():
         st.session_state["last_summary_path"] = str(summary_path)
     if process.returncode == 0:
