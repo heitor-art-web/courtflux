@@ -21,6 +21,13 @@
   outline: none;
 }
 
+/* File inputs are visually hidden inside the New Analysis upload card.
+   Surface their keyboard focus on the visible label instead. */
+label[class*="uploadBox"]:focus-within {
+  outline: 3px solid rgba(255, 116, 23, 0.72);
+  outline-offset: 3px;
+}
+
 @media (prefers-reduced-motion: reduce) {
   .skip-link {
     transition: none;

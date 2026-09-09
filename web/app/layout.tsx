@@ -7,6 +7,7 @@ import { getSiteUrl } from "@/lib/site";
 import { getRequestLocale } from "@/lib/i18n/request";
 import { LanguageSwitcher } from "./language-switcher";
 import { LocaleTextBridge } from "./locale-text-bridge";
+import { InteractionA11yBridge } from "./interaction-a11y-bridge";
 import { Analytics } from "@vercel/analytics/next";
 
 const siteUrl = getSiteUrl();
@@ -73,6 +74,7 @@ export default async function RootLayout({ children }: Readonly<{ children: Reac
         </div>
         <LocaleTextBridge locale={locale} />
         <LanguageSwitcher initialLocale={locale} />
+        <InteractionA11yBridge />
         <Analytics />
       </body>
     </html>
