@@ -9,9 +9,12 @@ import sys
 from datetime import datetime
 from pathlib import Path
 
+ROOT = Path(__file__).resolve().parents[1]
+if str(ROOT) not in sys.path:
+    sys.path.insert(0, str(ROOT))
+
 from evaluation.player_tracking_quality import aggregate_reports, evaluate_run
 
-ROOT = Path(__file__).resolve().parents[1]
 DEFAULT_CONTRACT = ROOT / "evaluation" / "p1_tracking_baseline_contract.json"
 RUN_DIR_RE = re.compile(r"^\[RUN_DIR\]\s+(.+?)\s*$")
 
