@@ -1,0 +1,51 @@
+{
+  "schema": "roboflow-basketball-court-detection-2-v19-fiba",
+  "units": "metres",
+  "source": {
+    "dataset": "roboflow-jvuqo/basketball-court-detection-2/19",
+    "keypoint_labels": [
+      "01", "02", "04", "05", "07", "08", "09", "10", "11", "12", "13",
+      "14", "15", "16", "17", "19", "21", "23", "25", "26", "27", "28",
+      "29", "30", "31", "32", "33", "34", "35", "37", "38", "40", "41"
+    ],
+    "geometry_provenance": "roboflow/sports PR #37 sports/basketball/config.py",
+    "geometry_source_commit": "415751384e34f1cb7089a00909e0d7932fe73a75",
+    "status": "derived_from_open_upstream_pr",
+    "note": "The upstream PR defines this exact 33-label ordering and returns 33 FIBA vertices in the same list order. CourtFlux maps model keypoint index 0..32 to those vertices. Re-verify if upstream changes before merge."
+  },
+  "points": [
+    {"index": 0, "label": "01", "court_xy_m": [0.0, 0.0]},
+    {"index": 1, "label": "02", "court_xy_m": [0.0, 0.9]},
+    {"index": 2, "label": "04", "court_xy_m": [0.0, 5.05]},
+    {"index": 3, "label": "05", "court_xy_m": [0.0, 9.95]},
+    {"index": 4, "label": "07", "court_xy_m": [0.0, 14.1]},
+    {"index": 5, "label": "08", "court_xy_m": [0.0, 15.0]},
+    {"index": 6, "label": "09", "court_xy_m": [1.57, 7.5]},
+    {"index": 7, "label": "10", "court_xy_m": [3.3, 0.9]},
+    {"index": 8, "label": "11", "court_xy_m": [3.3, 14.1]},
+    {"index": 9, "label": "12", "court_xy_m": [5.8, 5.05]},
+    {"index": 10, "label": "13", "court_xy_m": [5.8, 7.5]},
+    {"index": 11, "label": "14", "court_xy_m": [5.8, 9.95]},
+    {"index": 12, "label": "15", "court_xy_m": [8.3, 0.0]},
+    {"index": 13, "label": "16", "court_xy_m": [8.32, 7.5]},
+    {"index": 14, "label": "17", "court_xy_m": [8.3, 15.0]},
+    {"index": 15, "label": "19", "court_xy_m": [14.0, 0.0]},
+    {"index": 16, "label": "21", "court_xy_m": [14.0, 7.5]},
+    {"index": 17, "label": "23", "court_xy_m": [14.0, 15.0]},
+    {"index": 18, "label": "25", "court_xy_m": [19.7, 0.0]},
+    {"index": 19, "label": "26", "court_xy_m": [19.68, 7.5]},
+    {"index": 20, "label": "27", "court_xy_m": [19.7, 15.0]},
+    {"index": 21, "label": "28", "court_xy_m": [22.2, 5.05]},
+    {"index": 22, "label": "29", "court_xy_m": [22.2, 7.5]},
+    {"index": 23, "label": "30", "court_xy_m": [22.2, 9.95]},
+    {"index": 24, "label": "31", "court_xy_m": [24.7, 0.9]},
+    {"index": 25, "label": "32", "court_xy_m": [24.7, 14.1]},
+    {"index": 26, "label": "33", "court_xy_m": [26.43, 7.5]},
+    {"index": 27, "label": "34", "court_xy_m": [28.0, 0.0]},
+    {"index": 28, "label": "35", "court_xy_m": [28.0, 0.9]},
+    {"index": 29, "label": "37", "court_xy_m": [28.0, 5.05]},
+    {"index": 30, "label": "38", "court_xy_m": [28.0, 9.95]},
+    {"index": 31, "label": "40", "court_xy_m": [28.0, 14.1]},
+    {"index": 32, "label": "41", "court_xy_m": [28.0, 15.0]}
+  ]
+}
