@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import json
+import shutil
+import subprocess
 from pathlib import Path
 from typing import Any
 
@@ -30,10 +32,20 @@ class DiagnosticPreview:
         self.jpeg_quality = max(40, min(95, int(jpeg_quality)))
         self.team_colors = self._load_team_colors(Path(match_config_path)) if match_config_path else {}
         self.video_output_path = Path(video_output_path) if video_output_path else None
-        self.video_fps = max(1.0, float(video_fps))
+        self.video_fps = max(0.1, float(video_fps))
         self._video_writer: cv2.VideoWriter | None = None
         self._video_size: tuple[int, int] | None = None
         self._closed = False
+        self._working_video_path = (
+            self.video_output_path.with_name(f"{self.video_output_path.stem}.working{self.video_output_path.suffix}")
+            if self.video_output_path
+            else None
+        )
+        if self.video_output_path is not None:
+            self.video_output_path.parent.mkdir(parents=True, exist_ok=True)
+            self.video_output_path.unlink(missing_ok=True)
+        if self._working_video_path is not None:
+            self._working_video_path.unlink(missing_ok=True)
 
     def _load_team_colors(self, path: Path) -> dict[str, tuple[int, int, int]]:
         try:
@@ -64,26 +76,79 @@ class DiagnosticPreview:
         y1 = max(0, min(height - 1, y1)); y2 = max(0, min(height - 1, y2))
         return (x1, y1, x2, y2) if x2 > x1 and y2 > y1 else None
 
+    @staticmethod
+    def _even_video_frame(canvas: np.ndarray) -> np.ndarray:
+        """Keep dimensions compatible with 4:2:0 browser video decoders."""
+        height, width = canvas.shape[:2]
+        even_width = width - (width % 2)
+        even_height = height - (height % 2)
+        if even_width < 2 or even_height < 2:
+            return canvas
+        if (even_width, even_height) == (width, height):
+            return canvas
+        return cv2.resize(canvas, (even_width, even_height), interpolation=cv2.INTER_AREA)
+
     def _write_video_frame(self, canvas: np.ndarray) -> None:
-        if self.video_output_path is None or self._closed:
+        if self._working_video_path is None or self._closed:
             return
+        canvas = self._even_video_frame(canvas)
         height, width = canvas.shape[:2]
         size = (int(width), int(height))
         if self._video_writer is None:
-            self.video_output_path.parent.mkdir(parents=True, exist_ok=True)
             writer = cv2.VideoWriter(
-                str(self.video_output_path),
+                str(self._working_video_path),
                 cv2.VideoWriter_fourcc(*"mp4v"),
                 self.video_fps,
                 size,
             )
             if not writer.isOpened():
+                print("⚠️ Diagnostic preview video writer could not be opened.", flush=True)
                 return
             self._video_writer = writer
             self._video_size = size
         if self._video_size != size:
             canvas = cv2.resize(canvas, self._video_size, interpolation=cv2.INTER_AREA)
         self._video_writer.write(canvas)
+
+    def _finalize_video(self) -> None:
+        if self.video_output_path is None or self._working_video_path is None:
+            return
+        if not self._working_video_path.exists() or self._working_video_path.stat().st_size == 0:
+            return
+
+        ffmpeg = shutil.which("ffmpeg")
+        if ffmpeg:
+            finalizing_path = self.video_output_path.with_name(
+                f"{self.video_output_path.stem}.finalizing{self.video_output_path.suffix}"
+            )
+            finalizing_path.unlink(missing_ok=True)
+            result = subprocess.run(
+                [
+                    ffmpeg,
+                    "-y",
+                    "-loglevel", "error",
+                    "-i", str(self._working_video_path),
+                    "-an",
+                    "-c:v", "libx264",
+                    "-pix_fmt", "yuv420p",
+                    "-movflags", "+faststart",
+                    str(finalizing_path),
+                ],
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+            if result.returncode == 0 and finalizing_path.exists() and finalizing_path.stat().st_size > 0:
+                finalizing_path.replace(self.video_output_path)
+                self._working_video_path.unlink(missing_ok=True)
+                return
+            finalizing_path.unlink(missing_ok=True)
+            detail = (result.stderr or "ffmpeg returned no error output").strip()
+            print(f"⚠️ H.264 preview finalization failed; keeping MPEG-4 fallback: {detail}", flush=True)
+        else:
+            print("⚠️ ffmpeg is unavailable; keeping MPEG-4 fallback preview.", flush=True)
+
+        self._working_video_path.replace(self.video_output_path)
 
     def render(self, frame_state: Any) -> Path | None:
         frame_id = int(getattr(frame_state, "frame_id", 0))
@@ -172,3 +237,4 @@ class DiagnosticPreview:
         if self._video_writer is not None:
             self._video_writer.release()
             self._video_writer = None
+        self._finalize_video()
