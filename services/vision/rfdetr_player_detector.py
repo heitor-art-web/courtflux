@@ -69,6 +69,7 @@ class RFDETRPlayerDetector:
                     confidence_threshold=self.inference_threshold,
                     class_filter=[self.target_class],
                     max_detections=40,
+                    disable_active_learning=True,
                 )
             )
             return
@@ -132,14 +133,31 @@ class RFDETRPlayerDetector:
             output.append(RFDETRPlayerDetection(box=box, confidence=confidence))
         return output
 
-    def _detect_roboflow(self, frame_bgr: np.ndarray) -> list[RFDETRPlayerDetection]:
+    def _detect_roboflow_batch(
+        self,
+        frames_bgr: list[np.ndarray],
+    ) -> list[list[RFDETRPlayerDetection]]:
         assert self.client is not None
-        response = self.client.infer(frame_bgr, model_id=self.model_id)
-        return self._players_from_roboflow_response(
-            response,
-            target_class=self.target_class,
-            player_threshold=self.player_threshold,
-        )
+        responses = self.client.infer(frames_bgr, model_id=self.model_id)
+        if isinstance(responses, dict):
+            responses = [responses]
+        if not isinstance(responses, list):
+            raise RuntimeError(
+                f"Unexpected Roboflow batch response type: {type(responses).__name__}"
+            )
+        if len(responses) != len(frames_bgr):
+            raise RuntimeError(
+                "Roboflow batch response count mismatch: "
+                f"requested={len(frames_bgr)} received={len(responses)}"
+            )
+        return [
+            self._players_from_roboflow_response(
+                response,
+                target_class=self.target_class,
+                player_threshold=self.player_threshold,
+            )
+            for response in responses
+        ]
 
     def _detect_coco_diagnostic(self, frame_bgr: np.ndarray) -> list[RFDETRPlayerDetection]:
         assert self.model is not None
@@ -168,12 +186,20 @@ class RFDETRPlayerDetector:
             )
         return output
 
-    def detect(self, frame_bgr: np.ndarray) -> list[RFDETRPlayerDetection]:
-        if frame_bgr is None or frame_bgr.size == 0:
+    def detect_batch(
+        self,
+        frames_bgr: list[np.ndarray],
+    ) -> list[list[RFDETRPlayerDetection]]:
+        if not frames_bgr:
             return []
+        if any(frame is None or frame.size == 0 for frame in frames_bgr):
+            raise ValueError("RF-DETR batch contains an empty frame")
         if self.backend == "roboflow":
-            return self._detect_roboflow(frame_bgr)
-        return self._detect_coco_diagnostic(frame_bgr)
+            return self._detect_roboflow_batch(frames_bgr)
+        return [self._detect_coco_diagnostic(frame) for frame in frames_bgr]
+
+    def detect(self, frame_bgr: np.ndarray) -> list[RFDETRPlayerDetection]:
+        return self.detect_batch([frame_bgr])[0]
 
     def metadata(self) -> dict[str, Any]:
         return {
@@ -182,4 +208,5 @@ class RFDETRPlayerDetector:
             "target_class": self.target_class if self.backend == "roboflow" else "person",
             "semantic_quality_gate_eligible": self.backend == "roboflow" and self.target_class == "player",
             "api_url": self.api_url if self.backend == "roboflow" else None,
+            "batch_inference_supported": True,
         }
