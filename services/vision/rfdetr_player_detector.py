@@ -63,9 +63,14 @@ class RFDETRPlayerDetector:
                     "Export it in the shell; do not commit it to the repository."
                 )
             self.client = InferenceHTTPClient(api_url=self.api_url, api_key=resolved_key)
-            # Current serverless API supports header transport and avoids leaking
-            # the key in query parameters/logs.
-            self.client.configure(InferenceConfiguration(api_key_transport="header"))
+            self.client.configure(
+                InferenceConfiguration(
+                    api_key_transport="header",
+                    confidence_threshold=self.inference_threshold,
+                    class_filter=[self.target_class],
+                    max_detections=40,
+                )
+            )
             return
 
         if self.backend == "coco":
