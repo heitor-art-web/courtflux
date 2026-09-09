@@ -35,6 +35,7 @@ class DiagnosticPreview:
         self.video_fps = max(0.1, float(video_fps))
         self._video_writer: cv2.VideoWriter | None = None
         self._video_size: tuple[int, int] | None = None
+        self._last_video_timestamp: float | None = None
         self._closed = False
         self._working_video_path = (
             self.video_output_path.with_name(f"{self.video_output_path.stem}.working{self.video_output_path.suffix}")
@@ -88,7 +89,7 @@ class DiagnosticPreview:
             return canvas
         return cv2.resize(canvas, (even_width, even_height), interpolation=cv2.INTER_AREA)
 
-    def _write_video_frame(self, canvas: np.ndarray) -> None:
+    def _write_video_frame(self, canvas: np.ndarray, timestamp: float) -> None:
         if self._working_video_path is None or self._closed:
             return
         canvas = self._even_video_frame(canvas)
@@ -108,7 +109,14 @@ class DiagnosticPreview:
             self._video_size = size
         if self._video_size != size:
             canvas = cv2.resize(canvas, self._video_size, interpolation=cv2.INTER_AREA)
-        self._video_writer.write(canvas)
+
+        repeat = 1
+        if self._last_video_timestamp is not None:
+            delta = max(0.0, float(timestamp) - self._last_video_timestamp)
+            repeat = max(1, int(round(delta * self.video_fps)))
+        for _ in range(repeat):
+            self._video_writer.write(canvas)
+        self._last_video_timestamp = float(timestamp)
 
     def _finalize_video(self) -> None:
         if self.video_output_path is None or self._working_video_path is None:
@@ -221,7 +229,7 @@ class DiagnosticPreview:
         if not ok:
             return None
         temp_path.replace(self.output_path)
-        self._write_video_frame(canvas)
+        self._write_video_frame(canvas, timestamp)
         return self.output_path
 
     def draw(self, frame_state: Any):
