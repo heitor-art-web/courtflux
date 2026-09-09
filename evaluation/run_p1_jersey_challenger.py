@@ -2,10 +2,12 @@ from __future__ import annotations
 
 import argparse
 import json
+import math
 import sys
 from collections import defaultdict
 from datetime import datetime
 from pathlib import Path
+from statistics import fmean, median
 
 import cv2
 from ultralytics import YOLO
@@ -39,6 +41,28 @@ def _safe_crop(frame, box):
         return None
     crop = frame[y1:y2, x1:x2]
     return crop if crop.size else None
+
+
+def _latency_summary(values: list[float]) -> dict:
+    if not values:
+        return {
+            "count": 0,
+            "mean": None,
+            "median": None,
+            "p95": None,
+            "min": None,
+            "max": None,
+        }
+    ordered = sorted(float(value) for value in values)
+    p95_index = max(0, min(len(ordered) - 1, math.ceil(0.95 * len(ordered)) - 1))
+    return {
+        "count": len(ordered),
+        "mean": round(fmean(ordered), 3),
+        "median": round(median(ordered), 3),
+        "p95": round(ordered[p95_index], 3),
+        "min": round(ordered[0], 3),
+        "max": round(ordered[-1], 3),
+    }
 
 
 def main() -> int:
@@ -89,6 +113,9 @@ def main() -> int:
             "consecutive": 0,
             "locked_number": None,
             "locked_team": None,
+            "previous_accepted_number": None,
+            "consistency_comparisons": 0,
+            "consistency_matches": 0,
             "predictions": [],
         }
     )
@@ -96,6 +123,9 @@ def main() -> int:
     processed = 0
     attempts = 0
     accepted = 0
+    latencies_ms: list[float] = []
+    consistency_comparisons = 0
+    consistency_matches = 0
 
     try:
         while True:
@@ -140,6 +170,9 @@ def main() -> int:
                     prediction = analyzer.predict_jersey(track_id, team)
                     attempts += 1
                     state["attempts"] += 1
+                    latency_ms = prediction.get("latency_ms")
+                    if latency_ms is not None:
+                        latencies_ms.append(float(latency_ms))
                     record = {
                         "frame_id": frame_index,
                         "timestamp": round(timestamp, 4),
@@ -147,6 +180,7 @@ def main() -> int:
                         "accepted": bool(prediction.get("accepted")),
                         "number": prediction.get("candidate_number"),
                         "reason": prediction.get("rejection_reason"),
+                        "latency_ms": latency_ms,
                     }
                     state["predictions"].append(record)
                     if not prediction.get("accepted"):
@@ -157,6 +191,16 @@ def main() -> int:
                     accepted += 1
                     state["accepted"] += 1
                     number = str(prediction.get("candidate_number"))
+
+                    previous_accepted = state["previous_accepted_number"]
+                    if previous_accepted is not None:
+                        state["consistency_comparisons"] += 1
+                        consistency_comparisons += 1
+                        if number == previous_accepted:
+                            state["consistency_matches"] += 1
+                            consistency_matches += 1
+                    state["previous_accepted_number"] = number
+
                     if number == state["last_number"]:
                         state["consecutive"] += 1
                     else:
@@ -183,6 +227,13 @@ def main() -> int:
             "number": state["locked_number"],
             "attempts": state["attempts"],
             "accepted": state["accepted"],
+            "accepted_prediction_consistency_comparisons": state["consistency_comparisons"],
+            "accepted_prediction_consistency_matches": state["consistency_matches"],
+            "accepted_prediction_consistency_rate": (
+                state["consistency_matches"] / state["consistency_comparisons"]
+                if state["consistency_comparisons"]
+                else None
+            ),
             "predictions": state["predictions"],
         }
         for track_id, state in track_state.items()
@@ -205,11 +256,26 @@ def main() -> int:
         "ocr_attempts": attempts,
         "ocr_accepted": accepted,
         "ocr_acceptance_rate": (accepted / attempts if attempts else None),
+        "accepted_prediction_consistency": {
+            "definition": (
+                "same-number agreement between successive accepted OCR predictions on the "
+                "same track; this is a stability metric, not jersey-number accuracy"
+            ),
+            "comparisons": consistency_comparisons,
+            "matches": consistency_matches,
+            "rate": (
+                consistency_matches / consistency_comparisons
+                if consistency_comparisons
+                else None
+            ),
+        },
+        "ocr_latency_ms": _latency_summary(latencies_ms),
         "identity_locks": len(locks),
         "locked_tracks": locks,
         "limitations": [
             "No jersey-number ground truth is used by this runner; identity accuracy is not claimed.",
             "Team labels may remain unknown when the supplied match config has no valid team context.",
+            "Accepted-prediction consistency measures stability only and must not be interpreted as accuracy.",
             "The Roboflow VLM is evaluated on CourtFlux player/torso crops before production promotion.",
         ],
     }
