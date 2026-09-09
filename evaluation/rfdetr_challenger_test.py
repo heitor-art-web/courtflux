@@ -20,6 +20,26 @@ class _FakeTracker:
         return np.asarray([[0, 0, 10, 20, 42, 0.9, 0, 0]], dtype=np.float32)
 
 
+class _FakeRoboflowClient:
+    def infer(self, frames, model_id):
+        assert isinstance(frames, list)
+        assert len(frames) == 2
+        assert model_id == "basketball-model/1"
+        return [
+            {
+                "predictions": [
+                    {"x": 50, "y": 60, "width": 20, "height": 40, "confidence": 0.91, "class": "player"},
+                    {"x": 80, "y": 60, "width": 20, "height": 40, "confidence": 0.95, "class": "referee"},
+                ]
+            },
+            {
+                "predictions": [
+                    {"x": 30, "y": 40, "width": 10, "height": 20, "confidence": 0.88, "class": "player"}
+                ]
+            },
+        ]
+
+
 def test_roboflow_response_filters_only_player():
     response = {
         "predictions": [
@@ -53,6 +73,25 @@ def test_invalid_boxes_are_rejected():
     assert players == []
 
 
+def test_roboflow_batch_preserves_frame_order_and_semantics():
+    detector = RFDETRPlayerDetector.__new__(RFDETRPlayerDetector)
+    detector.backend = "roboflow"
+    detector.client = _FakeRoboflowClient()
+    detector.model_id = "basketball-model/1"
+    detector.target_class = "player"
+    detector.player_threshold = 0.10
+
+    frame = np.zeros((100, 100, 3), dtype=np.uint8)
+    batches = detector.detect_batch([frame, frame.copy()])
+    assert len(batches) == 2
+    assert len(batches[0]) == 1
+    assert len(batches[1]) == 1
+    assert batches[0][0].confidence == 0.91
+    assert batches[1][0].confidence == 0.88
+    assert batches[0][0].box == [40.0, 40.0, 60.0, 80.0]
+    assert batches[1][0].box == [25.0, 30.0, 35.0, 50.0]
+
+
 def test_unassigned_detections_are_preserved():
     adapter = RFDETRBoTSORTAdapter.__new__(RFDETRBoTSORTAdapter)
     adapter.tracker = _FakeTracker()
@@ -70,5 +109,6 @@ def test_unassigned_detections_are_preserved():
 if __name__ == "__main__":
     test_roboflow_response_filters_only_player()
     test_invalid_boxes_are_rejected()
+    test_roboflow_batch_preserves_frame_order_and_semantics()
     test_unassigned_detections_are_preserved()
     print("rfdetr_challenger_test: PASS")
