@@ -45,10 +45,22 @@ export function LanguageSwitcher({ initialLocale }: { initialLocale: Locale }) {
   const [host, setHost] = useState<HTMLElement | null>(null);
 
   useEffect(() => {
-    const frame = window.requestAnimationFrame(() => {
-      setHost(document.querySelector<HTMLElement>("#main-content header"));
-    });
-    return () => window.cancelAnimationFrame(frame);
+    let frame = 0;
+
+    const findHost = () => {
+      const nextHost = document.querySelector<HTMLElement>("#main-content header");
+      setHost((current) => (current === nextHost ? current : nextHost));
+    };
+
+    frame = window.requestAnimationFrame(findHost);
+    const mainContent = document.querySelector<HTMLElement>("#main-content");
+    const observer = new MutationObserver(findHost);
+    if (mainContent) observer.observe(mainContent, { childList: true, subtree: true });
+
+    return () => {
+      window.cancelAnimationFrame(frame);
+      observer.disconnect();
+    };
   }, [pathname]);
 
   function changeLanguage(nextLocale: Locale) {
