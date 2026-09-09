@@ -57,12 +57,72 @@ def _point(value: Any) -> tuple[float, float] | None:
 
 
 def _player_records(frame: dict[str, Any]) -> list[dict[str, Any]]:
-    # Future-proof for an explicit players field while remaining compatible with
-    # P1.1 instrumentation, which enriches the already-serialized team_predictions.
     values = frame.get("players")
     if values is None:
         values = frame.get("team_predictions", [])
     return [item for item in (values or []) if isinstance(item, dict)]
+
+
+def _track_id(player: dict[str, Any]) -> int:
+    try:
+        return int(player.get("track_id", -1))
+    except (TypeError, ValueError):
+        return -1
+
+
+def _player_box_height_ratio(player: dict[str, Any]) -> float | None:
+    value = player.get("player_box_height_ratio")
+    try:
+        if value is not None:
+            ratio = float(value)
+            return ratio if math.isfinite(ratio) and ratio >= 0.0 else None
+    except (TypeError, ValueError):
+        pass
+
+    box = player.get("box")
+    frame_height = player.get("frame_height")
+    try:
+        if not isinstance(box, list) or len(box) < 4 or frame_height is None:
+            return None
+        height = max(0.0, float(box[3]) - float(box[1]))
+        denom = float(frame_height)
+        if denom <= 0.0:
+            return None
+        return height / denom
+    except (TypeError, ValueError):
+        return None
+
+
+def _is_analytics_eligible(
+    players: list[dict[str, Any]],
+    *,
+    minimum_player_boxes: int,
+    median_box_height_ratio_max: float,
+) -> tuple[bool, float | None]:
+    ratios = [ratio for ratio in (_player_box_height_ratio(player) for player in players) if ratio is not None]
+    median_ratio = statistics.median(ratios) if ratios else None
+    eligible = bool(
+        len(ratios) >= int(minimum_player_boxes)
+        and median_ratio is not None
+        and median_ratio <= float(median_box_height_ratio_max)
+    )
+    return eligible, (round(float(median_ratio), 6) if median_ratio is not None else None)
+
+
+def _frame_scope_summary(counts: list[int]) -> dict[str, Any]:
+    median_players = statistics.median(counts) if counts else 0.0
+    low_player_threshold = max(0, int(math.floor(median_players)) - 2)
+    low_player_frames = sum(1 for value in counts if value <= low_player_threshold)
+    return {
+        "frames": len(counts),
+        "players_per_frame_mean": _mean(counts),
+        "players_per_frame_p10": _quantile([float(value) for value in counts], 0.10),
+        "players_per_frame_median": _quantile([float(value) for value in counts], 0.50),
+        "players_per_frame_p90": _quantile([float(value) for value in counts], 0.90),
+        "low_player_count_proxy_threshold": low_player_threshold,
+        "low_player_count_proxy_frames": low_player_frames,
+        "low_player_count_proxy_rate_pct": _rate(low_player_frames, len(counts)),
+    }
 
 
 def load_frames(path: Path) -> list[dict[str, Any]]:
@@ -86,35 +146,79 @@ def evaluate_frames(
     duplicate_iou_threshold: float = 0.75,
     court_jump_m_per_frame: float = 2.5,
     short_track_frames: int = 5,
+    wide_view_minimum_player_boxes: int = 2,
+    wide_view_median_box_height_ratio_max: float = 0.45,
 ) -> dict[str, Any]:
     gameplay = [row for row in frames if bool(row.get("valid_gameplay", False))]
-    player_counts: list[int] = []
-    untracked_observations = 0
+    all_player_counts: list[int] = []
+    eligible_player_counts: list[int] = []
+    wide_view_median_ratios: list[float] = []
+
+    detected_observations = 0
     tracked_observations = 0
+    untracked_observations = 0
+    frames_with_player_detections = 0
+    frames_without_player_detections = 0
+    frames_with_any_untracked = 0
+    frames_all_detections_untracked = 0
+    eligible_frames_with_player_detections = 0
+    eligible_frames_all_detections_untracked = 0
     duplicate_track_id_frames = 0
     duplicate_box_pairs = 0
     detector_timing_ms: list[float] = []
 
+    known_team_observations = 0
     observations: dict[int, list[dict[str, Any]]] = defaultdict(list)
 
     for row in gameplay:
         frame_id = int(row.get("frame_id", 0) or 0)
         players = _player_records(row)
-        player_counts.append(len(players))
+        player_count = len(players)
+        all_player_counts.append(player_count)
+
+        eligible, median_height_ratio = _is_analytics_eligible(
+            players,
+            minimum_player_boxes=wide_view_minimum_player_boxes,
+            median_box_height_ratio_max=wide_view_median_box_height_ratio_max,
+        )
+        if median_height_ratio is not None:
+            wide_view_median_ratios.append(median_height_ratio)
+        if eligible:
+            eligible_player_counts.append(player_count)
+
+        try:
+            detected_this_frame = int(row.get("accepted_player_candidates", player_count) or 0)
+        except (TypeError, ValueError):
+            detected_this_frame = player_count
+        detected_observations += max(0, detected_this_frame)
+        if detected_this_frame > 0:
+            frames_with_player_detections += 1
+            if eligible:
+                eligible_frames_with_player_detections += 1
+        else:
+            frames_without_player_detections += 1
 
         seen_ids: list[int] = []
         boxes: list[tuple[int, list[float] | None]] = []
+        tracked_this_frame = 0
+        untracked_this_frame = 0
+
         for player in players:
-            try:
-                track_id = int(player.get("track_id", -1))
-            except (TypeError, ValueError):
-                track_id = -1
+            track_id = _track_id(player)
             box = player.get("box")
             boxes.append((track_id, box if isinstance(box, list) else None))
+
+            team = player.get("team")
+            if team and str(team).lower() not in {"unknown", "none"}:
+                known_team_observations += 1
+
             if track_id < 0:
                 untracked_observations += 1
+                untracked_this_frame += 1
                 continue
+
             tracked_observations += 1
+            tracked_this_frame += 1
             seen_ids.append(track_id)
             observations[track_id].append(
                 {
@@ -122,10 +226,19 @@ def evaluate_frames(
                     "timestamp_sec": float(row.get("timestamp_sec", 0.0) or 0.0),
                     "box": box,
                     "court_xy": player.get("court_xy"),
-                    "team": player.get("team"),
+                    "court_xy_valid": bool(player.get("court_xy_valid", False)),
+                    "homography_source": player.get("homography_source"),
+                    "team": team,
                     "confidence": player.get("confidence"),
                 }
             )
+
+        if untracked_this_frame > 0:
+            frames_with_any_untracked += 1
+        if detected_this_frame > 0 and tracked_this_frame == 0:
+            frames_all_detections_untracked += 1
+            if eligible:
+                eligible_frames_all_detections_untracked += 1
 
         if len(seen_ids) != len(set(seen_ids)):
             duplicate_track_id_frames += 1
@@ -162,6 +275,8 @@ def evaluate_frames(
     court_steps_m_per_frame: list[float] = []
     court_jump_events = 0
     tracks_with_court = 0
+    invalid_or_missing_court_samples = 0
+    nonconsecutive_court_pairs_skipped = 0
 
     per_track: dict[str, Any] = {}
     for track_id, values in sorted(observations.items()):
@@ -196,20 +311,24 @@ def evaluate_frames(
         previous = None
         track_steps: list[float] = []
         for item in ordered:
-            current = _point(item.get("court_xy"))
+            current = _point(item.get("court_xy")) if item.get("court_xy_valid") else None
             if current is None:
+                invalid_or_missing_court_samples += 1
                 continue
             court_values += 1
             if previous is not None:
                 previous_frame, previous_point = previous
-                delta_frames = max(int(item["frame_id"]) - previous_frame, 1)
-                dx = current[0] - previous_point[0]
-                dy = current[1] - previous_point[1]
-                step = math.sqrt(dx * dx + dy * dy) / delta_frames
-                track_steps.append(step)
-                court_steps_m_per_frame.append(step)
-                if step > court_jump_m_per_frame:
-                    court_jump_events += 1
+                delta_frames = int(item["frame_id"]) - previous_frame
+                if delta_frames != 1:
+                    nonconsecutive_court_pairs_skipped += 1
+                else:
+                    dx = current[0] - previous_point[0]
+                    dy = current[1] - previous_point[1]
+                    step = math.sqrt(dx * dx + dy * dy)
+                    track_steps.append(step)
+                    court_steps_m_per_frame.append(step)
+                    if step > court_jump_m_per_frame:
+                        court_jump_events += 1
             previous = (int(item["frame_id"]), current)
         if court_values >= 2:
             tracks_with_court += 1
@@ -224,34 +343,65 @@ def evaluate_frames(
             "team_majority_share_pct": (
                 round(majority_share * 100.0, 2) if majority_share is not None else None
             ),
-            "court_samples": court_values,
-            "court_step_m_per_frame_p90": _quantile(track_steps, 0.90),
+            "valid_court_samples": court_values,
+            "court_step_m_per_consecutive_frame_p90": _quantile(track_steps, 0.90),
         }
 
-    median_players = statistics.median(player_counts) if player_counts else 0.0
-    low_player_threshold = max(0, int(math.floor(median_players)) - 2)
-    low_player_frames = sum(1 for value in player_counts if value <= low_player_threshold)
     all_observations = tracked_observations + untracked_observations
+    all_scope = _frame_scope_summary(all_player_counts)
+    eligible_scope = _frame_scope_summary(eligible_player_counts)
 
     return {
-        "schema_version": 1,
+        "schema_version": 2,
         "scope": "P1.1_player_tracking_quality",
         "ground_truth_status": {
             "true_id_switches": "requires_player_identity_ground_truth",
             "true_track_fragmentation": "requires_player_identity_ground_truth",
             "player_recall": "requires_player_presence_ground_truth",
+            "team_classification_accuracy": "requires_correct_match_context_and_team_ground_truth",
             "reported_interruptions": "same_track_id_gap_proxy_only",
             "reported_duplicate_boxes": "high_iou_distinct_track_proxy_only",
         },
         "frames": {
             "gameplay_frames": len(gameplay),
-            "players_per_frame_mean": _mean(player_counts),
-            "players_per_frame_p10": _quantile([float(v) for v in player_counts], 0.10),
-            "players_per_frame_median": _quantile([float(v) for v in player_counts], 0.50),
-            "players_per_frame_p90": _quantile([float(v) for v in player_counts], 0.90),
-            "low_player_count_proxy_threshold": low_player_threshold,
-            "low_player_count_proxy_frames": low_player_frames,
-            "low_player_count_proxy_rate_pct": _rate(low_player_frames, len(gameplay)),
+            "analytics_eligible_frames": len(eligible_player_counts),
+            "analytics_eligible_rate_pct": _rate(len(eligible_player_counts), len(gameplay)),
+            "analytics_eligibility_proxy": {
+                "minimum_player_boxes": int(wide_view_minimum_player_boxes),
+                "median_player_box_height_ratio_max": float(wide_view_median_box_height_ratio_max),
+                "median_observed_player_box_height_ratio": _quantile(wide_view_median_ratios, 0.50),
+                "quality_gate_eligible": False,
+                "semantics": "diagnostic_wide_view_proxy_not_gameplay_policy",
+            },
+            "all_gameplay": all_scope,
+            "analytics_eligible": eligible_scope,
+            "players_per_frame_mean": all_scope["players_per_frame_mean"],
+            "players_per_frame_p10": all_scope["players_per_frame_p10"],
+            "players_per_frame_median": all_scope["players_per_frame_median"],
+            "players_per_frame_p90": all_scope["players_per_frame_p90"],
+            "low_player_count_proxy_threshold": all_scope["low_player_count_proxy_threshold"],
+            "low_player_count_proxy_frames": all_scope["low_player_count_proxy_frames"],
+            "low_player_count_proxy_rate_pct": all_scope["low_player_count_proxy_rate_pct"],
+        },
+        "detector_tracker_bridge": {
+            "detected_player_observations": detected_observations,
+            "tracked_player_observations": tracked_observations,
+            "untracked_player_observations": untracked_observations,
+            "tracker_assignment_rate_pct": _rate(tracked_observations, detected_observations),
+            "untracked_observation_rate_pct": _rate(untracked_observations, all_observations),
+            "frames_with_player_detections": frames_with_player_detections,
+            "frames_without_player_detections": frames_without_player_detections,
+            "frames_with_any_untracked": frames_with_any_untracked,
+            "frames_all_detections_untracked": frames_all_detections_untracked,
+            "frames_all_detections_untracked_rate_pct": _rate(
+                frames_all_detections_untracked, frames_with_player_detections
+            ),
+            "analytics_eligible_frames_with_player_detections": eligible_frames_with_player_detections,
+            "analytics_eligible_frames_all_detections_untracked": eligible_frames_all_detections_untracked,
+            "analytics_eligible_all_untracked_rate_pct": _rate(
+                eligible_frames_all_detections_untracked,
+                eligible_frames_with_player_detections,
+            ),
         },
         "tracking": {
             "unique_track_ids": len(observations),
@@ -274,23 +424,31 @@ def evaluate_frames(
             "same_id_interruption_events": interruption_events,
         },
         "team_stability": {
+            "known_team_observations": known_team_observations,
+            "team_assignment_coverage_pct": _rate(known_team_observations, all_observations),
             "team_change_events": team_change_events,
             "track_team_majority_share_median_pct": (
                 round(100.0 * statistics.median(team_majority_shares), 2)
                 if team_majority_shares
                 else None
             ),
+            "quality_gate_eligible": False,
+            "accuracy_claim": "not_measured",
         },
         "court_continuity": {
-            "tracks_with_multiple_court_samples": tracks_with_court,
-            "court_step_m_per_frame_median": _quantile(court_steps_m_per_frame, 0.50),
-            "court_step_m_per_frame_p90": _quantile(court_steps_m_per_frame, 0.90),
-            "court_step_m_per_frame_max": (
+            "tracks_with_multiple_valid_court_samples": tracks_with_court,
+            "invalid_or_missing_court_samples": invalid_or_missing_court_samples,
+            "nonconsecutive_valid_pairs_skipped": nonconsecutive_court_pairs_skipped,
+            "court_step_m_per_consecutive_frame_median": _quantile(court_steps_m_per_frame, 0.50),
+            "court_step_m_per_consecutive_frame_p90": _quantile(court_steps_m_per_frame, 0.90),
+            "court_step_m_per_consecutive_frame_max": (
                 round(max(court_steps_m_per_frame), 6) if court_steps_m_per_frame else None
             ),
             "jump_threshold_m_per_frame": court_jump_m_per_frame,
             "jump_events": court_jump_events,
             "jump_rate_pct": _rate(court_jump_events, len(court_steps_m_per_frame)),
+            "quality_gate_eligible": False,
+            "semantics": "valid_plausible_homography_samples_and_consecutive_frames_only",
         },
         "performance": {
             "detector_timing_sum_ms_per_gameplay_frame_mean": _mean(detector_timing_ms),
@@ -299,11 +457,28 @@ def evaluate_frames(
     }
 
 
-def evaluate_run(run: Path) -> dict[str, Any]:
+def evaluate_run(
+    run: Path,
+    benchmark_context: dict[str, Any] | None = None,
+) -> dict[str, Any]:
     run = Path(run)
     frames_path = run / "frames.jsonl" if run.is_dir() else run
     run_dir = frames_path.parent
-    report = evaluate_frames(load_frames(frames_path))
+
+    context = dict(benchmark_context or {})
+    proxy = context.get("analytics_eligibility_proxy", {}) or {}
+    report = evaluate_frames(
+        load_frames(frames_path),
+        wide_view_minimum_player_boxes=int(proxy.get("minimum_player_boxes", 2) or 2),
+        wide_view_median_box_height_ratio_max=float(
+            proxy.get("median_player_box_height_ratio_max", 0.45) or 0.45
+        ),
+    )
+    report["benchmark_context"] = context
+    report["team_stability"]["quality_gate_eligible"] = bool(
+        context.get("team_metrics_in_quality_gate", False)
+    )
+
     config_path = run_dir / "run_config.json"
     summary_path = run_dir / "summary.json"
     report["run_dir"] = str(run_dir)
@@ -328,11 +503,41 @@ def evaluate_run(run: Path) -> dict[str, Any]:
 def aggregate_reports(reports: list[dict[str, Any]]) -> dict[str, Any]:
     if not reports:
         return {}
+
+    team_eligible = [
+        report
+        for report in reports
+        if bool(report.get("team_stability", {}).get("quality_gate_eligible", False))
+        and report.get("team_stability", {}).get("track_team_majority_share_median_pct") is not None
+    ]
     return {
         "runs": len(reports),
         "gameplay_frames_total": sum(int(r["frames"]["gameplay_frames"]) for r in reports),
+        "analytics_eligible_frames_total": sum(
+            int(r["frames"]["analytics_eligible_frames"]) for r in reports
+        ),
+        "analytics_eligible_rate_macro_pct": _mean(
+            r["frames"]["analytics_eligible_rate_pct"] for r in reports
+        ),
+        "all_gameplay_players_per_frame_macro_mean": _mean(
+            r["frames"]["all_gameplay"]["players_per_frame_mean"]
+            for r in reports
+            if r["frames"]["all_gameplay"]["players_per_frame_mean"] is not None
+        ),
+        "analytics_eligible_players_per_frame_macro_mean": _mean(
+            r["frames"]["analytics_eligible"]["players_per_frame_mean"]
+            for r in reports
+            if r["frames"]["analytics_eligible"]["players_per_frame_mean"] is not None
+        ),
         "unique_track_ids_macro_mean": _mean(r["tracking"]["unique_track_ids"] for r in reports),
         "short_track_rate_macro_pct": _mean(r["tracking"]["short_track_rate_pct"] for r in reports),
+        "tracker_assignment_rate_macro_pct": _mean(
+            r["detector_tracker_bridge"]["tracker_assignment_rate_pct"] for r in reports
+        ),
+        "all_untracked_frame_rate_macro_pct": _mean(
+            r["detector_tracker_bridge"]["frames_all_detections_untracked_rate_pct"]
+            for r in reports
+        ),
         "untracked_observation_rate_macro_pct": _mean(
             r["tracking"]["untracked_observation_rate_pct"] for r in reports
         ),
@@ -342,11 +547,13 @@ def aggregate_reports(reports: list[dict[str, Any]]) -> dict[str, Any]:
             if r["tracking"]["track_observation_coverage_median_pct"] is not None
         ),
         "team_majority_share_median_macro_pct": _mean(
-            r["team_stability"]["track_team_majority_share_median_pct"]
-            for r in reports
-            if r["team_stability"]["track_team_majority_share_median_pct"] is not None
+            r["team_stability"]["track_team_majority_share_median_pct"] for r in team_eligible
         ),
-        "court_jump_rate_macro_pct": _mean(r["court_continuity"]["jump_rate_pct"] for r in reports),
+        "team_quality_gate_eligible_runs": len(team_eligible),
+        "court_valid_jump_rate_macro_pct": _mean(
+            r["court_continuity"]["jump_rate_pct"] for r in reports
+        ),
+        "court_continuity_quality_gate_eligible": False,
         "worst_run_short_track_rate_pct": max(r["tracking"]["short_track_rate_pct"] for r in reports),
         "worst_run_untracked_observation_rate_pct": max(
             r["tracking"]["untracked_observation_rate_pct"] for r in reports
@@ -364,13 +571,14 @@ def main() -> int:
     payload = {
         "created_at": datetime.now().isoformat(),
         "scope": "P1.1_player_tracking_quality",
+        "schema_version": 2,
         "reports": reports,
         "aggregate": aggregate_reports(reports),
     }
     output = args.output
     if output is None:
         stamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-        output = Path("evaluation") / "p1_tracking_reports" / f"p1_tracking_{stamp}.json"
+        output = Path("evaluation") / "p1_tracking_reports" / f"p1_tracking_v2_{stamp}.json"
     output.parent.mkdir(parents=True, exist_ok=True)
     output.write_text(json.dumps(payload, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
     print(output)
