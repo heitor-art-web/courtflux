@@ -20,6 +20,21 @@ def main() -> int:
     _expect({"prediction": "number not visible"}, None, "no_valid_number")
     _expect({}, None, "no_text_output")
 
+    # Metadata strings must never be interpreted as jersey OCR output.
+    _expect(
+        {"model_id": "basketball-jersey-numbers-ocr/7", "latency_ms": "23"},
+        None,
+        "no_text_output",
+    )
+    _expect(
+        {
+            "model_id": "basketball-jersey-numbers-ocr/7",
+            "payload": {"response": {"text": "32"}},
+        },
+        "32",
+        "parsed",
+    )
+
     # Repeated equivalent evidence is unambiguous.
     _expect({"result": ["23", "jersey 23"]}, "23", "parsed")
 
