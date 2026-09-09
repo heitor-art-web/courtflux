@@ -1,5 +1,6 @@
 import os
 from pathlib import Path
+import statistics
 
 import numpy as np
 
@@ -56,13 +57,165 @@ class Pipeline:
                 self.camera_tracker = self.camera_tracker(first_frame=frame, use_keypoint_model=True)
             self._camera_tracker_initialized = True
 
+    @staticmethod
+    def _serializable_point(value):
+        if value is None:
+            return None
+        try:
+            if len(value) < 2:
+                return None
+            return [round(float(value[0]), 6), round(float(value[1]), 6)]
+        except (TypeError, ValueError):
+            return None
+
+    @staticmethod
+    def _serializable_box(value):
+        if value is None:
+            return None
+        try:
+            if len(value) < 4:
+                return None
+            return [round(float(value[index]), 3) for index in range(4)]
+        except (TypeError, ValueError):
+            return None
+
+    @staticmethod
+    def _plausible_court_xy(value, margin_m: float = 0.5) -> bool:
+        if value is None:
+            return False
+        try:
+            if len(value) < 2:
+                return False
+            x_m = float(value[0])
+            y_m = float(value[1])
+        except (TypeError, ValueError):
+            return False
+        return (
+            np.isfinite(x_m)
+            and np.isfinite(y_m)
+            and -margin_m <= x_m <= 28.0 + margin_m
+            and -margin_m <= y_m <= 15.0 + margin_m
+        )
+
+    def _enrich_player_tracking_diagnostics(self, frame_state):
+        """Persist P1.1 observations without changing detector/tracker decisions.
+
+        Court coordinates are serialized only when calibration is explicitly valid and
+        the projected point is plausible on a FIBA court. Frame-size and box-height
+        diagnostics let the evaluator distinguish broadcast close-ups from wide views
+        without changing GameplayFilter policy.
+        """
+        detector_diag = frame_state.diagnostics.setdefault("detector", {})
+        existing = list(detector_diag.get("team_predictions", []) or [])
+        by_track = {}
+        for item in existing:
+            if not isinstance(item, dict):
+                continue
+            try:
+                track_id = int(item.get("track_id", -1))
+            except (TypeError, ValueError):
+                continue
+            if track_id >= 0 and track_id not in by_track:
+                by_track[track_id] = dict(item)
+
+        frame = getattr(frame_state, "frame", None)
+        frame_h = int(frame.shape[0]) if frame is not None and getattr(frame, "shape", None) else None
+        frame_w = int(frame.shape[1]) if frame is not None and getattr(frame, "shape", None) else None
+
+        camera_diag = frame_state.diagnostics.get("camera", {}) or {}
+        homography_valid = bool(camera_diag.get("valid", False)) and not bool(
+            camera_diag.get("homography_is_identity", True)
+        )
+        homography_source = camera_diag.get("source")
+        reprojection_rmse_px = camera_diag.get("reprojection_rmse_px")
+
+        snapshots = []
+        player_height_ratios = []
+        for player in list(getattr(frame_state, "players", []) or []):
+            if not isinstance(player, dict):
+                continue
+            try:
+                track_id = int(player.get("track_id", -1))
+            except (TypeError, ValueError):
+                track_id = -1
+
+            snapshot = dict(by_track.get(track_id, {})) if track_id >= 0 else {}
+            box = self._serializable_box(player.get("box"))
+            height_ratio = None
+            if box is not None and frame_h:
+                height_ratio = max(0.0, float(box[3] - box[1])) / max(float(frame_h), 1.0)
+                player_height_ratios.append(height_ratio)
+
+            raw_court_xy = self._serializable_point(player.get("court_xy"))
+            court_xy_valid = bool(homography_valid and self._plausible_court_xy(raw_court_xy))
+            court_xy = raw_court_xy if court_xy_valid else None
+
+            snapshot.update(
+                {
+                    "track_id": track_id,
+                    "box": box,
+                    "center": self._serializable_point(player.get("center")),
+                    "confidence": (
+                        round(float(player.get("confidence")), 6)
+                        if player.get("confidence") is not None
+                        else None
+                    ),
+                    "team": player.get("team"),
+                    "team_confidence": player.get("team_confidence"),
+                    "team_margin": player.get("team_margin"),
+                    "shirt_num": player.get("shirt_num") or player.get("shirt_number"),
+                    "player_name": player.get("player_name"),
+                    "court_xy": court_xy,
+                    "court_xy_valid": court_xy_valid,
+                    "court_projection_source": (
+                        player.get("court_projection_source") if court_xy_valid else None
+                    ),
+                    "homography_valid": homography_valid,
+                    "homography_source": homography_source,
+                    "homography_reprojection_rmse_px": reprojection_rmse_px,
+                    "active_on_court": player.get("active_on_court"),
+                    "frame_width": frame_w,
+                    "frame_height": frame_h,
+                    "player_box_height_ratio": (
+                        round(height_ratio, 6) if height_ratio is not None else None
+                    ),
+                }
+            )
+            snapshots.append(snapshot)
+
+        median_height_ratio = statistics.median(player_height_ratios) if player_height_ratios else None
+        wide_view_proxy = bool(
+            len(player_height_ratios) >= 2
+            and median_height_ratio is not None
+            and median_height_ratio <= 0.45
+        )
+
+        detector_diag["team_predictions"] = snapshots
+        detector_diag["p1_tracking_schema"] = 2
+        detector_diag["p1_tracking_frame"] = {
+            "frame_width": frame_w,
+            "frame_height": frame_h,
+            "player_boxes": len(player_height_ratios),
+            "median_player_box_height_ratio": (
+                round(float(median_height_ratio), 6) if median_height_ratio is not None else None
+            ),
+            "wide_view_proxy": wide_view_proxy,
+            "wide_view_proxy_semantics": "at_least_2_players_and_median_box_height_ratio_lte_0_45",
+            "homography_valid": homography_valid,
+            "homography_source": homography_source,
+            "homography_reprojection_rmse_px": reprojection_rmse_px,
+        }
+        return frame_state
+
     def process(self, frame_state):
         self.profiler.start("Total")
         self.profiler.start("Gameplay Filter")
         is_gameplay = self.gameplay_filter.is_gameplay(frame_state.frame)
         frame_state.valid_gameplay = is_gameplay
         if hasattr(self.gameplay_filter, "last_diagnostics"):
-            frame_state.diagnostics["gameplay_filter"] = dict(getattr(self.gameplay_filter, "last_diagnostics", {}) or {})
+            frame_state.diagnostics["gameplay_filter"] = dict(
+                getattr(self.gameplay_filter, "last_diagnostics", {}) or {}
+            )
         self.profiler.stop("Gameplay Filter")
 
         if not is_gameplay:
@@ -87,6 +240,7 @@ class Pipeline:
             frame_state = self.camera_tracker.project_entities(frame_state)
             self.profiler.stop("Court Projection")
 
+        frame_state = self._enrich_player_tracking_diagnostics(frame_state)
         detector_diag = frame_state.diagnostics.get("detector", {}) or {}
         for name, milliseconds in (detector_diag.get("timing_ms", {}) or {}).items():
             self.profiler.add(f"Detector/{name}", float(milliseconds) / 1000.0)
