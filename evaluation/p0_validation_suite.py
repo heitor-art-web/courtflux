@@ -13,6 +13,7 @@ TESTS = [
     "evaluation/ball_candidate_pipeline_test.py",
     "evaluation/smart_candidate_filter_test.py",
     "evaluation/smart_ball_backend_integration_test.py",
+    "evaluation/ball_hypothesis_tracker_test.py",
     "evaluation/system_quality_gate_test.py",
     "evaluation/p0_quality_gate_test.py",
 ]
