@@ -271,7 +271,14 @@ def get_job_preview(job_id: str):
 def get_job_preview_video(job_id: str):
     path = job_dir(job_id) / "analysis_preview.mp4"
     if not path.exists(): raise HTTPException(status_code=404, detail="Analysis preview video not available")
-    return FileResponse(path, media_type="video/mp4", filename="analysis_preview.mp4")
+    return FileResponse(
+        path,
+        media_type="video/mp4",
+        headers={
+            "Cache-Control": "no-store",
+            "Content-Disposition": 'inline; filename="analysis_preview.mp4"',
+        },
+    )
 
 
 if __name__ == "__main__":
