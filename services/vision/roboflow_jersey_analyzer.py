@@ -13,6 +13,10 @@ from services.vision.team_only_analyzer import TeamOnlyAnalyzer
 
 DEFAULT_JERSEY_MODEL_ID = "basketball-jersey-numbers-ocr/7"
 DEFAULT_JERSEY_API_URL = "http://localhost:9001"
+UNSUPPORTED_JERSEY_API_URLS = {
+    "https://serverless.roboflow.com",
+    "https://detect.roboflow.com",
+}
 DEFAULT_JERSEY_PROMPT = (
     "Read the basketball jersey number in this crop. Return only the number from 0 to 99, "
     "including 00 when visible. If the number is not readable, return UNKNOWN."
@@ -49,10 +53,18 @@ class RoboflowJerseyAnalyzer(TeamOnlyAnalyzer):
         self.api_url = str(
             api_url or os.getenv("ROBOFLOW_JERSEY_API_URL") or DEFAULT_JERSEY_API_URL
         ).rstrip("/")
+        if self.api_url.lower() in UNSUPPORTED_JERSEY_API_URLS:
+            raise RuntimeError(
+                "The jersey SmolVLM2 challenger requires self-hosted Roboflow Inference "
+                "or a compatible Dedicated Deployment; the normal Serverless/Hosted "
+                "endpoint is not supported for this model."
+            )
         self.model_id = str(
             model_id or os.getenv("ROBOFLOW_JERSEY_MODEL_ID") or DEFAULT_JERSEY_MODEL_ID
         )
         self.api_key = api_key if api_key is not None else os.getenv("ROBOFLOW_API_KEY")
+        if not self.api_key:
+            raise RuntimeError("ROBOFLOW_API_KEY is required for the jersey challenger")
         self.prompt = str(
             prompt or os.getenv("ROBOFLOW_JERSEY_PROMPT") or DEFAULT_JERSEY_PROMPT
         )
