@@ -56,6 +56,83 @@ class Pipeline:
                 self.camera_tracker = self.camera_tracker(first_frame=frame, use_keypoint_model=True)
             self._camera_tracker_initialized = True
 
+    @staticmethod
+    def _serializable_point(value):
+        if value is None:
+            return None
+        try:
+            if len(value) < 2:
+                return None
+            return [round(float(value[0]), 6), round(float(value[1]), 6)]
+        except (TypeError, ValueError):
+            return None
+
+    @staticmethod
+    def _serializable_box(value):
+        if value is None:
+            return None
+        try:
+            if len(value) < 4:
+                return None
+            return [round(float(value[index]), 3) for index in range(4)]
+        except (TypeError, ValueError):
+            return None
+
+    def _enrich_player_tracking_diagnostics(self, frame_state):
+        """Persist normalized player observations through the existing frames.jsonl path.
+
+        RunDiagnostics already serializes ``detector.team_predictions``.  P1.1 enriches
+        that existing diagnostic field after court projection so the benchmark can use
+        track IDs, geometry and court coordinates without introducing a second inference
+        pipeline or changing player/tracker decisions.
+        """
+        detector_diag = frame_state.diagnostics.setdefault("detector", {})
+        existing = list(detector_diag.get("team_predictions", []) or [])
+        by_track = {}
+        for item in existing:
+            if not isinstance(item, dict):
+                continue
+            try:
+                track_id = int(item.get("track_id", -1))
+            except (TypeError, ValueError):
+                continue
+            if track_id >= 0 and track_id not in by_track:
+                by_track[track_id] = dict(item)
+
+        snapshots = []
+        for player in list(getattr(frame_state, "players", []) or []):
+            if not isinstance(player, dict):
+                continue
+            try:
+                track_id = int(player.get("track_id", -1))
+            except (TypeError, ValueError):
+                track_id = -1
+            snapshot = dict(by_track.get(track_id, {})) if track_id >= 0 else {}
+            snapshot.update(
+                {
+                    "track_id": track_id,
+                    "box": self._serializable_box(player.get("box")),
+                    "center": self._serializable_point(player.get("center")),
+                    "confidence": (
+                        round(float(player.get("confidence")), 6)
+                        if player.get("confidence") is not None
+                        else None
+                    ),
+                    "team": player.get("team"),
+                    "team_confidence": player.get("team_confidence"),
+                    "team_margin": player.get("team_margin"),
+                    "shirt_num": player.get("shirt_num") or player.get("shirt_number"),
+                    "player_name": player.get("player_name"),
+                    "court_xy": self._serializable_point(player.get("court_xy")),
+                    "active_on_court": player.get("active_on_court"),
+                }
+            )
+            snapshots.append(snapshot)
+
+        detector_diag["team_predictions"] = snapshots
+        detector_diag["p1_tracking_schema"] = 1
+        return frame_state
+
     def process(self, frame_state):
         self.profiler.start("Total")
         self.profiler.start("Gameplay Filter")
@@ -87,6 +164,7 @@ class Pipeline:
             frame_state = self.camera_tracker.project_entities(frame_state)
             self.profiler.stop("Court Projection")
 
+        frame_state = self._enrich_player_tracking_diagnostics(frame_state)
         detector_diag = frame_state.diagnostics.get("detector", {}) or {}
         for name, milliseconds in (detector_diag.get("timing_ms", {}) or {}).items():
             self.profiler.add(f"Detector/{name}", float(milliseconds) / 1000.0)
