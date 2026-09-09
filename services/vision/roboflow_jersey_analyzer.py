@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import os
 import re
+import time
 from typing import Any
 
 import cv2
@@ -199,12 +200,15 @@ class RoboflowJerseyAnalyzer(TeamOnlyAnalyzer):
             return {"accepted": False, "rejection_reason": "crop_not_ready"}
 
         crop = max(crops, key=self._crop_quality)
+        started = time.perf_counter()
         response = self.client.infer_lmm(
             inference_input=crop,
             model_id=self.model_id,
             prompt=self.prompt,
+            model_id_in_path=True,
             max_new_tokens=16,
         )
+        latency_ms = (time.perf_counter() - started) * 1000.0
         number, parse_reason = self.parse_number(response)
 
         if number is None:
@@ -231,6 +235,7 @@ class RoboflowJerseyAnalyzer(TeamOnlyAnalyzer):
             "api_url": self.api_url,
             "crop_buffer_size": len(crops),
             "parse_reason": parse_reason,
+            "latency_ms": round(latency_ms, 3),
         }
 
     def get_shirt_number(
