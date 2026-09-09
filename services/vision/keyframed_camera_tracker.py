@@ -30,7 +30,13 @@ class CameraTracker(BaseCameraTracker):
             interval = fallback
         self.keypoint_interval_frames = max(1, min(interval, 900))
         self._keypoint_detection_calls = 0
+        self._last_valid_direct_call: int | None = None
         super().__init__(*args, **kwargs)
+
+    def _calibration_age(self, call_index: int) -> int | None:
+        if self._last_valid_direct_call is None:
+            return None
+        return max(int(call_index) - int(self._last_valid_direct_call), 0)
 
     def _detect_keypoints(
         self,
@@ -48,13 +54,22 @@ class CameraTracker(BaseCameraTracker):
                 self.keypoint_interval_frames
             )
             self.last_calibration_diagnostics["keypoint_backend"] = self.keypoint_backend
+            self.last_calibration_diagnostics["keypoint_age_frames"] = self._calibration_age(
+                call_index
+            )
             return None, None
 
         result = super()._detect_keypoints(frame)
+        direct_H, _direct_poly = result
+        if direct_H is not None and bool(self.last_calibration_diagnostics.get("valid", False)):
+            self._last_valid_direct_call = int(call_index)
         self.last_calibration_diagnostics["keypoint_interval_frames"] = int(
             self.keypoint_interval_frames
         )
         self.last_calibration_diagnostics["keypoint_refresh_index"] = int(call_index)
+        self.last_calibration_diagnostics["keypoint_age_frames"] = self._calibration_age(
+            call_index
+        )
         return result
 
     def process(self, frame_state):
@@ -62,4 +77,6 @@ class CameraTracker(BaseCameraTracker):
         camera = frame_state.diagnostics.setdefault("camera", {})
         camera["keypoint_interval_frames"] = int(self.keypoint_interval_frames)
         camera["keypoint_detection_calls"] = int(self._keypoint_detection_calls)
+        current_call = max(int(self._keypoint_detection_calls) - 1, 0)
+        camera["keypoint_age_frames"] = self._calibration_age(current_call)
         return frame_state
