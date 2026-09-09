@@ -19,13 +19,13 @@ test("onboarding role radiogroup supports keyboard navigation", async ({ page })
   const group = page.getByRole("radiogroup", { name: "Basketball role" });
   await expect(group).toBeVisible();
   const radios = group.getByRole("radio");
-  await expect(radios.first()).toHaveAttribute("tabindex", /0|-1/);
+  const focusable = group.locator('[role="radio"][tabindex="0"]');
+  await expect(focusable).toHaveCount(1);
+  await focusable.focus();
 
-  const initiallyFocusable = radios.filter({ has: page.locator('[tabindex="0"]') });
-  if (await initiallyFocusable.count()) await initiallyFocusable.first().focus();
-  else await radios.first().focus();
-
+  const startIndex = await radios.evaluateAll((nodes) => nodes.findIndex((node) => node === document.activeElement));
   await page.keyboard.press("ArrowDown");
-  await expect(radios.nth(1)).toBeFocused();
-  await expect(radios.nth(1)).toHaveAttribute("aria-checked", "true");
+  const expectedIndex = (startIndex + 1) % (await radios.count());
+  await expect(radios.nth(expectedIndex)).toBeFocused();
+  await expect(radios.nth(expectedIndex)).toHaveAttribute("aria-checked", "true");
 });
