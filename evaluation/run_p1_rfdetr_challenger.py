@@ -33,6 +33,26 @@ BASELINE_TAXONOMY = {
 }
 
 
+def _serialize_tracked_players(tracked, frame_height: int) -> list[dict]:
+    players = []
+    for player in tracked:
+        players.append(
+            {
+                "track_id": int(player.track_id),
+                "box": [round(float(v), 3) for v in player.box],
+                "confidence": round(float(player.confidence), 6),
+                "team": "UNKNOWN",
+                "shirt_num": None,
+                "player_name": None,
+                "court_xy": None,
+                "court_xy_valid": False,
+                "homography_source": None,
+                "frame_height": int(frame_height),
+            }
+        )
+    return players
+
+
 def _run_video(
     video: dict,
     *,
@@ -42,6 +62,7 @@ def _run_video(
     model_id: str,
     target_class: str,
     api_url: str,
+    batch_size: int,
 ) -> dict:
     path = (ROOT / video["path"]).resolve()
     if not path.exists():
@@ -69,10 +90,57 @@ def _run_video(
         processing_scale=0.5,
     )
 
-    rows = []
+    rows: list[dict] = []
+    pending: list[dict] = []
     frame_id = 0
-    detector_ms = []
+    detector_ms_amortized: list[float] = []
+    batch_roundtrip_ms: list[float] = []
+    batch_sizes: list[int] = []
+    batches_completed = 0
     start_wall = time.perf_counter()
+
+    def flush_pending() -> None:
+        nonlocal batches_completed
+        if not pending:
+            return
+
+        frames = [item["frame"] for item in pending]
+        t0 = time.perf_counter()
+        batch_detections = detector.detect_batch(frames)
+        elapsed_ms = (time.perf_counter() - t0) * 1000.0
+        if len(batch_detections) != len(pending):
+            raise RuntimeError(
+                "RF-DETR batch result count mismatch: "
+                f"pending={len(pending)} returned={len(batch_detections)}"
+            )
+
+        batch_roundtrip_ms.append(elapsed_ms)
+        batch_sizes.append(len(pending))
+        amortized_ms = elapsed_ms / max(len(pending), 1)
+
+        for item, detections in zip(pending, batch_detections):
+            row = rows[item["row_index"]]
+            row["accepted_player_candidates"] = len(detections)
+            row["timing_ms"]["rfdetr_players"] = amortized_ms
+            row["timing_ms"]["rfdetr_batch_roundtrip"] = elapsed_ms
+            row["timing_ms"]["rfdetr_batch_size"] = len(pending)
+            detector_ms_amortized.append(amortized_ms)
+
+            tracked = tracker.update(detections, item["frame"])
+            row["players"] = _serialize_tracked_players(
+                tracked,
+                frame_height=int(item["frame"].shape[0]),
+            )
+
+        batches_completed += 1
+        if batches_completed == 1 or batches_completed % 10 == 0:
+            print(
+                f"  batches={batches_completed} gameplay_frames={sum(batch_sizes)} "
+                f"last_batch={len(pending)} last_roundtrip={elapsed_ms:.0f}ms",
+                flush=True,
+            )
+        pending.clear()
+
     try:
         while True:
             ok, frame = cap.read()
@@ -83,45 +151,30 @@ def _run_video(
                 break
 
             valid_gameplay = gameplay_filter.is_gameplay(frame)
-            players = []
-            detected_count = 0
-            timing = {}
-            if valid_gameplay:
-                t0 = time.perf_counter()
-                detections = detector.detect(frame)
-                elapsed_ms = (time.perf_counter() - t0) * 1000.0
-                detector_ms.append(elapsed_ms)
-                timing["rfdetr_players"] = elapsed_ms
-                detected_count = len(detections)
-                tracked = tracker.update(detections, frame)
-                frame_height = int(frame.shape[0])
-                for player in tracked:
-                    players.append(
-                        {
-                            "track_id": int(player.track_id),
-                            "box": [round(float(v), 3) for v in player.box],
-                            "confidence": round(float(player.confidence), 6),
-                            "team": "UNKNOWN",
-                            "shirt_num": None,
-                            "player_name": None,
-                            "court_xy": None,
-                            "court_xy_valid": False,
-                            "homography_source": None,
-                            "frame_height": frame_height,
-                        }
-                    )
-
             rows.append(
                 {
                     "frame_id": frame_id,
                     "timestamp_sec": timestamp,
                     "valid_gameplay": bool(valid_gameplay),
-                    "accepted_player_candidates": detected_count,
-                    "players": players,
-                    "timing_ms": timing,
+                    "accepted_player_candidates": 0,
+                    "players": [],
+                    "timing_ms": {},
                 }
             )
+
+            if valid_gameplay:
+                pending.append(
+                    {
+                        "row_index": len(rows) - 1,
+                        "frame": frame,
+                    }
+                )
+                if len(pending) >= batch_size:
+                    flush_pending()
+
             frame_id += 1
+
+        flush_pending()
     finally:
         cap.release()
 
@@ -144,11 +197,28 @@ def _run_video(
         "video_fps": fps,
         "wall_time_sec": round(time.perf_counter() - start_wall, 3),
         "player_detector_ms_per_gameplay_frame_mean": (
-            round(sum(detector_ms) / len(detector_ms), 6) if detector_ms else None
+            round(sum(detector_ms_amortized) / len(detector_ms_amortized), 6)
+            if detector_ms_amortized
+            else None
+        ),
+        "serverless_batches": len(batch_roundtrip_ms),
+        "serverless_batch_size_requested": batch_size,
+        "serverless_batch_size_mean": (
+            round(sum(batch_sizes) / len(batch_sizes), 3) if batch_sizes else None
+        ),
+        "serverless_batch_roundtrip_ms_mean": (
+            round(sum(batch_roundtrip_ms) / len(batch_roundtrip_ms), 3)
+            if batch_roundtrip_ms
+            else None
+        ),
+        "serverless_roundtrip_ms_per_gameplay_frame_amortized": (
+            round(sum(batch_roundtrip_ms) / max(sum(batch_sizes), 1), 6)
+            if batch_roundtrip_ms
+            else None
         ),
         "latency_quality_gate_eligible": backend != "roboflow" or not api_url.startswith("http"),
         "latency_semantics": (
-            "hosted_api_roundtrip_not_directly_comparable_to_local_yolo"
+            "hosted_batched_api_roundtrip_not_directly_comparable_to_local_yolo"
             if backend == "roboflow" and api_url.startswith("http")
             else "local_detector_timing"
         ),
@@ -165,11 +235,19 @@ def main() -> int:
     parser.add_argument("--model-id", default=DEFAULT_BASKETBALL_MODEL_ID)
     parser.add_argument("--target-class", default="player")
     parser.add_argument("--api-url", default=os.getenv("ROBOFLOW_API_URL", DEFAULT_ROBOFLOW_API_URL))
+    parser.add_argument(
+        "--batch-size",
+        type=int,
+        default=8,
+        help="Gameplay frames per hosted inference call. Tracking remains sequential within each batch.",
+    )
     parser.add_argument("--output", type=Path, default=None)
     args = parser.parse_args()
 
     if args.backend == "roboflow" and args.target_class.strip().lower() != "player":
         raise SystemExit("P1.1 promotion benchmark must target the semantic class 'player'.")
+    if args.batch_size < 1 or args.batch_size > 32:
+        raise SystemExit("--batch-size must be between 1 and 32.")
 
     contract = json.loads(CONTRACT.read_text(encoding="utf-8"))
     videos = [v for v in contract["videos"] if args.video is None or v["label"] == args.video]
@@ -183,7 +261,7 @@ def main() -> int:
     for video in videos:
         print(
             f"\n=== RF-DETR {video['label']} {video['path']} {video['start_sec']}–{video['end_sec']}s "
-            f"backend={args.backend} model={args.model_id} class={args.target_class} ===",
+            f"backend={args.backend} model={args.model_id} class={args.target_class} batch={args.batch_size} ===",
             flush=True,
         )
         result = _run_video(
@@ -194,6 +272,7 @@ def main() -> int:
             model_id=args.model_id,
             target_class=args.target_class,
             api_url=args.api_url,
+            batch_size=args.batch_size,
         )
         detector_metadata = result["detector_metadata"]
         video_dir = run_root / video["label"]
@@ -236,6 +315,7 @@ def main() -> int:
             ),
             "inference_confidence": args.inference_conf,
             "player_confidence": args.player_conf,
+            "batch_size": args.batch_size,
             "tracker": "botsort.yaml",
             "reid": False,
             "canonical_yolo_baseline_unchanged": "weights/model_v1.0.0.pt",
