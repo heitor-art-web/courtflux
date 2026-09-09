@@ -3,13 +3,17 @@ from __future__ import annotations
 import argparse
 import os
 from pathlib import Path
+import sys
+
+ROOT = Path(__file__).resolve().parents[1]
+if str(ROOT) not in sys.path:
+    sys.path.insert(0, str(ROOT))
 
 from core.config import settings
 import services.analytics.analyzer as analyzer
 from services.p0_context_pipeline import Pipeline as ContextPipeline
 from services.vision.keyframed_camera_tracker import CameraTracker as KeyframedCameraTracker
 
-ROOT = Path(__file__).resolve().parents[1]
 V19_MAP = ROOT / "services" / "vision" / "court_keypoint_maps" / "roboflow_basketball_court_v19_fiba.json"
 
 
