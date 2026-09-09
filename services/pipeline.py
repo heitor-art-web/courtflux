@@ -33,16 +33,21 @@ class Pipeline:
         self.detection_only = bool(detection_only)
         self.persist_results = bool(persist_results)
         self._camera_tracker_initialized = False
+        self._renderer_closed = False
 
         if self.renderer is None and self.detection_only:
             preview_path = os.getenv("BASKETBALL_PREVIEW_PATH", "").strip()
             if preview_path:
                 match_config = os.getenv("BASKETBALL_PREVIEW_MATCH_CONFIG", "").strip()
                 interval = int(os.getenv("BASKETBALL_PREVIEW_INTERVAL", "15") or "15")
+                video_path = os.getenv("BASKETBALL_PREVIEW_VIDEO_PATH", "").strip()
+                video_fps = float(os.getenv("BASKETBALL_PREVIEW_VIDEO_FPS", "4") or "4")
                 self.renderer = DiagnosticPreview(
                     output_path=Path(preview_path),
                     match_config_path=Path(match_config) if match_config else None,
                     interval_frames=interval,
+                    video_output_path=Path(video_path) if video_path else None,
+                    video_fps=video_fps,
                 )
 
     def _ensure_camera_tracker(self, frame: np.ndarray):
@@ -57,9 +62,7 @@ class Pipeline:
         is_gameplay = self.gameplay_filter.is_gameplay(frame_state.frame)
         frame_state.valid_gameplay = is_gameplay
         if hasattr(self.gameplay_filter, "last_diagnostics"):
-            frame_state.diagnostics["gameplay_filter"] = dict(
-                getattr(self.gameplay_filter, "last_diagnostics", {}) or {}
-            )
+            frame_state.diagnostics["gameplay_filter"] = dict(getattr(self.gameplay_filter, "last_diagnostics", {}) or {})
         self.profiler.stop("Gameplay Filter")
 
         if not is_gameplay:
@@ -69,8 +72,6 @@ class Pipeline:
             self.profiler.stop("Total")
             return frame_state
 
-        # Camera calibration is optional in detection-only mode. When supplied, it runs
-        # diagnostically and never changes detector/association decisions.
         if self.camera_tracker is not None:
             self.profiler.start("Camera Tracker")
             self._ensure_camera_tracker(frame_state.frame)
@@ -99,8 +100,7 @@ class Pipeline:
             if not detector_ball_source:
                 detector_ball_source = "detector" if getattr(frame_state, "ball", None) is not None else "missing"
             camera_diag = frame_state.diagnostics.get("camera", {}) or {}
-            frame_state.diagnostics.setdefault("analytics", {})
-            frame_state.diagnostics["analytics"].update(
+            frame_state.diagnostics.setdefault("analytics", {}).update(
                 {
                     "ball_source": detector_ball_source,
                     "players_final": len(getattr(frame_state, "players", []) or []),
@@ -134,3 +134,6 @@ class Pipeline:
             self.profiler.start("Database Flush")
             self.database.flush()
             self.profiler.stop("Database Flush")
+        if not self._renderer_closed and self.renderer is not None and hasattr(self.renderer, "close"):
+            self.renderer.close()
+            self._renderer_closed = True
