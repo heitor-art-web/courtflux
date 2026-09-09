@@ -61,3 +61,14 @@ jobs:
           COURTFLUX_E2E_ONBOARDING_EMAIL: ${{ secrets.COURTFLUX_E2E_ONBOARDING_EMAIL }}
           COURTFLUX_E2E_ONBOARDING_PASSWORD: ${{ secrets.COURTFLUX_E2E_ONBOARDING_PASSWORD }}
         run: npx playwright test --config web/playwright.config.ts
+
+      - name: Upload Playwright diagnostics
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-diagnostics
+          path: |
+            playwright-report
+            test-results
+          if-no-files-found: ignore
+          retention-days: 7
