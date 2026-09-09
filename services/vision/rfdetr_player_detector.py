@@ -1,10 +1,15 @@
 from __future__ import annotations
 
+import os
 from dataclasses import dataclass
 from typing import Any
 
 import cv2
 import numpy as np
+
+
+DEFAULT_BASKETBALL_MODEL_ID = "basketball-player-detection-3-ycjdo/13"
+DEFAULT_ROBOFLOW_API_URL = "https://serverless.roboflow.com"
 
 
 @dataclass(slots=True)
@@ -14,81 +19,139 @@ class RFDETRPlayerDetection:
 
 
 class RFDETRPlayerDetector:
-    """Optional P1 challenger adapter around RF-DETR pretrained COCO person detections."""
+    """P1 challenger adapter for basketball-specific RF-DETR player detections.
 
-    def __init__(self, *, inference_threshold: float = 0.03, player_threshold: float = 0.10):
-        try:
-            from rfdetr import RFDETRSmall
-        except ImportError as exc:  # pragma: no cover - exercised by local smoke test
-            raise RuntimeError(
-                "RF-DETR challenger dependency is missing. Install with: "
-                "pip install -r requirements-rfdetr.txt"
-            ) from exc
+    The promotion path uses the public basketball model and filters the semantic
+    class ``player``. A local COCO-person backend remains available only as a
+    diagnostic; it is not quality-gate eligible because ``person`` also includes
+    referees, staff and spectators.
+    """
 
-        self.model = RFDETRSmall()
+    def __init__(
+        self,
+        *,
+        inference_threshold: float = 0.03,
+        player_threshold: float = 0.10,
+        backend: str = "roboflow",
+        model_id: str = DEFAULT_BASKETBALL_MODEL_ID,
+        target_class: str = "player",
+        api_url: str = DEFAULT_ROBOFLOW_API_URL,
+        api_key: str | None = None,
+    ):
         self.inference_threshold = float(inference_threshold)
         self.player_threshold = float(player_threshold)
+        self.backend = str(backend).strip().lower()
+        self.model_id = str(model_id)
+        self.target_class = str(target_class).strip().lower()
+        self.api_url = str(api_url)
+        self.model = None
+        self.client = None
 
-        # Pretrained RF-DETR COCO checkpoints emit sparse COCO category IDs
-        # (person == 1), while model.class_names may be a contiguous list.
-        # Keep class_names-derived IDs only as a fallback; detection-level
-        # class_name metadata is preferred in detect().
-        self.person_class_ids = {1}
-        self.person_class_ids.update(
-            self._resolve_person_class_ids(getattr(self.model, "class_names", {}))
+        if self.backend == "roboflow":
+            try:
+                from inference_sdk import InferenceConfiguration, InferenceHTTPClient
+            except ImportError as exc:  # pragma: no cover - local environment dependent
+                raise RuntimeError(
+                    "Roboflow inference dependency is missing. Install with: "
+                    "pip install -r requirements-rfdetr.txt"
+                ) from exc
+
+            resolved_key = api_key or os.getenv("ROBOFLOW_API_KEY")
+            if not resolved_key:
+                raise RuntimeError(
+                    "ROBOFLOW_API_KEY is required for the basketball-specific RF-DETR challenger. "
+                    "Export it in the shell; do not commit it to the repository."
+                )
+            self.client = InferenceHTTPClient(api_url=self.api_url, api_key=resolved_key)
+            # Current serverless API supports header transport and avoids leaking
+            # the key in query parameters/logs.
+            self.client.configure(InferenceConfiguration(api_key_transport="header"))
+            return
+
+        if self.backend == "coco":
+            try:
+                from rfdetr import RFDETRSmall
+            except ImportError as exc:  # pragma: no cover - local environment dependent
+                raise RuntimeError(
+                    "RF-DETR local diagnostic dependency is missing. Install with: "
+                    "pip install -r requirements-rfdetr.txt"
+                ) from exc
+            self.model = RFDETRSmall()
+            return
+
+        raise ValueError(f"Unsupported RF-DETR challenger backend: {backend}")
+
+    @staticmethod
+    def _xywh_center_to_xyxy(prediction: dict[str, Any]) -> list[float] | None:
+        try:
+            x = float(prediction["x"])
+            y = float(prediction["y"])
+            width = float(prediction["width"])
+            height = float(prediction["height"])
+        except (KeyError, TypeError, ValueError):
+            return None
+        if width <= 0.0 or height <= 0.0:
+            return None
+        return [
+            x - width / 2.0,
+            y - height / 2.0,
+            x + width / 2.0,
+            y + height / 2.0,
+        ]
+
+    @classmethod
+    def _players_from_roboflow_response(
+        cls,
+        response: dict[str, Any],
+        *,
+        target_class: str,
+        player_threshold: float,
+    ) -> list[RFDETRPlayerDetection]:
+        output: list[RFDETRPlayerDetection] = []
+        predictions = response.get("predictions", []) if isinstance(response, dict) else []
+        for prediction in predictions or []:
+            if not isinstance(prediction, dict):
+                continue
+            class_name = str(prediction.get("class", "")).strip().lower()
+            if class_name != str(target_class).strip().lower():
+                continue
+            try:
+                confidence = float(prediction.get("confidence", 0.0))
+            except (TypeError, ValueError):
+                continue
+            if confidence < float(player_threshold):
+                continue
+            box = cls._xywh_center_to_xyxy(prediction)
+            if box is None:
+                continue
+            output.append(RFDETRPlayerDetection(box=box, confidence=confidence))
+        return output
+
+    def _detect_roboflow(self, frame_bgr: np.ndarray) -> list[RFDETRPlayerDetection]:
+        assert self.client is not None
+        response = self.client.infer(frame_bgr, model_id=self.model_id)
+        return self._players_from_roboflow_response(
+            response,
+            target_class=self.target_class,
+            player_threshold=self.player_threshold,
         )
 
-    @staticmethod
-    def _resolve_person_class_ids(class_names: Any) -> set[int]:
-        if isinstance(class_names, dict):
-            return {
-                int(class_id)
-                for class_id, name in class_names.items()
-                if str(name).strip().lower() == "person"
-            }
-        if isinstance(class_names, (list, tuple)):
-            return {
-                index
-                for index, name in enumerate(class_names)
-                if str(name).strip().lower() == "person"
-            }
-        return set()
-
-    @staticmethod
-    def _class_names_from_detections(detections: Any, count: int) -> list[str | None]:
-        data = getattr(detections, "data", None)
-        if not isinstance(data, dict):
-            return [None] * count
-        values = data.get("class_name")
-        if values is None:
-            return [None] * count
-        try:
-            names = list(values)
-        except TypeError:
-            return [None] * count
-        return [str(names[index]) if index < len(names) else None for index in range(count)]
-
-    def detect(self, frame_bgr: np.ndarray) -> list[RFDETRPlayerDetection]:
-        if frame_bgr is None or frame_bgr.size == 0:
-            return []
+    def _detect_coco_diagnostic(self, frame_bgr: np.ndarray) -> list[RFDETRPlayerDetection]:
+        assert self.model is not None
         frame_rgb = cv2.cvtColor(frame_bgr, cv2.COLOR_BGR2RGB)
         detections = self.model.predict(frame_rgb, threshold=self.inference_threshold)
-
         boxes = np.asarray(getattr(detections, "xyxy", []), dtype=np.float32)
         confidences = np.asarray(getattr(detections, "confidence", []), dtype=np.float32)
         class_ids = np.asarray(getattr(detections, "class_id", []), dtype=np.int64)
-        class_names = self._class_names_from_detections(detections, len(boxes))
+        data = getattr(detections, "data", {})
+        names = list(data.get("class_name", [])) if isinstance(data, dict) else []
 
         output: list[RFDETRPlayerDetection] = []
         for index, (box, confidence, class_id) in enumerate(zip(boxes, confidences, class_ids)):
-            class_name = class_names[index]
-            if class_name is not None:
-                is_person = class_name.strip().lower() == "person"
-            else:
-                is_person = int(class_id) in self.person_class_ids
+            class_name = str(names[index]).strip().lower() if index < len(names) else None
+            is_person = class_name == "person" if class_name is not None else int(class_id) == 1
             if not is_person:
                 continue
-
             confidence_value = float(confidence)
             if confidence_value < self.player_threshold:
                 continue
@@ -99,3 +162,19 @@ class RFDETRPlayerDetector:
                 )
             )
         return output
+
+    def detect(self, frame_bgr: np.ndarray) -> list[RFDETRPlayerDetection]:
+        if frame_bgr is None or frame_bgr.size == 0:
+            return []
+        if self.backend == "roboflow":
+            return self._detect_roboflow(frame_bgr)
+        return self._detect_coco_diagnostic(frame_bgr)
+
+    def metadata(self) -> dict[str, Any]:
+        return {
+            "backend": self.backend,
+            "model_id": self.model_id if self.backend == "roboflow" else "rfdetr-small-coco",
+            "target_class": self.target_class if self.backend == "roboflow" else "person",
+            "semantic_quality_gate_eligible": self.backend == "roboflow" and self.target_class == "player",
+            "api_url": self.api_url if self.backend == "roboflow" else None,
+        }
