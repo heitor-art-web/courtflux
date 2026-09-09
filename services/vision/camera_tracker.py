@@ -17,13 +17,54 @@ from services.vision.court_geometry import (
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 load_dotenv(PROJECT_ROOT / ".env", override=False)
-roboflow_api_key = os.getenv("ROBOFLOW_API_KEY")
 
 try:
-    from inference import get_model
-    INFERENCE_AVAILABLE = True
+    from inference import get_model as get_local_inference_model
+
+    LOCAL_INFERENCE_AVAILABLE = True
 except ImportError:
-    INFERENCE_AVAILABLE = False
+    get_local_inference_model = None
+    LOCAL_INFERENCE_AVAILABLE = False
+
+
+class _ServerlessCourtKeypointModel:
+    """Small compatibility wrapper around the lightweight Roboflow HTTP SDK."""
+
+    def __init__(
+        self,
+        *,
+        model_id: str,
+        api_key: str,
+        api_url: str,
+        confidence: float,
+        keypoint_confidence: float,
+    ) -> None:
+        try:
+            from inference_sdk import InferenceConfiguration, InferenceHTTPClient
+        except ImportError as exc:
+            raise RuntimeError(
+                "Serverless court inference requires optional dependencies. Install: "
+                "python3 -m pip install -r requirements-roboflow.txt"
+            ) from exc
+
+        self.model_id = str(model_id)
+        self.client = InferenceHTTPClient(
+            api_url=str(api_url),
+            api_key=str(api_key),
+        ).configure(
+            InferenceConfiguration(
+                api_key_transport="header",
+                confidence_threshold=float(confidence),
+                keypoint_confidence_threshold=float(keypoint_confidence),
+                disable_active_learning=True,
+            )
+        )
+
+    def infer(self, frame: np.ndarray, confidence: float | None = None) -> Any:
+        # Confidence is configured on the client to keep the wrapper compatible with
+        # the legacy `get_model(...).infer(frame, confidence=...)` contract.
+        del confidence
+        return self.client.infer(frame, model_id=self.model_id)
 
 
 class CameraTracker:
@@ -52,33 +93,23 @@ class CameraTracker:
         self.keypoint_map = load_keypoint_map(resolved_map_path or None)
         self.keypoint_schema = "external" if resolved_map_path else "fiba14_builtin"
         self.keypoint_model = None
+        self.keypoint_backend = os.getenv(
+            "BASKETBALL_COURT_INFERENCE_BACKEND",
+            "legacy",
+        ).strip().lower() or "legacy"
         self.last_calibration_diagnostics: dict[str, Any] = {
             "valid": False,
             "anchor_count": 0,
             "inlier_count": 0,
             "reprojection_rmse_px": None,
             "source": "uninitialized",
+            "keypoint_backend": self.keypoint_backend,
         }
 
         requested_keypoints = bool(use_keypoint_model)
-        self.use_keypoint_model = (
-            requested_keypoints and INFERENCE_AVAILABLE and bool(roboflow_api_key)
-        )
-        if requested_keypoints and not INFERENCE_AVAILABLE:
-            print("[CameraTracker] inference package unavailable; using optical-flow fallback.")
-        elif requested_keypoints and not roboflow_api_key:
-            print("[CameraTracker] ROBOFLOW_API_KEY not set; using optical-flow fallback.")
-
-        if self.use_keypoint_model:
-            try:
-                self.keypoint_model = get_model(model_id=self.model_id)
-                print(
-                    f"[CameraTracker] Loaded court keypoint model: {self.model_id} "
-                    f"schema={self.keypoint_schema} anchors={len(self.keypoint_map)}"
-                )
-            except Exception as exc:
-                print(f"[CameraTracker] Could not load keypoint model: {exc}. Falling back to optical flow.")
-                self.use_keypoint_model = False
+        self.use_keypoint_model = False
+        if requested_keypoints:
+            self._initialize_keypoint_model()
 
         self.initial_H = initial_H
         self.base_polygon = initial_polygon
@@ -88,6 +119,77 @@ class CameraTracker:
 
         if first_frame is not None:
             self._init_first_frame(first_frame)
+
+    def _initialize_keypoint_model(self) -> None:
+        if self.keypoint_backend in {"serverless", "roboflow", "http"}:
+            api_key = (
+                os.getenv("ROBOFLOW_PRIVATE_API_KEY", "").strip()
+                or os.getenv("ROBOFLOW_API_KEY", "").strip()
+            )
+            if not api_key:
+                print(
+                    "[CameraTracker] Serverless court inference requested but no private/API key "
+                    "is configured; using optical-flow fallback.",
+                    flush=True,
+                )
+                return
+            api_url = os.getenv(
+                "BASKETBALL_ROBOFLOW_API_URL",
+                "https://serverless.roboflow.com",
+            ).strip()
+            try:
+                self.keypoint_model = _ServerlessCourtKeypointModel(
+                    model_id=self.model_id,
+                    api_key=api_key,
+                    api_url=api_url,
+                    confidence=self.confidence,
+                    keypoint_confidence=self.anchor_confidence,
+                )
+                self.use_keypoint_model = True
+                print(
+                    f"[CameraTracker] Loaded Serverless court keypoint model: {self.model_id} "
+                    f"schema={self.keypoint_schema} anchors={len(self.keypoint_map)}",
+                    flush=True,
+                )
+            except Exception as exc:
+                print(
+                    f"[CameraTracker] Could not initialize Serverless court model: {exc}. "
+                    "Falling back to optical flow.",
+                    flush=True,
+                )
+            return
+
+        if self.keypoint_backend not in {"legacy", "local"}:
+            print(
+                f"[CameraTracker] Unsupported BASKETBALL_COURT_INFERENCE_BACKEND="
+                f"{self.keypoint_backend!r}; using optical-flow fallback.",
+                flush=True,
+            )
+            return
+        if not LOCAL_INFERENCE_AVAILABLE or get_local_inference_model is None:
+            print(
+                "[CameraTracker] legacy inference package unavailable; using optical-flow fallback. "
+                "For the lightweight hosted path set BASKETBALL_COURT_INFERENCE_BACKEND=serverless.",
+                flush=True,
+            )
+            return
+        api_key = os.getenv("ROBOFLOW_API_KEY", "").strip()
+        if not api_key:
+            print("[CameraTracker] ROBOFLOW_API_KEY not set; using optical-flow fallback.")
+            return
+        try:
+            self.keypoint_model = get_local_inference_model(model_id=self.model_id)
+            self.use_keypoint_model = True
+            print(
+                f"[CameraTracker] Loaded local court keypoint model: {self.model_id} "
+                f"schema={self.keypoint_schema} anchors={len(self.keypoint_map)}",
+                flush=True,
+            )
+        except Exception as exc:
+            print(
+                f"[CameraTracker] Could not load keypoint model: {exc}. Falling back to optical flow.",
+                flush=True,
+            )
 
     def _init_first_frame(self, frame: np.ndarray):
         self.frame_h, self.frame_w = frame.shape[:2]
@@ -119,7 +221,10 @@ class CameraTracker:
         if hasattr(results, "keypoints"):
             return list(results.keypoints or [])
         if isinstance(results, dict) and results.get("predictions"):
-            return list(results["predictions"][0].get("keypoints", []) or [])
+            first_prediction = results["predictions"][0]
+            if isinstance(first_prediction, dict):
+                return list(first_prediction.get("keypoints", []) or [])
+            return list(getattr(first_prediction, "keypoints", []) or [])
         return []
 
     def _detect_keypoints(self, frame: np.ndarray) -> Tuple[Optional[np.ndarray], Optional[np.ndarray]]:
@@ -130,6 +235,7 @@ class CameraTracker:
                 "inlier_count": 0,
                 "reprojection_rmse_px": None,
                 "source": "keypoint_model_unavailable",
+                "keypoint_backend": self.keypoint_backend,
             }
             return None, None
 
@@ -174,6 +280,7 @@ class CameraTracker:
                 "model_id": self.model_id,
                 "keypoint_schema": self.keypoint_schema,
                 "keypoint_map_size": len(self.keypoint_map),
+                "keypoint_backend": self.keypoint_backend,
             }
 
             court_poly = None
@@ -188,6 +295,7 @@ class CameraTracker:
                 "inlier_count": 0,
                 "reprojection_rmse_px": None,
                 "source": "keypoint_exception",
+                "keypoint_backend": self.keypoint_backend,
                 "error": f"{type(exc).__name__}: {exc}",
             }
             print(f"[CameraTracker] Keypoint detection failed: {exc}")
@@ -312,6 +420,7 @@ class CameraTracker:
         camera_diag.update(
             {
                 "keypoint_model_active": bool(self.use_keypoint_model),
+                "keypoint_backend": self.keypoint_backend,
                 "homography_is_identity": bool(np.allclose(current_H, np.eye(3))),
                 "diagnostic_only": True,
             }
