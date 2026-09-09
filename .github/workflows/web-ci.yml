@@ -23,7 +23,7 @@ permissions:
 jobs:
   quality:
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 25
 
     steps:
       - name: Checkout
@@ -48,11 +48,16 @@ jobs:
       - name: Build
         run: npm run build
 
-      - name: Install Playwright test runner
-        run: npm install --no-save --ignore-scripts @playwright/test@1.55.0
+      - name: Install browser test tools
+        run: npm install --no-save --ignore-scripts @playwright/test@1.55.0 @axe-core/playwright@4.10.2
 
       - name: Install Chromium
         run: npx playwright install --with-deps chromium
 
-      - name: Browser smoke tests
+      - name: Browser and accessibility tests
+        env:
+          COURTFLUX_E2E_EMAIL: ${{ secrets.COURTFLUX_E2E_EMAIL }}
+          COURTFLUX_E2E_PASSWORD: ${{ secrets.COURTFLUX_E2E_PASSWORD }}
+          COURTFLUX_E2E_ONBOARDING_EMAIL: ${{ secrets.COURTFLUX_E2E_ONBOARDING_EMAIL }}
+          COURTFLUX_E2E_ONBOARDING_PASSWORD: ${{ secrets.COURTFLUX_E2E_ONBOARDING_PASSWORD }}
         run: npx playwright test --config web/playwright.config.ts
