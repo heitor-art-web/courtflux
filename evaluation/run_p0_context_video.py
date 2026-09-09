@@ -15,6 +15,26 @@ from services.p0_context_pipeline import Pipeline as ContextPipeline
 from services.vision.keyframed_camera_tracker import CameraTracker as KeyframedCameraTracker
 
 V19_MAP = ROOT / "services" / "vision" / "court_keypoint_maps" / "roboflow_basketball_court_v19_fiba.json"
+FROZEN_MODEL_NAME = "model_v1.0.0.pt"
+
+
+def _default_model_path() -> str:
+    """Resolve the checkpoint used by the frozen Smart-v1 experiments.
+
+    Model weights are intentionally not committed to GitHub, so tolerate the common
+    local layouts while keeping an explicit --model override for other workers.
+    """
+    candidates = (
+        ROOT / "weights" / FROZEN_MODEL_NAME,
+        ROOT / "models" / FROZEN_MODEL_NAME,
+        ROOT / FROZEN_MODEL_NAME,
+    )
+    for path in candidates:
+        if path.exists():
+            return str(path.relative_to(ROOT))
+    # Preserve the expected CourtFlux weights layout so analyzer.py emits a useful
+    # FileNotFoundError if this worker genuinely does not have the frozen checkpoint.
+    return str(Path("weights") / FROZEN_MODEL_NAME)
 
 
 def _freeze_experiment_defaults() -> None:
@@ -44,7 +64,7 @@ def main() -> None:
     parser.add_argument("--video", required=True)
     parser.add_argument("--start", default="0")
     parser.add_argument("--end", default="")
-    parser.add_argument("--model", default=settings.model)
+    parser.add_argument("--model", default=_default_model_path())
     parser.add_argument("--conf", type=float, default=0.10)
     parser.add_argument("--imgsz", type=int, default=960)
     parser.add_argument("--device", default=settings.device, choices=["mps", "cpu", "cuda"])
