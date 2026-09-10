@@ -48,9 +48,8 @@ def _read_annotations(path: Path) -> pd.DataFrame:
         if column not in frame.columns:
             frame[column] = ""
 
-    # Backward-compatible migration: a numeric jersey label proves the subject was
-    # treated as a player. Legacy unreadable rows stay blank because they may contain
-    # referees/camera staff and need one short subject-type review pass.
+    # Numeric legacy labels prove that the subject was treated as a player. Legacy
+    # unreadable labels stay unresolved because some were referees/camera staff.
     numeric = frame["jersey_gt"].str.fullmatch(r"\d{1,2}", na=False)
     frame.loc[numeric & (frame["subject_type"] == ""), "subject_type"] = "player"
     return frame[ANNOTATION_FIELDS]
@@ -85,33 +84,35 @@ def _canonical_number(value: str) -> str:
 def _track_conflicts(
     manifest: pd.DataFrame,
     annotations: pd.DataFrame,
-) -> tuple[set[str], dict[tuple[str, str], list[str]]]:
+) -> dict[tuple[str, str], dict[str, object]]:
     numeric = annotations[
         (annotations["subject_type"] == "player")
         & annotations["jersey_gt"].str.fullmatch(r"\d{1,2}", na=False)
     ].copy()
     if numeric.empty:
-        return set(), {}
+        return {}
 
     numeric["canonical_number"] = numeric["jersey_gt"].map(_canonical_number)
-    locations = manifest[["sample_id", "video", "track_id"]].copy()
+    locations = manifest[["sample_id", "video", "track_id", "timestamp_sec"]].copy()
     joined = numeric.merge(locations, on="sample_id", how="inner")
-    conflicts: dict[tuple[str, str], list[str]] = {}
+
+    conflicts: dict[tuple[str, str], dict[str, object]] = {}
     for (video, track_id), rows in joined.groupby(["video", "track_id"], sort=False):
         labels = sorted(
             {value for value in rows["canonical_number"].tolist() if value},
             key=int,
         )
-        if len(labels) > 1:
-            conflicts[(str(video), str(track_id))] = labels
-
-    conflict_ids: set[str] = set()
-    for (video, track_id), _labels in conflicts.items():
-        rows = manifest[
-            (manifest["video"] == video) & (manifest["track_id"] == track_id)
+        if len(labels) <= 1:
+            continue
+        track_rows = manifest[
+            (manifest["video"] == str(video)) & (manifest["track_id"] == str(track_id))
         ]
-        conflict_ids.update(rows["sample_id"].astype(str).tolist())
-    return conflict_ids, conflicts
+        conflicts[(str(video), str(track_id))] = {
+            "labels": labels,
+            "samples": int(len(track_rows)),
+            "numeric_samples": int(len(rows)),
+        }
+    return conflicts
 
 
 def _save_rows(
@@ -167,7 +168,7 @@ def main() -> None:
             "sample_id",
         ].tolist()
     )
-    conflict_ids, conflict_tracks = _track_conflicts(manifest, annotations)
+    conflict_tracks = _track_conflicts(manifest, annotations)
 
     st.title("CourtFlux · Jersey OCR Ground Truth")
     st.caption(
@@ -175,32 +176,55 @@ def main() -> None:
         "Do not infer a jersey number from the roster or from OCR predictions."
     )
 
+    selected_conflict: tuple[str, str] | None = None
     with st.sidebar:
         st.header("Queue")
         status = st.selectbox(
             "Status",
-            [
-                "unreviewed",
-                "needs subject review",
-                "track conflicts",
-                "all",
-                "reviewed",
-            ],
+            ["unreviewed", "needs subject review", "track conflicts", "all", "reviewed"],
             index=0,
         )
+
+        if status == "track conflicts" and conflict_tracks:
+            conflict_keys = sorted(conflict_tracks, key=lambda item: int(item[1]))
+            conflict_labels = {}
+            for key in conflict_keys:
+                info = conflict_tracks[key]
+                numbers = "/".join(info["labels"])
+                conflict_labels[key] = (
+                    f"Track {key[1]} → {numbers} "
+                    f"({info['samples']} crops, {info['numeric_samples']} numeric)"
+                )
+            selected_conflict = st.selectbox(
+                "Conflict track",
+                conflict_keys,
+                format_func=lambda key: conflict_labels[key],
+                help="Review one conflicting track at a time.",
+            )
+            st.caption(f"{len(conflict_tracks)} conflicting tracks remaining")
+
         teams = ["all"] + sorted(
             value for value in manifest.get("team_suggested", pd.Series(dtype=str)).unique()
             if value
         )
         team_filter = st.selectbox("Suggested team", teams)
-        track_filter = st.text_input("Track ID", "").strip()
+        track_filter = ""
+        if status != "track conflicts":
+            track_filter = st.text_input("Track ID", "").strip()
         reviewer_default = args.reviewer or st.session_state.get("reviewer", "")
         reviewer = st.text_input("Reviewer", reviewer_default)
         st.session_state["reviewer"] = reviewer
+
         if needs_subject_ids:
             st.info(f"Legacy unreadable rows needing subject review: {len(needs_subject_ids)}")
         if conflict_tracks:
-            st.warning(f"Tracks with conflicting numeric labels: {len(conflict_tracks)}")
+            with st.expander("All conflict tracks", expanded=status == "track conflicts"):
+                for key in sorted(conflict_tracks, key=lambda item: int(item[1])):
+                    info = conflict_tracks[key]
+                    st.write(
+                        f"Track **{key[1]}** → **{' / '.join(info['labels'])}** "
+                        f"· {info['samples']} crops"
+                    )
 
     queue = manifest.copy()
     if status == "unreviewed":
@@ -208,9 +232,16 @@ def main() -> None:
     elif status == "needs subject review":
         queue = queue[queue["sample_id"].isin(needs_subject_ids)]
     elif status == "track conflicts":
-        queue = queue[queue["sample_id"].isin(conflict_ids)]
+        if not conflict_tracks:
+            st.success("No conflicting tracks remain.")
+            st.stop()
+        assert selected_conflict is not None
+        video, track_id = selected_conflict
+        queue = queue[(queue["video"] == video) & (queue["track_id"] == track_id)]
+        queue = queue.sort_values("timestamp_sec", key=lambda col: pd.to_numeric(col, errors="coerce"))
     elif status == "reviewed":
         queue = queue[queue["sample_id"].isin(reviewed_ids)]
+
     if team_filter != "all":
         queue = queue[queue["team_suggested"] == team_filter]
     if track_filter:
@@ -226,9 +257,22 @@ def main() -> None:
         f"Conflict tracks: **{len(conflict_tracks)}**"
     )
 
+    if status == "track conflicts" and selected_conflict is not None:
+        info = conflict_tracks[selected_conflict]
+        st.warning(
+            f"Reviewing track {selected_conflict[1]} with conflicting labels "
+            f"{' / '.join(info['labels'])}. Compare every crop in timestamp order. "
+            "If this is a real ID switch, keep both jersey labels and use different identity_group values."
+        )
+
+    if queue.empty:
+        st.success("No samples match the current filters.")
+        st.stop()
+
     history_key = f"history:{manifest_path}"
     forced_key = f"forced_sample:{manifest_path}"
-    index_key = f"queue_index:{status}:{team_filter}:{track_filter}"
+    conflict_token = selected_conflict[1] if selected_conflict else "none"
+    index_key = f"queue_index:{status}:{team_filter}:{track_filter}:{conflict_token}"
     history = list(st.session_state.get(history_key, []))
     forced_sample_id = str(st.session_state.get(forced_key, "") or "")
 
@@ -241,9 +285,6 @@ def main() -> None:
             row = forced_rows.iloc[0]
             index = 0
     if not forced_sample_id:
-        if queue.empty:
-            st.success("No samples match the current filters.")
-            st.stop()
         index = int(st.session_state.get(index_key, 0))
         index = max(0, min(index, len(queue) - 1))
         st.session_state[index_key] = index
@@ -252,27 +293,18 @@ def main() -> None:
     sample_id = str(row["sample_id"])
     if not history or history[-1] != sample_id:
         history.append(sample_id)
-        history = history[-500:]
-        st.session_state[history_key] = history
+        st.session_state[history_key] = history[-500:]
 
     current = _annotation_for(annotations, sample_id)
     has_annotation = sample_id in reviewed_ids
-
     location_text = "history" if forced_sample_id else f"{index + 1}/{len(queue)}"
     st.subheader(f"Sample {location_text} · {sample_id}")
     st.write(
         f"Track **{row.get('track_id', '')}** · t={row.get('timestamp_sec', '')}s · "
+        f"current GT **{current.get('jersey_gt', '') or 'unlabelled'}** · "
         f"suggested team **{row.get('team_suggested', '') or 'unknown'}** · "
         f"sharpness {row.get('torso_sharpness', '')}"
     )
-
-    conflict_key = (str(row.get("video", "")), str(row.get("track_id", "")))
-    if conflict_key in conflict_tracks:
-        st.error(
-            "This track currently has conflicting numeric jersey labels: "
-            + ", ".join(conflict_tracks[conflict_key])
-            + ". Review every crop in the track for an annotation error or tracker ID switch."
-        )
 
     torso_path = manifest_path.parent / str(row["torso_crop"])
     player_path = manifest_path.parent / str(row["player_crop"])
@@ -327,9 +359,12 @@ def main() -> None:
         jersey_gt = "not_applicable"
         visibility = "not_applicable"
         if subject_type:
-            st.info("Non-player/unknown subject: this sample is retained as detector evidence but excluded from jersey OCR training/evaluation.")
+            st.info(
+                "Non-player/unknown subject: retained as detector evidence but excluded "
+                "from jersey OCR training/evaluation."
+            )
         else:
-            st.warning("Choose a subject type before saving this legacy annotation.")
+            st.warning("Choose a subject type before saving this annotation.")
 
     team_gt = st.selectbox(
         "Team GT (optional)",
@@ -341,15 +376,18 @@ def main() -> None:
         "Identity group (optional, same physical player across fragmented tracks)",
         value=current.get("identity_group", ""),
         key=f"identity:{form_key}",
+        help="For a confirmed ID switch, give each physical player a different identity_group.",
     ).strip()
     notes = st.text_area(
         "Notes", value=current.get("notes", ""), key=f"notes:{form_key}"
     ).strip()
+
     propagate = st.checkbox(
         "Apply this annotation to every sample in this video+track",
         value=False,
         key=f"propagate:{form_key}",
-        help="Use only after visually checking that the track does not contain an ID switch.",
+        help="Do NOT use this for a conflict track unless you are certain there is no ID switch.",
+        disabled=status == "track conflicts",
     )
 
     def target_ids() -> list[str]:
@@ -363,8 +401,6 @@ def main() -> None:
     def advance_after_save() -> None:
         st.session_state[forced_key] = ""
         if status in {"unreviewed", "needs subject review"}:
-            # Saved row disappears from these queues on rerun. Keeping the same index
-            # advances to the row that shifted into its place instead of skipping it.
             st.session_state[index_key] = index
         else:
             st.session_state[index_key] = min(max(len(queue) - 1, 0), index + 1)
@@ -374,7 +410,7 @@ def main() -> None:
         if st.button("← Previous", use_container_width=True, disabled=len(history) < 2):
             history = list(st.session_state.get(history_key, []))
             if len(history) >= 2:
-                history.pop()  # current sample
+                history.pop()
                 previous_sample = history[-1]
                 st.session_state[history_key] = history
                 st.session_state[forced_key] = previous_sample
@@ -435,6 +471,18 @@ def main() -> None:
                 _atomic_write(annotations_path, updated)
                 advance_after_save()
                 st.rerun()
+
+    if status == "track conflicts" and selected_conflict is not None:
+        st.divider()
+        st.subheader("Current track labels")
+        track_sample_ids = set(queue["sample_id"].astype(str))
+        track_annotations = annotations[annotations["sample_id"].isin(track_sample_ids)].copy()
+        display = queue[["sample_id", "timestamp_sec"]].merge(
+            track_annotations[["sample_id", "jersey_gt", "identity_group"]],
+            on="sample_id",
+            how="left",
+        )
+        st.dataframe(display, use_container_width=True, hide_index=True)
 
     st.divider()
     st.caption(f"Annotations file: {annotations_path}")
