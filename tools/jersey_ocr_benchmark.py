@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import argparse
 import json
-import math
 import time
 from collections import Counter
 from pathlib import Path
@@ -34,17 +33,20 @@ def _float_frame(frame: pd.DataFrame) -> pd.DataFrame:
     for column in NUMERIC_COLUMNS:
         if column in out.columns:
             out[column] = pd.to_numeric(out[column], errors="coerce")
-    if "torso_width" in out.columns and "torso_height" in out.columns:
-        out["torso_area"] = out["torso_width"] * out["torso_height"]
+    out["torso_area"] = out["torso_width"] * out["torso_height"]
     return out
+
+
+def _safe_div(numerator: float, denominator: float) -> float | None:
+    return float(numerator / denominator) if denominator else None
 
 
 def _pct(value: float | None) -> str:
     return "n/a" if value is None else f"{100.0 * value:.1f}%"
 
 
-def _safe_div(numerator: float, denominator: float) -> float | None:
-    return float(numerator / denominator) if denominator else None
+def _fmt4(value: float | None) -> str:
+    return "n/a" if value is None else f"{value:.4f}"
 
 
 def _quantiles(values: pd.Series) -> dict[str, float | None]:
@@ -64,16 +66,14 @@ def _quantiles(values: pd.Series) -> dict[str, float | None]:
 
 
 def _readability_auc(frame: pd.DataFrame) -> float | None:
-    readable = frame["label_kind"] == "number"
-    unreadable = frame["label_kind"] == "unreadable"
-    subset = frame[readable | unreadable].copy()
+    subset = frame[frame["label_kind"].isin(["number", "unreadable"])].copy()
     n_pos = int((subset["label_kind"] == "number").sum())
     n_neg = int((subset["label_kind"] == "unreadable").sum())
     if not n_pos or not n_neg:
         return None
     ranks = pd.to_numeric(subset["raw_probability"], errors="coerce").rank(method="average")
     pos_rank_sum = float(ranks[subset["label_kind"] == "number"].sum())
-    return (pos_rank_sum - n_pos * (n_pos + 1) / 2.0) / (n_pos * n_neg)
+    return float((pos_rank_sum - n_pos * (n_pos + 1) / 2.0) / (n_pos * n_neg))
 
 
 def _number_scores(
@@ -94,22 +94,21 @@ def _numeric_metrics(frame: pd.DataFrame) -> dict[str, Any]:
     if numeric.empty:
         return {
             "rows": 0,
+            "correct": 0,
             "exact_accuracy": None,
             "top3_accuracy": None,
             "top5_accuracy": None,
             "mean_raw_probability": None,
             "median_raw_probability": None,
         }
-    exact = numeric["raw_canonical"] == numeric["jersey_gt_canonical"]
-    top3 = numeric["top3_hit"].astype(bool)
-    top5 = numeric["top5_hit"].astype(bool)
+    exact = numeric["raw_canonical"].fillna("").astype(str) == numeric["jersey_gt_canonical"].astype(str)
     probabilities = pd.to_numeric(numeric["raw_probability"], errors="coerce")
     return {
         "rows": int(len(numeric)),
         "correct": int(exact.sum()),
         "exact_accuracy": float(exact.mean()),
-        "top3_accuracy": float(top3.mean()),
-        "top5_accuracy": float(top5.mean()),
+        "top3_accuracy": float(numeric["top3_hit"].astype(bool).mean()),
+        "top5_accuracy": float(numeric["top5_hit"].astype(bool).mean()),
         "mean_raw_probability": float(probabilities.mean()),
         "median_raw_probability": float(probabilities.median()),
     }
@@ -136,11 +135,20 @@ def _candidate_keep(frame: pd.DataFrame, candidate: dict[str, Any]) -> pd.Series
 def _gate_metrics(frame: pd.DataFrame, candidate: dict[str, Any]) -> dict[str, Any]:
     numeric = frame[frame["label_kind"] == "number"].copy()
     if numeric.empty:
-        return {"rows": 0, "kept_rows": 0, "coverage": None, "accuracy_kept": None}
+        return {
+            "rows": 0,
+            "kept_rows": 0,
+            "rejected_rows": 0,
+            "coverage": None,
+            "baseline_accuracy": None,
+            "accuracy_kept": None,
+            "correct_rows_kept": 0,
+            "correct_recall_vs_all_numeric": None,
+        }
     keep = _candidate_keep(numeric, candidate).fillna(False).astype(bool)
     kept = numeric[keep]
-    correct_all = numeric["raw_canonical"] == numeric["jersey_gt_canonical"]
-    correct_kept = kept["raw_canonical"] == kept["jersey_gt_canonical"]
+    correct_all = numeric["raw_canonical"].fillna("").astype(str) == numeric["jersey_gt_canonical"].astype(str)
+    correct_kept = kept["raw_canonical"].fillna("").astype(str) == kept["jersey_gt_canonical"].astype(str)
     return {
         "rows": int(len(numeric)),
         "kept_rows": int(keep.sum()),
@@ -153,39 +161,42 @@ def _gate_metrics(frame: pd.DataFrame, candidate: dict[str, Any]) -> dict[str, A
     }
 
 
-def _temporal_metrics(
-    frame: pd.DataFrame,
-    analyzer: PerformanceJerseyAnalyzer,
-) -> dict[str, Any]:
+def _temporal_metrics(frame: pd.DataFrame, analyzer: PerformanceJerseyAnalyzer) -> dict[str, Any]:
     numeric = frame[frame["label_kind"] == "number"].copy()
     if numeric.empty:
-        return {"groups": 0, "exact_accuracy": None, "multi_crop_groups": 0, "multi_crop_accuracy": None}
+        return {
+            "groups": 0,
+            "exact_accuracy": None,
+            "multi_crop_groups": 0,
+            "multi_crop_accuracy": None,
+            "note": "No numeric groups.",
+        }
 
     def group_key(row: pd.Series) -> str:
         identity = str(row.get("identity_group", "") or "").strip()
         base = identity or f"{row.get('video', '')}|track:{row.get('track_id', '')}"
-        # A confirmed tracker ID switch can legitimately leave multiple jersey labels on
-        # one track. Keep temporal diagnostics label-homogeneous rather than mixing people.
+        # Confirmed tracker ID switches may contain two people under one track. Keep
+        # this diagnostic label-homogeneous instead of averaging different jerseys.
         return f"{base}|gt:{row['jersey_gt_canonical']}"
 
     numeric["benchmark_group"] = numeric.apply(group_key, axis=1)
-    rows = []
+    grouped_rows: list[dict[str, Any]] = []
     for key, group in numeric.groupby("benchmark_group", sort=False):
         tens = np.mean(np.stack(group["_tens_probs"].to_list()), axis=0)
         ones = np.mean(np.stack(group["_ones_probs"].to_list()), axis=0)
         raw = analyzer._raw_prediction(tens.tolist(), ones.tolist())
         gt = str(group.iloc[0]["jersey_gt_canonical"])
-        rows.append(
+        prediction = str(raw.get("raw_canonical") or "")
+        grouped_rows.append(
             {
                 "group": key,
                 "gt": gt,
-                "prediction": str(raw.get("raw_canonical") or ""),
-                "correct": str(raw.get("raw_canonical") or "") == gt,
+                "prediction": prediction,
+                "correct": prediction == gt,
                 "crops": int(len(group)),
-                "raw_probability": float(raw.get("raw_probability", 0.0) or 0.0),
             }
         )
-    groups = pd.DataFrame(rows)
+    groups = pd.DataFrame(grouped_rows)
     multi = groups[groups["crops"] >= 2]
     return {
         "groups": int(len(groups)),
@@ -197,6 +208,13 @@ def _temporal_metrics(
             "It is not production temporal accuracy because unreadable frames are excluded by definition."
         ),
     }
+
+
+def _sync_device(device: torch.device) -> None:
+    if device.type == "mps" and hasattr(torch, "mps"):
+        torch.mps.synchronize()
+    elif device.type == "cuda":
+        torch.cuda.synchronize(device)
 
 
 def _write_markdown(report: dict[str, Any], path: Path) -> None:
@@ -214,13 +232,14 @@ def _write_markdown(report: dict[str, Any], path: Path) -> None:
         f"- Checkpoint: `{report['model']['checkpoint']}`",
         f"- Device: `{report['model']['device']}`",
         f"- Inference wall time: {report['model']['inference_seconds']:.3f}s",
+        f"- Mean inference cost: {report['model']['milliseconds_per_crop']:.3f} ms/crop",
         "",
         "## Raw OCR accuracy",
         "",
-        f"- Exact accuracy: **{_pct(overall['exact_accuracy'])}** ({overall.get('correct', 0)}/{overall['rows']})",
+        f"- Exact accuracy: **{_pct(overall['exact_accuracy'])}** ({overall['correct']}/{overall['rows']})",
         f"- Top-3 number accuracy: **{_pct(overall['top3_accuracy'])}**",
         f"- Top-5 number accuracy: **{_pct(overall['top5_accuracy'])}**",
-        f"- Median raw probability on readable crops: {overall['median_raw_probability']:.4f}",
+        f"- Median raw probability on readable crops: {_fmt4(overall['median_raw_probability'])}",
         "",
         "### By split",
         "",
@@ -241,19 +260,17 @@ def _write_markdown(report: dict[str, Any], path: Path) -> None:
         "| --- | ---: | ---: | ---: |",
     ]
     for visibility, item in report["visibility_metrics"].items():
-        lines.append(
-            f"| {visibility} | {item['rows']} | {_pct(item['exact_accuracy'])} | {_pct(item['top3_accuracy'])} |"
-        )
+        lines.append(f"| {visibility} | {item['rows']} | {_pct(item['exact_accuracy'])} | {_pct(item['top3_accuracy'])} |")
 
     lines += [
         "",
         "## Confidence vs readability",
         "",
         f"- Readability AUROC using raw probability alone: {_pct(report['confidence']['readability_auroc'])}",
-        f"- Readable median raw probability: {report['confidence']['readable']['median']:.4f}",
-        f"- Unreadable median raw probability: {report['confidence']['unreadable']['median']:.4f}",
+        f"- Readable median raw probability: {_fmt4(report['confidence']['readable']['median'])}",
+        f"- Unreadable median raw probability: {_fmt4(report['confidence']['unreadable']['median'])}",
         "",
-        "A readability AUROC near 50% means raw model confidence does not separate readable from unreadable crops well; a high value would support an additional confidence-based abstention rule.",
+        "An AUROC near 50% means raw confidence does not separate readable from unreadable crops well; a high value would support an additional confidence-based abstention rule.",
         "",
         "## Temporal readable-crop aggregation",
         "",
@@ -284,12 +301,7 @@ def _write_markdown(report: dict[str, Any], path: Path) -> None:
             )
         lines.append("")
 
-    lines += [
-        "## Prediction distribution",
-        "",
-        "Most common raw predictions on readable GT crops:",
-        "",
-    ]
+    lines += ["## Prediction distribution", "", "Most common raw predictions on readable GT crops:", ""]
     for prediction, count in report["prediction_distribution"][:12]:
         lines.append(f"- `{prediction}`: {count}")
 
@@ -332,6 +344,7 @@ def main() -> int:
     missing = sorted(required - set(frame.columns))
     if missing:
         raise ValueError(f"Ground truth is missing required columns: {missing}")
+
     frame = _float_frame(frame)
     ocr = frame[
         (frame["dataset_role"] == "ocr")
@@ -352,35 +365,32 @@ def main() -> int:
     )
 
     tensors: list[torch.Tensor] = []
-    valid_indices: list[int] = []
-    for index, row in ocr.iterrows():
+    for _, row in ocr.iterrows():
         crop_path = gt_path.parent / str(row["torso_crop"])
         crop = cv2.imread(str(crop_path))
         if crop is None or crop.size == 0:
             raise FileNotFoundError(f"Missing/unreadable torso crop: {crop_path}")
         rgb = cv2.cvtColor(crop, cv2.COLOR_BGR2RGB)
         tensors.append(analyzer.transform(Image.fromarray(rgb)))
-        valid_indices.append(index)
 
     batch_size = max(1, int(args.batch_size))
     tens_prob_rows: list[np.ndarray] = []
     ones_prob_rows: list[np.ndarray] = []
+    _sync_device(analyzer.device)
     started = time.perf_counter()
     with torch.inference_mode():
         for start in range(0, len(tensors), batch_size):
             batch = torch.stack(tensors[start:start + batch_size]).to(analyzer.device)
             tens_logits, ones_logits = analyzer.number_model(batch)
-            tens_probs = torch.softmax(tens_logits, dim=1).detach().cpu().numpy()
-            ones_probs = torch.softmax(ones_logits, dim=1).detach().cpu().numpy()
-            tens_prob_rows.extend(tens_probs)
-            ones_prob_rows.extend(ones_probs)
+            tens_prob_rows.extend(torch.softmax(tens_logits, dim=1).detach().cpu().numpy())
+            ones_prob_rows.extend(torch.softmax(ones_logits, dim=1).detach().cpu().numpy())
+    _sync_device(analyzer.device)
     inference_seconds = time.perf_counter() - started
 
-    records = []
-    for position, index in enumerate(valid_indices):
-        row = ocr.iloc[index]
-        tens = tens_prob_rows[position].astype(float).tolist()
-        ones = ones_prob_rows[position].astype(float).tolist()
+    records: list[dict[str, Any]] = []
+    for index, row in ocr.iterrows():
+        tens = tens_prob_rows[index].astype(float).tolist()
+        ones = ones_prob_rows[index].astype(float).tolist()
         raw = analyzer._raw_prediction(tens, ones)
         scored = _number_scores(analyzer, tens, ones)
         top_numbers = [number for number, _ in scored[:5]]
@@ -402,12 +412,13 @@ def main() -> int:
     for split in ("train", "val", "test"):
         numeric_metrics[split] = _numeric_metrics(results[results["split"] == split])
 
-    visibility_metrics = {}
-    for visibility in sorted(results.loc[results["label_kind"] == "number", "visibility"].unique()):
-        visibility_metrics[str(visibility)] = _numeric_metrics(results[results["visibility"] == visibility])
+    visibility_metrics: dict[str, Any] = {}
+    visibilities = sorted(results.loc[results["label_kind"] == "number", "visibility"].astype(str).unique())
+    for visibility in visibilities:
+        visibility_metrics[visibility] = _numeric_metrics(results[results["visibility"] == visibility])
 
-    readable_prob = pd.to_numeric(results.loc[results["label_kind"] == "number", "raw_probability"], errors="coerce")
-    unreadable_prob = pd.to_numeric(results.loc[results["label_kind"] == "unreadable", "raw_probability"], errors="coerce")
+    readable_prob = results.loc[results["label_kind"] == "number", "raw_probability"]
+    unreadable_prob = results.loc[results["label_kind"] == "unreadable", "raw_probability"]
 
     numeric = results[results["label_kind"] == "number"].copy()
     prediction_counts = Counter(str(value or "invalid") for value in numeric["raw_canonical"].tolist())
@@ -421,9 +432,9 @@ def main() -> int:
         for (gt, prediction), count in confusion_counts.most_common()
     ]
 
-    class_metrics = []
-    for gt, group in numeric.groupby("jersey_gt_canonical", sort=lambda values: values):
-        exact = group["raw_canonical"] == group["jersey_gt_canonical"]
+    class_metrics: list[dict[str, Any]] = []
+    for gt, group in numeric.groupby("jersey_gt_canonical", sort=False):
+        exact = group["raw_canonical"].fillna("").astype(str) == group["jersey_gt_canonical"].astype(str)
         class_metrics.append(
             {
                 "jersey_gt": str(gt),
@@ -434,8 +445,8 @@ def main() -> int:
         )
     class_metrics.sort(key=lambda item: int(item["jersey_gt"]))
 
-    quality_gates = []
-    gate_path = None
+    quality_gates: list[dict[str, Any]] = []
+    gate_path: Path | None = None
     if args.quality_gate_report:
         gate_path = Path(args.quality_gate_report).expanduser().resolve()
     else:
@@ -443,6 +454,8 @@ def main() -> int:
         if candidate.exists():
             gate_path = candidate
     if gate_path is not None:
+        if not gate_path.exists():
+            raise FileNotFoundError(gate_path)
         gate_report = json.loads(gate_path.read_text(encoding="utf-8"))
         for candidate in gate_report.get("selected", []):
             gate = {
@@ -487,21 +500,25 @@ def main() -> int:
             "numeric_accuracy": "human-readable numeric GT crops only",
             "unreadable": "used only for confidence/readability diagnostics, not counted as an OCR number error",
             "quality_gate": "uses pre-existing calibrated thresholds without re-optimizing against OCR accuracy",
+            "temporal": "readable-only diagnostic upper bound; not production temporal accuracy",
         },
     }
 
     serializable = results.drop(columns=["_tens_probs", "_ones_probs"], errors="ignore").copy()
     serializable.to_csv(output_dir / "jersey_ocr_predictions.csv", index=False)
-    pd.DataFrame(confusions).to_csv(output_dir / "jersey_ocr_confusions.csv", index=False)
+    pd.DataFrame(confusions, columns=["gt", "prediction", "count"]).to_csv(
+        output_dir / "jersey_ocr_confusions.csv", index=False
+    )
     (output_dir / "jersey_ocr_benchmark.json").write_text(
         json.dumps(report, indent=2, ensure_ascii=False) + "\n", encoding="utf-8"
     )
     _write_markdown(report, output_dir / "jersey_ocr_benchmark.md")
 
+    overall = numeric_metrics["all"]
     print(f"benchmark={output_dir / 'jersey_ocr_benchmark.md'}")
     print(f"predictions={output_dir / 'jersey_ocr_predictions.csv'}")
-    print(f"exact_accuracy={numeric_metrics['all']['exact_accuracy']:.6f}")
-    print(f"top3_accuracy={numeric_metrics['all']['top3_accuracy']:.6f}")
+    print(f"exact_accuracy={overall['exact_accuracy']:.6f}")
+    print(f"top3_accuracy={overall['top3_accuracy']:.6f}")
     print(f"inference_ms_per_crop={report['model']['milliseconds_per_crop']:.3f}")
     return 0
 
