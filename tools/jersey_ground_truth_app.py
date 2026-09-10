@@ -75,6 +75,45 @@ def _valid_player_label(value: str) -> bool:
     return value == "unreadable" or (value.isdigit() and 0 <= int(value) <= 99)
 
 
+def _canonical_number(value: str) -> str:
+    value = str(value or "").strip()
+    if value.isdigit() and 0 <= int(value) <= 99:
+        return str(int(value))
+    return ""
+
+
+def _track_conflicts(
+    manifest: pd.DataFrame,
+    annotations: pd.DataFrame,
+) -> tuple[set[str], dict[tuple[str, str], list[str]]]:
+    numeric = annotations[
+        (annotations["subject_type"] == "player")
+        & annotations["jersey_gt"].str.fullmatch(r"\d{1,2}", na=False)
+    ].copy()
+    if numeric.empty:
+        return set(), {}
+
+    numeric["canonical_number"] = numeric["jersey_gt"].map(_canonical_number)
+    locations = manifest[["sample_id", "video", "track_id"]].copy()
+    joined = numeric.merge(locations, on="sample_id", how="inner")
+    conflicts: dict[tuple[str, str], list[str]] = {}
+    for (video, track_id), rows in joined.groupby(["video", "track_id"], sort=False):
+        labels = sorted(
+            {value for value in rows["canonical_number"].tolist() if value},
+            key=int,
+        )
+        if len(labels) > 1:
+            conflicts[(str(video), str(track_id))] = labels
+
+    conflict_ids: set[str] = set()
+    for (video, track_id), _labels in conflicts.items():
+        rows = manifest[
+            (manifest["video"] == video) & (manifest["track_id"] == track_id)
+        ]
+        conflict_ids.update(rows["sample_id"].astype(str).tolist())
+    return conflict_ids, conflicts
+
+
 def _save_rows(
     annotations: pd.DataFrame,
     sample_ids: list[str],
@@ -128,6 +167,7 @@ def main() -> None:
             "sample_id",
         ].tolist()
     )
+    conflict_ids, conflict_tracks = _track_conflicts(manifest, annotations)
 
     st.title("CourtFlux · Jersey OCR Ground Truth")
     st.caption(
@@ -139,7 +179,13 @@ def main() -> None:
         st.header("Queue")
         status = st.selectbox(
             "Status",
-            ["unreviewed", "needs subject review", "all", "reviewed"],
+            [
+                "unreviewed",
+                "needs subject review",
+                "track conflicts",
+                "all",
+                "reviewed",
+            ],
             index=0,
         )
         teams = ["all"] + sorted(
@@ -153,12 +199,16 @@ def main() -> None:
         st.session_state["reviewer"] = reviewer
         if needs_subject_ids:
             st.info(f"Legacy unreadable rows needing subject review: {len(needs_subject_ids)}")
+        if conflict_tracks:
+            st.warning(f"Tracks with conflicting numeric labels: {len(conflict_tracks)}")
 
     queue = manifest.copy()
     if status == "unreviewed":
         queue = queue[~queue["sample_id"].isin(reviewed_ids)]
     elif status == "needs subject review":
         queue = queue[queue["sample_id"].isin(needs_subject_ids)]
+    elif status == "track conflicts":
+        queue = queue[queue["sample_id"].isin(conflict_ids)]
     elif status == "reviewed":
         queue = queue[queue["sample_id"].isin(reviewed_ids)]
     if team_filter != "all":
@@ -172,7 +222,8 @@ def main() -> None:
     st.progress(reviewed / total if total else 0.0)
     st.write(
         f"Reviewed: **{reviewed}/{total}** · Current queue: **{len(queue)}** · "
-        f"Needs subject review: **{len(needs_subject_ids)}**"
+        f"Needs subject review: **{len(needs_subject_ids)}** · "
+        f"Conflict tracks: **{len(conflict_tracks)}**"
     )
 
     history_key = f"history:{manifest_path}"
@@ -214,6 +265,14 @@ def main() -> None:
         f"suggested team **{row.get('team_suggested', '') or 'unknown'}** · "
         f"sharpness {row.get('torso_sharpness', '')}"
     )
+
+    conflict_key = (str(row.get("video", "")), str(row.get("track_id", "")))
+    if conflict_key in conflict_tracks:
+        st.error(
+            "This track currently has conflicting numeric jersey labels: "
+            + ", ".join(conflict_tracks[conflict_key])
+            + ". Review every crop in the track for an annotation error or tracker ID switch."
+        )
 
     torso_path = manifest_path.parent / str(row["torso_crop"])
     player_path = manifest_path.parent / str(row["player_crop"])
