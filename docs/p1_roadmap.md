@@ -1,63 +1,85 @@
-# CourtFlux P1 Roadmap — Game State + Event Primitives
+# CourtFlux P1 Roadmap — Perception + Game State
 
 **Status:** CURRENT PHASE  
 **Entry condition:** P0 Vision Foundation Complete  
-**Primary objective:** build reliable player/game-state primitives and event evidence without requiring perfect ball tracking.
+**Primary objective:** produce stable, confidence-aware `PlayerState`, `BallState`, team and jersey identity evidence from broadcast basketball video.
 
-P1 follows the P0 product boundary:
+P1 is the boundary between raw perception and basketball understanding:
 
 ```text
-players + teams + court + temporal state
-                 ↓
-          possession / events
-                 ↑
-       ball when sufficiently reliable
+video
+  ↓
+player / ball / court perception
+  ↓
+tracking + temporal evidence
+  ↓
+team + jersey identity evidence
+  ↓
+PlayerState + BallState + CourtState
+  ↓
+──────────────────────────── P1 COMPLETE
+  ↓
+P2 basketball semantics / events / spatial reasoning
 ```
 
 `UNKNOWN` / abstention remains a valid output whenever evidence is insufficient.
 
 ---
 
-## P1 priorities
+## Product phase boundary
 
-The current execution order is:
+CourtFlux now uses the following hierarchy:
 
 ```text
-1. Player tracking baseline + evaluation
-2. RF-DETR as a player-detector challenger
-3. Jersey-number recognition improvement
-4. PlayerState + court state
-5. Possession + event primitives
-6. Basketball-specific semantic evidence as supporting signals
-7. Spatial analytics + event timeline
+P0 — Vision Foundation
+P1 — Perception + Game State
+P2 — Basketball Understanding
+P3 — Structured Basketball Analytics
+P4 — Tactical Intelligence
+```
+
+### P1 answers
+
+> Who/what is visible, where is it, and what identity/state evidence do we trust now?
+
+### P2 answers
+
+> What basketball action or game event is happening?
+
+### P3 answers
+
+> What structured statistics and summaries result from those events?
+
+### P4 answers
+
+> What do those patterns mean tactically?
+
+---
+
+## P1 execution order
+
+```text
+1. Player tracking baseline + evaluation                         ✅ complete
+2. RF-DETR player-detector challenger                            ✅ closed / not promoted
+3. Jersey identification                                         🔄 active validation
+4. Temporal Ball Tracker v1                                      ⏳ implemented / validate
+5. Ball Trajectory Consistency v1                                ⏳ implemented / validate
+6. CourtFlux detector model_v1.1.0 validation                    ⏳ after training
+7. BallState                                                     ⏳ pending
+8. PlayerState + CourtState                                      ⏳ pending
+9. Persistent team + jersey identity evidence                    ⏳ consolidate
+10. P1 integration / exit validation                             ⏳ pending
 
 SAM2: deferred / contingency backlog
 ```
 
-This ordering is intentional. SAM2 is not required to enter or complete the first P1 milestones. It should only be promoted if measured player-track continuity remains a material blocker after the baseline and detector/tracker work.
+The new `model_v1.1.0.pt` validation is a separate controlled comparison against `model_v1.0.0.pt`; it does not invalidate conclusions from jersey or ball experiments performed on the frozen baseline.
 
 ---
 
-## Technical references
+# P1.1 — Player Tracking Quality — COMPLETE
 
-P1 uses the following Roboflow material as **research/reference architecture**, not code to copy wholesale:
-
-- Basketball player detection/tracking/identification notebook:  
-  https://colab.research.google.com/github/roboflow-ai/notebooks/blob/main/notebooks/basketball-ai-how-to-detect-track-and-identify-basketball-players.ipynb
-- Basketball jersey-number OCR project:  
-  https://universe.roboflow.com/roboflow-jvuqo/basketball-jersey-numbers-ocr
-
-The useful ideas are evaluated independently inside the CourtFlux architecture and must beat the existing baseline before promotion.
-
----
-
-# P1.1 — Player Tracking Quality
-
-P1.1 begins by freezing and measuring the current player pipeline before tuning or replacing anything.
-
-## Baseline
-
-Current canonical player baseline:
+The canonical baseline was frozen and measured before changing detector/tracker behavior.
 
 ```text
 model            weights/model_v1.0.0.pt
@@ -67,19 +89,13 @@ imgsz            960
 player conf      0.10
 ```
 
-ByteTrack remains an available comparison path.
+The P1.1 evaluation contract includes:
 
-## Evaluation contract
-
-Primary metrics:
-
-- player recall / players visible vs detected;
+- player recall / players visible vs detected where GT supports it;
 - false player detections and referee leakage;
-- track fragmentation;
-- ID switches;
+- track fragmentation and ID-switch diagnostics;
 - average / median track duration;
-- missing-player frames;
-- duplicate tracks;
+- missing-player frames and duplicate tracks;
 - players per gameplay frame;
 - on-court track persistence;
 - `court_xy` continuity;
@@ -87,13 +103,13 @@ Primary metrics:
 - per-video robustness;
 - processing FPS / cost.
 
-The target is **stable enough track identity for game-state reasoning**, not perfect human identity.
+The target is **stable enough track identity for game-state reasoning**, not perfect long-term person re-identification.
 
-## RF-DETR challenger
+---
 
-RF-DETR is the first major challenger to the existing player detector.
+# P1.2 — RF-DETR Player Detector Challenger — CLOSED / NOT PROMOTED
 
-Intended experiment:
+RF-DETR was evaluated as a player-detector challenger under the same downstream tracking contract.
 
 ```text
 CourtFlux YOLO + same downstream tracking
@@ -101,258 +117,272 @@ CourtFlux YOLO + same downstream tracking
 RF-DETR player detection + same downstream tracking
 ```
 
-The comparison must isolate detector quality as much as possible. RF-DETR is promoted only if it produces a material improvement in player recall/track quality at acceptable runtime cost.
+The investigation is complete and RF-DETR is not promoted to the canonical player detector. The production/reference baseline remains CourtFlux YOLO `model_v1.0.0.pt` until a later versioned CourtFlux detector beats it under the same evaluation contract.
 
-No ball baseline is replaced by this experiment.
+No RF-DETR experiment changes the frozen P0 ball baseline.
 
 ---
 
-# P1 identity-support track — Jersey Number Recognition
+# P1.3 — Jersey Identification — ACTIVE
 
-Jersey recognition now takes priority over SAM2 as the next identity-support improvement once the P1.1 player baseline/evaluator is established.
-
-This does **not** move full player attribution out of P2. P1 may improve jersey evidence early because better track-level identity evidence helps debugging, validation and later event attribution.
+Jersey identification is an explicit P1 responsibility because it is part of the game-state identity evidence consumed by later basketball reasoning.
 
 Preferred architecture:
 
 ```text
 player track
     ↓
-player bbox
+player / torso crop
     ↓
-jersey-number region / candidate
+jersey-number recognizer
     ↓
-OCR or digit classifier
+confidence + uncertainty + abstention
     ↓
-confidence-aware observation
+temporal aggregation on track
     ↓
-temporal voting on track_id
+team + jersey evidence
     ↓
-confirmed team + jersey number
-    ↓
-roster identity when sufficiently reliable
+roster identity candidate when sufficiently reliable
 ```
 
-CourtFlux already has useful downstream primitives such as temporal observations, voting and identity locking. The main research target is improving the quality of the per-frame jersey-number evidence.
+The primary metric is **track-level jersey identity precision and coverage**, not only single-frame OCR accuracy.
 
-Evaluation should prioritize **track-level identity accuracy**, not only single-frame OCR accuracy.
+Required metrics include:
 
-Metrics should include:
-
-- OCR / classifier candidate accuracy;
+- readable-crop exact / top-k accuracy;
 - accepted observation precision;
 - observation coverage;
+- unreadable false-accept rate;
 - track-level jersey accuracy;
-- time-to-lock identity;
+- track-level coverage;
+- time to identity lock;
 - false identity lock rate;
-- number of usable observations per track;
+- usable observations per track;
 - runtime overhead.
 
-Potential challengers:
+Current investigation includes multiple discarded/diagnostic challengers and an uncertainty-aware ViT-B path. A model or policy is promoted only after train-calibrated thresholds are frozen and evaluated on held-out data.
 
-- current EasyOCR path — baseline;
-- jersey-region-specific OCR;
-- Roboflow jersey-number model / dataset-derived approach;
-- fine-tuned digit classifier;
-- confidence-weighted ensemble if justified by evidence.
+Roster constraints must never rewrite an unsupported model prediction into an apparently correct answer. `UNKNOWN` remains valid.
 
 ---
 
-# SAM2 — Deferred / contingency backlog
+# P1.4 — Temporal Ball Tracker v1 — IMPLEMENTED / VALIDATION PENDING
 
-SAM2 is explicitly **out of the active P1 critical path**.
+The temporal tracker consumes direct basketball detections and provides conservative short-gap temporal continuity.
 
-It remains a useful future challenger for:
+Core semantics:
 
-- severe player-track fragmentation;
-- recovery through hard occlusions;
-- mask-based foot-point estimation;
-- cleaner player crops for team/jersey analysis.
+- direct observations own state;
+- smoothed image-space velocity comes from direct detections only;
+- short gaps may be bridged with constant-velocity prediction;
+- predicted positions never recursively mutate direct-observation state;
+- long-gap reacquisition remains disabled;
+- after the prediction budget expires, the result becomes missing/`UNKNOWN`.
 
-SAM2 should be revisited only if the measured baseline shows that detector/tracker improvements cannot provide sufficiently stable player tracks.
+This step must be validated against the established ball-quality evaluation contract before promotion.
+
+---
+
+# P1.5 — Ball Trajectory Consistency v1 — IMPLEMENTED / VALIDATION PENDING
+
+Trajectory consistency ranks direct ball candidates using supporting motion evidence:
+
+- detector confidence;
+- position residual from temporal prediction;
+- velocity consistency;
+- acceleration consistency;
+- bounding-box size consistency.
+
+Motion quantities are normalized by frame geometry. The trajectory scorer does not own track state.
+
+A high-confidence but trajectory-inconsistent detection may be rejected in favor of a lower-confidence coherent candidate. If no candidate passes, CourtFlux falls back to the conservative short-gap temporal behavior and then to missing/`UNKNOWN`.
+
+---
+
+# P1.6 — CourtFlux Detector `model_v1.1.0.pt` Validation — PLANNED
+
+When the new detector training is complete, `model_v1.1.0.pt` is evaluated as a versioned CourtFlux candidate against the current canonical `model_v1.0.0.pt`.
+
+The comparison must keep the evaluation contract as constant as possible:
 
 ```text
-baseline player evaluation
-        ↓
-RF-DETR / tracker improvements
-        ↓
-track quality sufficient? ── yes → continue P1
-        │
-        no
-        ↓
-consider SAM2 challenger
+same V1–V5 evaluation footage
+same gameplay windows
+same imgsz=960 baseline contract
+same BoT-SORT downstream tracker
+same normalized tracking metrics
+same failure attribution
 ```
+
+The validation should answer:
+
+- does player detection improve across videos?
+- are false players / referee or staff leakage controlled?
+- does track persistence improve?
+- do short tracks / fragmentation decrease?
+- is ball/rim/backboard behavior preserved or improved where relevant?
+- what is the runtime impact?
+
+`model_v1.1.0.pt` becomes canonical only if it provides a clear system-level improvement without unacceptable regressions.
 
 ---
 
-# P1.2 — PlayerState + Court State
+# P1.7 — BallState
 
-Build a stable per-frame player representation:
+Create an explicit downstream ball-state contract so analytics never confuse observation, prediction and absence.
+
+Example states:
+
+```text
+OBSERVED
+PREDICTED
+MISSING
+UNKNOWN
+```
+
+A `BallState` should preserve at least:
+
+- image position / bbox when supported;
+- optional apparent/projected court position with provenance;
+- velocity / motion evidence;
+- direct-vs-predicted source;
+- age since last direct observation;
+- confidence / uncertainty;
+- validity flags.
+
+Low-confidence or expired evidence must produce `MISSING`/`UNKNOWN`, never a fabricated concrete ball state.
+
+---
+
+# P1.8 — PlayerState + CourtState
+
+Build a stable per-frame player representation that joins perception, tracking, team, jersey and court evidence.
+
+Example:
 
 ```json
 {
   "track_id": 17,
   "team": "FC Porto",
+  "jersey_number": 14,
+  "identity_confidence": 0.91,
   "court_xy": [12.4, 6.8],
   "velocity": [0.12, -0.04],
   "active_on_court": true,
-  "confidence": 0.93
+  "tracking_confidence": 0.93
 }
 ```
 
-This becomes the stable interface between perception and basketball reasoning.
+Fields may remain `UNKNOWN` independently. A strong track does not imply a known jersey, and a jersey candidate does not imply a fully resolved player identity.
+
+`PlayerState`, `BallState` and `CourtState` form the stable interface between P1 perception and P2 basketball reasoning.
 
 ---
 
-# P1.3 — Possession
+# P1.9 — Persistent Team + Jersey Identity Evidence
 
-Possession combines multiple evidence sources rather than depending on perfect ball tracking.
-
-Potential evidence:
+P1 owns enough identity persistence to support downstream event attribution:
 
 ```text
-high-confidence ball → player proximity
-player motion
-team continuity
-previous possessor
-court position
-basketball-specific semantic evidence
+track
+  ↓
+team evidence
+  ↓
+jersey evidence
+  ↓
+temporal confidence / lock
+  ↓
+roster candidate when supported
 ```
 
-Target states:
+P1 does **not** require perfect cross-game or cross-camera person ReID. Difficult identity merges may remain `UNKNOWN` rather than forcing a player.
+
+Advanced appearance/ReID or SAM2-style continuity remains a future challenger if measured failures justify it.
+
+---
+
+# P1.10 — Integration / Exit Validation
+
+P1 is complete when the system exposes confidence-aware, temporally coherent state objects suitable for basketball reasoning:
 
 ```text
-POSSESSED
-LOOSE
-IN_FLIGHT
-UNKNOWN
+PlayerState[]
+BallState
+CourtState
+identity evidence
+timestamps + provenance + uncertainty
 ```
 
-Semantic classes such as `player-in-possession`, when available and validated, are **supporting evidence**, never ground truth by themselves.
+The P1 exit contract requires:
+
+- stable player tracking baseline;
+- measured jersey identity policy with explicit abstention;
+- conservative temporal ball state;
+- trajectory-consistency behavior validated;
+- no forced player/jersey/ball state when evidence is weak;
+- reproducible diagnostics and failure attribution;
+- versioned detector baseline, including `model_v1.1.0` decision when available.
+
+P1 does **not** require possession, passes, shots, rebounds or spatial event analytics. Those move to P2.
 
 ---
 
-# P1.4 — Pass Candidates
+# P2 Preview — Basketball Understanding
 
-Infer pass candidates from possession transition:
+P2 consumes P1 state and answers **what is happening in basketball terms**.
 
 ```text
-Player A possession
-        ↓
-transition / loose / uncertain interval
-        ↓
-Player B possession
+PlayerState + BallState + CourtState
+                ↓
+            possession
+                ↓
+ semantic basketball evidence
+                ↓
+ pass / turnover / shot / rebound primitives
+                ↓
+       spatial interpretation
+                ↓
+           event timeline
 ```
 
-Same-team transition increases pass likelihood. Reliable ball trajectory can increase confidence but is not mandatory through the full event.
+Planned P2 lanes:
+
+- possession states and transitions;
+- pass candidates;
+- turnover candidates;
+- shot attempts and outcome evidence;
+- rebounds;
+- basketball-specific semantic evidence such as `player-in-possession`, `player-jump-shot`, `player-layup-dunk`, `player-shot-block`, `ball-in-basket` and `rim`;
+- spatial analytics using homography and stable state;
+- confidence-aware event timeline.
+
+Semantic detections remain **supporting evidence**. A single class must never force an event.
 
 ---
 
-# P1.5 — Turnover Candidates
+# SAM2 — Deferred / Contingency Backlog
 
-Detect team-possession transitions:
+SAM2 remains outside the active P1 critical path.
 
-```text
-Team A possession
-        ↓
-transition
-        ↓
-Team B possession
-```
+Potential future uses:
 
-Fine-grained steal/turnover attribution comes later.
+- severe player-track fragmentation;
+- recovery through hard occlusions;
+- mask-based foot-point estimation;
+- cleaner player crops for team/jersey analysis;
+- cross-track continuity where simpler evidence is insufficient.
 
----
-
-# P1.6 — Shot Attempts + Semantic Basketball Evidence
-
-Basketball-specific semantic detection is a P1 research lane and should feed the event layer as supporting evidence.
-
-Candidate signals include:
-
-```text
-player-in-possession
-player-jump-shot
-player-layup-dunk
-player-shot-block
-ball-in-basket
-rim
-```
-
-Shot-attempt inference may combine:
-
-- possessor state before release;
-- `jump-shot` / `layup-dunk` visual evidence;
-- reliable ball motion when available;
-- hoop proximity;
-- court location;
-- possession transition;
-- temporal consistency.
-
-The first milestone remains `SHOT_ATTEMPT`. A semantic class alone must never force an event.
+Promote SAM2 only if measured track/identity failures justify the additional complexity and runtime.
 
 ---
 
-# P1.7 — Rebounds
+## Promotion rules
 
-After a shot candidate:
-
-```text
-SHOT
- ↓
-loose / uncertain interval
- ↓
-new possession
-```
-
-Same-team recovery suggests an offensive rebound; opponent recovery suggests a defensive rebound.
-
----
-
-# P1.8 — Spatial Analytics
-
-Use homography and stable `PlayerState` for:
-
-- player heatmaps;
-- possession zones;
-- spacing;
-- paint occupancy;
-- corner occupancy;
-- transition positioning;
-- touch / shot-origin zones when confidence supports them.
-
----
-
-# P1.9 — Event Timeline
-
-Unify primitives into timestamped, confidence-aware events.
-
-Each event preserves:
-
-- confidence;
-- provenance / supporting evidence;
-- involved tracks and teams;
-- court location;
-- frame/time window;
-- uncertainty / abstention state.
-
-Example:
-
-```text
-12:32  FC Porto possession
-12:28  track17 → track8 pass candidate
-12:25  shot attempt
-12:23  Ovarense rebound candidate
-```
-
----
-
-## P1 promotion rules
-
-1. **Measure before replacing.** Current CourtFlux YOLO + BoT-SORT remains the baseline until a challenger beats it.
-2. **One variable at a time.** Detector, tracker, OCR and semantic models should be evaluated independently where possible.
-3. **No forced state.** Unknown player, possessor, jersey or event states are valid.
-4. **Ball quality is parallel.** Ball evidence improves confidence but does not block P1.
-5. **Semantic detection is evidence.** `player-in-possession`, `jump-shot`, etc. do not become event truth by themselves.
-6. **Jersey before SAM2.** Jersey-number evidence is the active identity-support priority; SAM2 remains deferred unless track continuity data justifies it.
-7. **Keep existing videos.** Use the established CourtFlux evaluation footage for controlled comparisons before introducing additional footage.
+1. **Measure before replacing.** A baseline remains canonical until a challenger beats it.
+2. **One variable at a time.** Detector, tracker and jersey models/policies should be isolated where possible.
+3. **No forced state.** Unknown player, jersey, ball or court state is valid.
+4. **Ball quality remains measurable.** Ball evidence is used only when sufficiently reliable.
+5. **Jersey is P1 identity evidence.** Roster constraints may validate evidence but must not manufacture it.
+6. **Basketball semantics are P2.** Possession/event classes and spatial event reasoning do not belong in the P1 exit criteria.
+7. **Keep controlled footage.** Use established evaluation footage for comparisons before expanding datasets.
+8. **Version detector promotions.** `model_v1.1.0.pt` must beat `model_v1.0.0.pt` before becoming canonical.
