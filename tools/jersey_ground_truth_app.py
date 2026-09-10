@@ -19,6 +19,9 @@ ANNOTATION_FIELDS = [
     "notes",
     "annotated_at",
 ]
+TRACK_REVIEW_FIELDS = [
+    "video", "track_id", "labels", "resolution", "reviewer", "notes", "reviewed_at",
+]
 SUBJECT_TYPES = ["player", "referee", "cameraman_staff", "other_non_player", "unknown"]
 VISIBILITY = ["clear", "partial", "unreadable"]
 SUBJECT_LABELS = {
@@ -35,6 +38,7 @@ def _args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(add_help=False)
     parser.add_argument("--manifest", required=True)
     parser.add_argument("--annotations")
+    parser.add_argument("--track-reviews")
     parser.add_argument("--reviewer", default="")
     args, _ = parser.parse_known_args()
     return args
@@ -47,12 +51,19 @@ def _read_annotations(path: Path) -> pd.DataFrame:
     for column in ANNOTATION_FIELDS:
         if column not in frame.columns:
             frame[column] = ""
-
-    # Numeric legacy labels prove that the subject was treated as a player. Legacy
-    # unreadable labels stay unresolved because some were referees/camera staff.
     numeric = frame["jersey_gt"].str.fullmatch(r"\d{1,2}", na=False)
     frame.loc[numeric & (frame["subject_type"] == ""), "subject_type"] = "player"
     return frame[ANNOTATION_FIELDS]
+
+
+def _read_track_reviews(path: Path) -> pd.DataFrame:
+    if not path.exists() or path.stat().st_size == 0:
+        return pd.DataFrame(columns=TRACK_REVIEW_FIELDS)
+    frame = pd.read_csv(path, dtype=str, keep_default_na=False)
+    for column in TRACK_REVIEW_FIELDS:
+        if column not in frame.columns:
+            frame[column] = ""
+    return frame[TRACK_REVIEW_FIELDS]
 
 
 def _atomic_write(path: Path, frame: pd.DataFrame) -> None:
@@ -81,9 +92,50 @@ def _canonical_number(value: str) -> str:
     return ""
 
 
+def _labels_token(values: list[str]) -> str:
+    return "|".join(sorted({_canonical_number(value) for value in values if _canonical_number(value)}, key=int))
+
+
+def _review_for(
+    track_reviews: pd.DataFrame,
+    video: str,
+    track_id: str,
+) -> dict[str, str] | None:
+    rows = track_reviews[
+        (track_reviews["video"] == video) & (track_reviews["track_id"] == track_id)
+    ]
+    if rows.empty:
+        return None
+    return {field: str(rows.iloc[-1].get(field, "")) for field in TRACK_REVIEW_FIELDS}
+
+
+def _save_track_review(
+    track_reviews: pd.DataFrame,
+    video: str,
+    track_id: str,
+    labels: list[str],
+    reviewer: str,
+    notes: str,
+) -> pd.DataFrame:
+    track_reviews = track_reviews[
+        ~((track_reviews["video"] == video) & (track_reviews["track_id"] == track_id))
+    ].copy()
+    row = {
+        "video": video,
+        "track_id": track_id,
+        "labels": _labels_token(labels),
+        "resolution": "confirmed_id_switch",
+        "reviewer": reviewer,
+        "notes": notes,
+        "reviewed_at": datetime.now(timezone.utc).isoformat(),
+    }
+    return pd.concat([track_reviews, pd.DataFrame([row])], ignore_index=True)[TRACK_REVIEW_FIELDS]
+
+
 def _track_conflicts(
     manifest: pd.DataFrame,
     annotations: pd.DataFrame,
+    track_reviews: pd.DataFrame,
 ) -> dict[tuple[str, str], dict[str, object]]:
     numeric = annotations[
         (annotations["subject_type"] == "player")
@@ -98,19 +150,24 @@ def _track_conflicts(
 
     conflicts: dict[tuple[str, str], dict[str, object]] = {}
     for (video, track_id), rows in joined.groupby(["video", "track_id"], sort=False):
-        labels = sorted(
-            {value for value in rows["canonical_number"].tolist() if value},
-            key=int,
-        )
+        labels = sorted({value for value in rows["canonical_number"].tolist() if value}, key=int)
         if len(labels) <= 1:
             continue
-        track_rows = manifest[
-            (manifest["video"] == str(video)) & (manifest["track_id"] == str(track_id))
-        ]
-        conflicts[(str(video), str(track_id))] = {
+        video = str(video)
+        track_id = str(track_id)
+        track_rows = manifest[(manifest["video"] == video) & (manifest["track_id"] == track_id)]
+        review = _review_for(track_reviews, video, track_id)
+        confirmed = bool(
+            review
+            and review.get("resolution") == "confirmed_id_switch"
+            and review.get("labels") == _labels_token(labels)
+        )
+        conflicts[(video, track_id)] = {
             "labels": labels,
             "samples": int(len(track_rows)),
             "numeric_samples": int(len(rows)),
+            "confirmed": confirmed,
+            "review": review,
         }
     return conflicts
 
@@ -151,8 +208,11 @@ def main() -> None:
     manifest_path = Path(args.manifest).expanduser().resolve()
     annotations_path = (
         Path(args.annotations).expanduser().resolve()
-        if args.annotations
-        else manifest_path.parent / "annotations.csv"
+        if args.annotations else manifest_path.parent / "annotations.csv"
+    )
+    track_reviews_path = (
+        Path(args.track_reviews).expanduser().resolve()
+        if args.track_reviews else manifest_path.parent / "track_reviews.csv"
     )
     if not manifest_path.exists():
         st.error(f"Manifest not found: {manifest_path}")
@@ -160,6 +220,7 @@ def main() -> None:
 
     manifest = pd.read_csv(manifest_path, dtype=str, keep_default_na=False)
     annotations = _read_annotations(annotations_path)
+    track_reviews = _read_track_reviews(track_reviews_path)
     reviewed_ids = set(annotations["sample_id"].tolist())
     needs_subject_ids = set(
         annotations.loc[
@@ -168,7 +229,10 @@ def main() -> None:
             "sample_id",
         ].tolist()
     )
-    conflict_tracks = _track_conflicts(manifest, annotations)
+    conflict_tracks = _track_conflicts(manifest, annotations, track_reviews)
+    unresolved_conflicts = {
+        key: info for key, info in conflict_tracks.items() if not bool(info["confirmed"])
+    }
 
     st.title("CourtFlux · Jersey OCR Ground Truth")
     st.caption(
@@ -186,26 +250,32 @@ def main() -> None:
         )
 
         if status == "track conflicts" and conflict_tracks:
-            conflict_keys = sorted(conflict_tracks, key=lambda item: int(item[1]))
+            conflict_keys = sorted(
+                conflict_tracks,
+                key=lambda item: (bool(conflict_tracks[item]["confirmed"]), int(item[1])),
+            )
             conflict_labels = {}
             for key in conflict_keys:
                 info = conflict_tracks[key]
                 numbers = "/".join(info["labels"])
+                state = "✅ confirmed" if info["confirmed"] else "⬜ needs confirmation"
                 conflict_labels[key] = (
-                    f"Track {key[1]} → {numbers} "
-                    f"({info['samples']} crops, {info['numeric_samples']} numeric)"
+                    f"Track {key[1]} → {numbers} · {state} "
+                    f"({info['samples']} crops)"
                 )
             selected_conflict = st.selectbox(
                 "Conflict track",
                 conflict_keys,
                 format_func=lambda key: conflict_labels[key],
-                help="Review one conflicting track at a time.",
+                help="A confirmation is stored separately and tied to the exact current labels.",
             )
-            st.caption(f"{len(conflict_tracks)} conflicting tracks remaining")
+            st.caption(
+                f"{len(unresolved_conflicts)} need confirmation · "
+                f"{len(conflict_tracks) - len(unresolved_conflicts)} confirmed"
+            )
 
         teams = ["all"] + sorted(
-            value for value in manifest.get("team_suggested", pd.Series(dtype=str)).unique()
-            if value
+            value for value in manifest.get("team_suggested", pd.Series(dtype=str)).unique() if value
         )
         team_filter = st.selectbox("Suggested team", teams)
         track_filter = ""
@@ -221,8 +291,9 @@ def main() -> None:
             with st.expander("All conflict tracks", expanded=status == "track conflicts"):
                 for key in sorted(conflict_tracks, key=lambda item: int(item[1])):
                     info = conflict_tracks[key]
+                    icon = "✅" if info["confirmed"] else "⬜"
                     st.write(
-                        f"Track **{key[1]}** → **{' / '.join(info['labels'])}** "
+                        f"{icon} Track **{key[1]}** → **{' / '.join(info['labels'])}** "
                         f"· {info['samples']} crops"
                     )
 
@@ -254,16 +325,23 @@ def main() -> None:
     st.write(
         f"Reviewed: **{reviewed}/{total}** · Current queue: **{len(queue)}** · "
         f"Needs subject review: **{len(needs_subject_ids)}** · "
-        f"Conflict tracks: **{len(conflict_tracks)}**"
+        f"Unconfirmed conflict tracks: **{len(unresolved_conflicts)}**"
     )
 
     if status == "track conflicts" and selected_conflict is not None:
         info = conflict_tracks[selected_conflict]
-        st.warning(
-            f"Reviewing track {selected_conflict[1]} with conflicting labels "
-            f"{' / '.join(info['labels'])}. Compare every crop in timestamp order. "
-            "If this is a real ID switch, keep both jersey labels and use different identity_group values."
-        )
+        if info["confirmed"]:
+            review = info.get("review") or {}
+            st.success(
+                f"Track {selected_conflict[1]} is confirmed as a tracker ID switch for labels "
+                f"{' / '.join(info['labels'])} by {review.get('reviewer', 'reviewer')}."
+            )
+        else:
+            st.warning(
+                f"Reviewing track {selected_conflict[1]} with conflicting labels "
+                f"{' / '.join(info['labels'])}. If the labels are both correct and this is a real "
+                "tracker ID switch, confirm it below after checking the crops."
+            )
 
     if queue.empty:
         st.success("No samples match the current filters.")
@@ -323,8 +401,7 @@ def main() -> None:
             st.error(f"Missing crop: {player_path}")
 
     teams_for_gt = [""] + sorted(
-        value for value in manifest.get("team_suggested", pd.Series(dtype=str)).unique()
-        if value
+        value for value in manifest.get("team_suggested", pd.Series(dtype=str)).unique() if value
     )
     current_team = current.get("team_gt", "")
     if current_team and current_team not in teams_for_gt:
@@ -376,11 +453,9 @@ def main() -> None:
         "Identity group (optional, same physical player across fragmented tracks)",
         value=current.get("identity_group", ""),
         key=f"identity:{form_key}",
-        help="For a confirmed ID switch, give each physical player a different identity_group.",
+        help="For a confirmed ID switch, identity_group can additionally identify the physical player.",
     ).strip()
-    notes = st.text_area(
-        "Notes", value=current.get("notes", ""), key=f"notes:{form_key}"
-    ).strip()
+    notes = st.text_area("Notes", value=current.get("notes", ""), key=f"notes:{form_key}").strip()
 
     propagate = st.checkbox(
         "Apply this annotation to every sample in this video+track",
@@ -474,6 +549,35 @@ def main() -> None:
 
     if status == "track conflicts" and selected_conflict is not None:
         st.divider()
+        info = conflict_tracks[selected_conflict]
+        st.subheader("Track conflict review")
+        if info["confirmed"]:
+            review = info.get("review") or {}
+            st.success(
+                f"Confirmed ID switch · labels {review.get('labels', '')} · "
+                f"reviewer {review.get('reviewer', '')} · {review.get('reviewed_at', '')}"
+            )
+        else:
+            review_notes = st.text_input(
+                "Conflict review notes (optional)",
+                value="Manual review confirmed both jersey labels are correct",
+                key=f"conflict_notes:{selected_conflict[1]}",
+            )
+            if st.button("Confirm reviewed tracker ID switch", type="primary"):
+                if not reviewer.strip():
+                    st.error("Reviewer is required before confirming an ID switch.")
+                else:
+                    updated_reviews = _save_track_review(
+                        track_reviews,
+                        selected_conflict[0],
+                        selected_conflict[1],
+                        list(info["labels"]),
+                        reviewer.strip(),
+                        review_notes.strip(),
+                    )
+                    _atomic_write(track_reviews_path, updated_reviews)
+                    st.rerun()
+
         st.subheader("Current track labels")
         track_sample_ids = set(queue["sample_id"].astype(str))
         track_annotations = annotations[annotations["sample_id"].isin(track_sample_ids)].copy()
@@ -486,6 +590,7 @@ def main() -> None:
 
     st.divider()
     st.caption(f"Annotations file: {annotations_path}")
+    st.caption(f"Track reviews file: {track_reviews_path}")
 
 
 if __name__ == "__main__":
