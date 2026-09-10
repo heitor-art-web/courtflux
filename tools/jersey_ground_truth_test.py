@@ -7,6 +7,7 @@ from pathlib import Path
 from jersey_ground_truth import (
     ANNOTATION_FIELDS,
     MANIFEST_FIELDS,
+    TRACK_REVIEW_FIELDS,
     _label_kind,
     _normalize_annotation_row,
     _split_for_group,
@@ -46,6 +47,7 @@ def main() -> int:
         root = Path(temp)
         manifest = root / "manifest.csv"
         annotations = root / "annotations.csv"
+        track_reviews = root / "track_reviews.csv"
         base = {field: "" for field in MANIFEST_FIELDS}
         rows = []
         for index in (1, 2, 3):
@@ -98,6 +100,26 @@ def main() -> int:
         a2["jersey_gt"] = "7"
         _write(annotations, ANNOTATION_FIELDS, [a1, a2, a3])
         _, errors = _validate_and_join(manifest, annotations)
+        assert any("track conflict" in error for error in errors)
+
+        review = {field: "" for field in TRACK_REVIEW_FIELDS}
+        review.update(
+            {
+                "video": "/tmp/game.mp4",
+                "track_id": "10",
+                "labels": "7|14",
+                "resolution": "confirmed_id_switch",
+                "reviewer": "test",
+                "reviewed_at": "2026-09-10T12:00:00+00:00",
+            }
+        )
+        _write(track_reviews, TRACK_REVIEW_FIELDS, [review])
+        _, errors = _validate_and_join(manifest, annotations, track_reviews)
+        assert not errors
+
+        review["labels"] = "6|14"
+        _write(track_reviews, TRACK_REVIEW_FIELDS, [review])
+        _, errors = _validate_and_join(manifest, annotations, track_reviews)
         assert any("track conflict" in error for error in errors)
 
         legacy_bad = {
