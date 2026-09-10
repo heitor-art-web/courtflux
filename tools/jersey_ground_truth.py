@@ -30,6 +30,7 @@ VALID_SUBJECT_TYPES = {
     "unknown",
 }
 NON_PLAYER_SUBJECT_TYPES = {"referee", "cameraman_staff", "other_non_player"}
+VALID_TRACK_REVIEW_RESOLUTIONS = {"confirmed_id_switch"}
 
 MANIFEST_FIELDS = [
     "sample_id", "video", "frame_id", "timestamp_sec", "track_id",
@@ -41,6 +42,9 @@ MANIFEST_FIELDS = [
 ANNOTATION_FIELDS = [
     "sample_id", "subject_type", "jersey_gt", "visibility", "team_gt",
     "identity_group", "reviewer", "notes", "annotated_at",
+]
+TRACK_REVIEW_FIELDS = [
+    "video", "track_id", "labels", "resolution", "reviewer", "notes", "reviewed_at",
 ]
 
 
@@ -127,6 +131,47 @@ def _normalize_annotation_row(row: dict[str, str]) -> dict[str, str]:
     if not normalized["subject_type"] and kind == "number":
         normalized["subject_type"] = "player"
     return normalized
+
+
+def _canonical_labels(values: set[str] | list[str]) -> list[str]:
+    labels = {
+        str(int(value))
+        for value in values
+        if str(value or "").strip().isdigit() and 0 <= int(str(value).strip()) <= 99
+    }
+    return sorted(labels, key=int)
+
+
+def _labels_token(values: set[str] | list[str]) -> str:
+    return "|".join(_canonical_labels(values))
+
+
+def _read_track_review_index(path: Path | None) -> tuple[dict[tuple[str, str], dict[str, str]], list[str]]:
+    if path is None or not path.exists() or path.stat().st_size == 0:
+        return {}, []
+    rows = _read_csv(path)
+    index: dict[tuple[str, str], dict[str, str]] = {}
+    errors: list[str] = []
+    for raw in rows:
+        row = {field: str(raw.get(field, "") or "").strip() for field in TRACK_REVIEW_FIELDS}
+        video = row["video"]
+        track_id = row["track_id"]
+        if not video or not track_id:
+            errors.append("track_reviews contains a row without video or track_id")
+            continue
+        if row["resolution"] not in VALID_TRACK_REVIEW_RESOLUTIONS:
+            errors.append(
+                f"track_reviews video={Path(video).name} track_id={track_id}: invalid resolution "
+                f"{row['resolution']!r}"
+            )
+            continue
+        if not row["reviewer"]:
+            errors.append(
+                f"track_reviews video={Path(video).name} track_id={track_id}: reviewer is required"
+            )
+            continue
+        index[(video, track_id)] = row
+    return index, errors
 
 
 def _split_for_group(group: str, seed: int, train: float, val: float) -> str:
@@ -272,6 +317,9 @@ def extract(args: argparse.Namespace) -> int:
     annotations_path = output_dir / "annotations.csv"
     if not annotations_path.exists():
         _write_csv(annotations_path, ANNOTATION_FIELDS, [])
+    track_reviews_path = output_dir / "track_reviews.csv"
+    if not track_reviews_path.exists():
+        _write_csv(track_reviews_path, TRACK_REVIEW_FIELDS, [])
 
     metadata = {
         "created_at": _utc_now(),
@@ -297,6 +345,7 @@ def extract(args: argparse.Namespace) -> int:
             "player_visibility": sorted(PLAYER_VISIBILITY),
             "non_player": "use jersey_gt=not_applicable and visibility=not_applicable",
             "identity_group": "optional physical-player group used to prevent split leakage",
+            "track_reviews": "confirmed ID switches store the exact conflicting label set reviewed by a human",
             "quality": "retain blurry/unreadable player crops so an OCR quality gate can be calibrated later",
         },
     }
@@ -305,17 +354,21 @@ def extract(args: argparse.Namespace) -> int:
     )
     print(f"[GT EXTRACT] manifest={manifest_path}")
     print(f"[GT EXTRACT] annotations={annotations_path}")
+    print(f"[GT EXTRACT] track_reviews={track_reviews_path}")
     print(f"[GT EXTRACT] samples={len(rows)} tracks={len(track_counts)}")
     return 0
 
 
 def _validate_and_join(
-    manifest_path: Path, annotations_path: Path
+    manifest_path: Path,
+    annotations_path: Path,
+    track_reviews_path: Path | None = None,
 ) -> tuple[list[dict[str, str]], list[str]]:
     manifest = _read_csv(manifest_path)
     raw_annotations = _read_csv(annotations_path) if annotations_path.exists() else []
     annotations = [_normalize_annotation_row(row) for row in raw_annotations]
-    errors: list[str] = []
+    review_index, review_errors = _read_track_review_index(track_reviews_path)
+    errors: list[str] = list(review_errors)
     manifest_by_id: dict[str, dict[str, str]] = {}
 
     for row in manifest:
@@ -359,25 +412,21 @@ def _validate_and_join(
 
         if subject_type == "player":
             if kind not in {"number", "unreadable"}:
-                errors.append(
-                    f"{sample_id}: player jersey_gt must be 0-99 or unreadable"
-                )
+                errors.append(f"{sample_id}: player jersey_gt must be 0-99 or unreadable")
             if visibility not in PLAYER_VISIBILITY:
                 errors.append(
                     f"{sample_id}: player visibility must be one of {sorted(PLAYER_VISIBILITY)}"
                 )
         else:
             if kind != "not_applicable":
-                errors.append(
-                    f"{sample_id}: non-player/unknown jersey_gt must be not_applicable"
-                )
+                errors.append(f"{sample_id}: non-player/unknown jersey_gt must be not_applicable")
             if visibility != NON_PLAYER_VISIBILITY:
                 errors.append(
                     f"{sample_id}: non-player/unknown visibility must be not_applicable"
                 )
 
     joined: list[dict[str, str]] = []
-    track_numbers: defaultdict[tuple[str, str], set[str]] = defaultdict(set)
+    track_rows: defaultdict[tuple[str, str], list[dict[str, str]]] = defaultdict(list)
     for sample_id, manifest_row in manifest_by_id.items():
         annotation = annotation_by_id.get(sample_id, {})
         row = dict(manifest_row)
@@ -401,26 +450,63 @@ def _validate_and_join(
 
         if subject_type == "player" and row["label_kind"] == "number":
             key = (row.get("video", ""), row.get("track_id", ""))
-            track_numbers[key].add(str(int(row["jersey_gt"])))
+            track_rows[key].append(row)
 
-    for (video, track_id), numbers in sorted(track_numbers.items()):
-        if len(numbers) > 1:
+    for (video, track_id), rows in sorted(track_rows.items()):
+        labels = _canonical_labels([row["jersey_gt"] for row in rows])
+        if len(labels) <= 1:
+            continue
+
+        identity_to_labels: defaultdict[str, set[str]] = defaultdict(set)
+        all_have_identity = True
+        for row in rows:
+            identity = row.get("identity_group", "").strip()
+            if not identity:
+                all_have_identity = False
+                break
+            identity_to_labels[identity].add(str(int(row["jersey_gt"])))
+        identity_resolved = (
+            all_have_identity
+            and bool(identity_to_labels)
+            and all(len(values) == 1 for values in identity_to_labels.values())
+            and len(identity_to_labels) >= 2
+        )
+
+        review = review_index.get((video, track_id))
+        review_resolved = bool(
+            review
+            and review.get("resolution") == "confirmed_id_switch"
+            and review.get("labels") == _labels_token(labels)
+        )
+
+        if not identity_resolved and not review_resolved:
             errors.append(
                 f"track conflict: video={Path(video).name} track_id={track_id} has labels "
-                f"{sorted(numbers)}; review for an ID switch or annotation error"
+                f"{labels}; correct the annotation, assign distinct identity_group values, or confirm "
+                "the ID switch in track_reviews"
             )
+
     return joined, errors
 
 
-def validate(args: argparse.Namespace) -> int:
+def _paths_from_args(args: argparse.Namespace) -> tuple[Path, Path, Path]:
     manifest_path = Path(args.manifest).expanduser().resolve()
     annotations_path = (
         Path(args.annotations).expanduser().resolve()
         if args.annotations else manifest_path.parent / "annotations.csv"
     )
+    track_reviews_path = (
+        Path(args.track_reviews).expanduser().resolve()
+        if getattr(args, "track_reviews", None) else manifest_path.parent / "track_reviews.csv"
+    )
+    return manifest_path, annotations_path, track_reviews_path
+
+
+def validate(args: argparse.Namespace) -> int:
+    manifest_path, annotations_path, track_reviews_path = _paths_from_args(args)
     if not manifest_path.exists():
         raise FileNotFoundError(manifest_path)
-    joined, errors = _validate_and_join(manifest_path, annotations_path)
+    joined, errors = _validate_and_join(manifest_path, annotations_path, track_reviews_path)
     kinds = Counter(row["label_kind"] for row in joined)
     subjects = Counter(row.get("subject_type", "") or "missing" for row in joined)
     roles = Counter(row.get("dataset_role", "") for row in joined)
@@ -429,8 +515,10 @@ def validate(args: argparse.Namespace) -> int:
         for row in joined
         if row.get("subject_type") == "player" and row["label_kind"] == "number"
     )
+    review_index, _ = _read_track_review_index(track_reviews_path)
     reviewed_rows = sum(
-        1 for row in joined if row.get("dataset_role") in {"ocr", "detector_negative", "excluded_unknown"}
+        1 for row in joined
+        if row.get("dataset_role") in {"ocr", "detector_negative", "excluded_unknown"}
     )
     summary = {
         "manifest_rows": len(joined),
@@ -443,6 +531,9 @@ def validate(args: argparse.Namespace) -> int:
         "not_applicable_rows": kinds["not_applicable"],
         "missing_rows": kinds["missing"],
         "invalid_rows": kinds["invalid"],
+        "confirmed_id_switch_tracks": sum(
+            row.get("resolution") == "confirmed_id_switch" for row in review_index.values()
+        ),
         "subject_distribution": dict(sorted(subjects.items())),
         "numeric_distribution": dict(sorted(numbers.items(), key=lambda item: int(item[0]))),
         "errors": errors,
@@ -452,16 +543,12 @@ def validate(args: argparse.Namespace) -> int:
 
 
 def export(args: argparse.Namespace) -> int:
-    manifest_path = Path(args.manifest).expanduser().resolve()
-    annotations_path = (
-        Path(args.annotations).expanduser().resolve()
-        if args.annotations else manifest_path.parent / "annotations.csv"
-    )
+    manifest_path, annotations_path, track_reviews_path = _paths_from_args(args)
     output_path = (
         Path(args.output).expanduser().resolve()
         if args.output else manifest_path.parent / "ground_truth.csv"
     )
-    joined, errors = _validate_and_join(manifest_path, annotations_path)
+    joined, errors = _validate_and_join(manifest_path, annotations_path, track_reviews_path)
     if errors:
         for error in errors:
             print(f"ERROR: {error}", file=sys.stderr)
@@ -490,6 +577,7 @@ def export(args: argparse.Namespace) -> int:
         field for field in ANNOTATION_FIELDS if field != "sample_id"
     ] + ["label_kind", "ocr_eligible", "dataset_role", "split_group", "split"]
     _write_csv(output_path, export_fields, reviewed)
+    review_index, _ = _read_track_review_index(track_reviews_path)
     report = {
         "created_at": _utc_now(),
         "ground_truth": str(output_path),
@@ -497,6 +585,9 @@ def export(args: argparse.Namespace) -> int:
         "ocr_eligible_rows": sum(row["ocr_eligible"] == "true" for row in reviewed),
         "detector_negative_rows": sum(row["dataset_role"] == "detector_negative" for row in reviewed),
         "unknown_subject_rows": sum(row["dataset_role"] == "excluded_unknown" for row in reviewed),
+        "confirmed_id_switch_tracks": sum(
+            row.get("resolution") == "confirmed_id_switch" for row in review_index.values()
+        ),
         "split_counts": dict(Counter(row["split"] for row in reviewed)),
         "label_counts": dict(Counter(row["label_kind"] for row in reviewed)),
         "subject_counts": dict(Counter(row.get("subject_type", "") for row in reviewed)),
@@ -510,6 +601,10 @@ def export(args: argparse.Namespace) -> int:
         "ocr_policy": (
             "Only dataset_role=ocr / ocr_eligible=true rows are jersey OCR samples. "
             "Non-player detections remain in the ground truth as detector_negative evidence."
+        ),
+        "track_conflict_policy": (
+            "A multi-number track must be corrected, separated by explicit identity_group values, "
+            "or confirmed as an ID switch in track_reviews.csv for the exact current label set."
         ),
     }
     output_path.with_suffix(".summary.json").write_text(
@@ -546,11 +641,13 @@ def build_parser() -> argparse.ArgumentParser:
     p = sub.add_parser("validate", help="Validate manifest plus manual annotations")
     p.add_argument("--manifest", required=True)
     p.add_argument("--annotations")
+    p.add_argument("--track-reviews")
     p.set_defaults(func=validate)
 
     p = sub.add_parser("export", help="Export reviewed GT with grouped train/val/test split")
     p.add_argument("--manifest", required=True)
     p.add_argument("--annotations")
+    p.add_argument("--track-reviews")
     p.add_argument("--output")
     p.add_argument("--seed", type=int, default=20260910)
     p.add_argument("--train", type=float, default=0.70)
