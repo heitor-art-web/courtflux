@@ -9,10 +9,26 @@ import pandas as pd
 import streamlit as st
 
 ANNOTATION_FIELDS = [
-    "sample_id", "jersey_gt", "visibility", "team_gt", "identity_group",
-    "reviewer", "notes", "annotated_at",
+    "sample_id",
+    "subject_type",
+    "jersey_gt",
+    "visibility",
+    "team_gt",
+    "identity_group",
+    "reviewer",
+    "notes",
+    "annotated_at",
 ]
+SUBJECT_TYPES = ["player", "referee", "cameraman_staff", "other_non_player", "unknown"]
 VISIBILITY = ["clear", "partial", "unreadable"]
+SUBJECT_LABELS = {
+    "": "— needs review —",
+    "player": "Player",
+    "referee": "Referee",
+    "cameraman_staff": "Cameraman / staff",
+    "other_non_player": "Other non-player",
+    "unknown": "Unknown subject",
+}
 
 
 def _args() -> argparse.Namespace:
@@ -31,6 +47,12 @@ def _read_annotations(path: Path) -> pd.DataFrame:
     for column in ANNOTATION_FIELDS:
         if column not in frame.columns:
             frame[column] = ""
+
+    # Backward-compatible migration: a numeric jersey label proves the subject was
+    # treated as a player. Legacy unreadable rows stay blank because they may contain
+    # referees/camera staff and need one short subject-type review pass.
+    numeric = frame["jersey_gt"].str.fullmatch(r"\d{1,2}", na=False)
+    frame.loc[numeric & (frame["subject_type"] == ""), "subject_type"] = "player"
     return frame[ANNOTATION_FIELDS]
 
 
@@ -48,7 +70,7 @@ def _annotation_for(frame: pd.DataFrame, sample_id: str) -> dict[str, str]:
     return {field: str(rows.iloc[-1].get(field, "")) for field in ANNOTATION_FIELDS}
 
 
-def _valid_label(value: str) -> bool:
+def _valid_player_label(value: str) -> bool:
     value = value.strip().lower()
     return value == "unreadable" or (value.isdigit() and 0 <= int(value) <= 99)
 
@@ -56,6 +78,7 @@ def _valid_label(value: str) -> bool:
 def _save_rows(
     annotations: pd.DataFrame,
     sample_ids: list[str],
+    subject_type: str,
     jersey_gt: str,
     visibility: str,
     team_gt: str,
@@ -68,6 +91,7 @@ def _save_rows(
     additions = pd.DataFrame([
         {
             "sample_id": sample_id,
+            "subject_type": subject_type,
             "jersey_gt": jersey_gt,
             "visibility": visibility,
             "team_gt": team_gt,
@@ -97,16 +121,27 @@ def main() -> None:
     manifest = pd.read_csv(manifest_path, dtype=str, keep_default_na=False)
     annotations = _read_annotations(annotations_path)
     reviewed_ids = set(annotations["sample_id"].tolist())
+    needs_subject_ids = set(
+        annotations.loc[
+            (annotations["jersey_gt"].str.lower() == "unreadable")
+            & (annotations["subject_type"] == ""),
+            "sample_id",
+        ].tolist()
+    )
 
     st.title("CourtFlux · Jersey OCR Ground Truth")
     st.caption(
-        "Annotate what is actually visible in the crop. Do not infer a number from the roster "
-        "or from previous OCR predictions."
+        "Label what is actually visible. First decide whether the detection is a real player. "
+        "Do not infer a jersey number from the roster or from OCR predictions."
     )
 
     with st.sidebar:
         st.header("Queue")
-        status = st.selectbox("Status", ["unreviewed", "all", "reviewed"], index=0)
+        status = st.selectbox(
+            "Status",
+            ["unreviewed", "needs subject review", "all", "reviewed"],
+            index=0,
+        )
         teams = ["all"] + sorted(
             value for value in manifest.get("team_suggested", pd.Series(dtype=str)).unique()
             if value
@@ -116,10 +151,14 @@ def main() -> None:
         reviewer_default = args.reviewer or st.session_state.get("reviewer", "")
         reviewer = st.text_input("Reviewer", reviewer_default)
         st.session_state["reviewer"] = reviewer
+        if needs_subject_ids:
+            st.info(f"Legacy unreadable rows needing subject review: {len(needs_subject_ids)}")
 
     queue = manifest.copy()
     if status == "unreviewed":
         queue = queue[~queue["sample_id"].isin(reviewed_ids)]
+    elif status == "needs subject review":
+        queue = queue[queue["sample_id"].isin(needs_subject_ids)]
     elif status == "reviewed":
         queue = queue[queue["sample_id"].isin(reviewed_ids)]
     if team_filter != "all":
@@ -131,20 +170,45 @@ def main() -> None:
     total = len(manifest)
     reviewed = len(reviewed_ids.intersection(set(manifest["sample_id"])))
     st.progress(reviewed / total if total else 0.0)
-    st.write(f"Reviewed: **{reviewed}/{total}** · Current queue: **{len(queue)}**")
-    if queue.empty:
-        st.success("No samples match the current filters.")
-        st.stop()
+    st.write(
+        f"Reviewed: **{reviewed}/{total}** · Current queue: **{len(queue)}** · "
+        f"Needs subject review: **{len(needs_subject_ids)}**"
+    )
 
+    history_key = f"history:{manifest_path}"
+    forced_key = f"forced_sample:{manifest_path}"
     index_key = f"queue_index:{status}:{team_filter}:{track_filter}"
-    index = int(st.session_state.get(index_key, 0))
-    index = max(0, min(index, len(queue) - 1))
-    st.session_state[index_key] = index
-    row = queue.iloc[index]
-    sample_id = str(row["sample_id"])
-    current = _annotation_for(annotations, sample_id)
+    history = list(st.session_state.get(history_key, []))
+    forced_sample_id = str(st.session_state.get(forced_key, "") or "")
 
-    st.subheader(f"Sample {index + 1}/{len(queue)} · {sample_id}")
+    if forced_sample_id:
+        forced_rows = manifest[manifest["sample_id"] == forced_sample_id]
+        if forced_rows.empty:
+            st.session_state[forced_key] = ""
+            forced_sample_id = ""
+        else:
+            row = forced_rows.iloc[0]
+            index = 0
+    if not forced_sample_id:
+        if queue.empty:
+            st.success("No samples match the current filters.")
+            st.stop()
+        index = int(st.session_state.get(index_key, 0))
+        index = max(0, min(index, len(queue) - 1))
+        st.session_state[index_key] = index
+        row = queue.iloc[index]
+
+    sample_id = str(row["sample_id"])
+    if not history or history[-1] != sample_id:
+        history.append(sample_id)
+        history = history[-500:]
+        st.session_state[history_key] = history
+
+    current = _annotation_for(annotations, sample_id)
+    has_annotation = sample_id in reviewed_ids
+
+    location_text = "history" if forced_sample_id else f"{index + 1}/{len(queue)}"
+    st.subheader(f"Sample {location_text} · {sample_id}")
     st.write(
         f"Track **{row.get('track_id', '')}** · t={row.get('timestamp_sec', '')}s · "
         f"suggested team **{row.get('team_suggested', '') or 'unknown'}** · "
@@ -176,16 +240,38 @@ def main() -> None:
         teams_for_gt.append(current_team)
 
     form_key = sample_id
-    jersey_gt = st.text_input(
-        "Jersey GT (0–99, or unreadable)",
-        value=current.get("jersey_gt", ""),
-        key=f"jersey:{form_key}",
-    ).strip().lower()
-    visibility_default = current.get("visibility", "")
-    visibility_index = VISIBILITY.index(visibility_default) if visibility_default in VISIBILITY else 0
-    visibility = st.selectbox(
-        "Visibility", VISIBILITY, index=visibility_index, key=f"visibility:{form_key}"
+    current_subject = current.get("subject_type", "")
+    if not has_annotation and not current_subject:
+        current_subject = "player"
+    subject_options = [""] + SUBJECT_TYPES
+    subject_type = st.selectbox(
+        "Subject type",
+        subject_options,
+        index=subject_options.index(current_subject) if current_subject in subject_options else 0,
+        format_func=lambda value: SUBJECT_LABELS.get(value, value),
+        key=f"subject:{form_key}",
+        help="Only real basketball players are eligible for jersey OCR.",
     )
+
+    if subject_type == "player":
+        jersey_gt = st.text_input(
+            "Jersey GT (0–99, or unreadable)",
+            value=current.get("jersey_gt", "") if current.get("jersey_gt") != "not_applicable" else "",
+            key=f"jersey:{form_key}",
+        ).strip().lower()
+        visibility_default = current.get("visibility", "")
+        visibility_index = VISIBILITY.index(visibility_default) if visibility_default in VISIBILITY else 0
+        visibility = st.selectbox(
+            "Visibility", VISIBILITY, index=visibility_index, key=f"visibility:{form_key}"
+        )
+    else:
+        jersey_gt = "not_applicable"
+        visibility = "not_applicable"
+        if subject_type:
+            st.info("Non-player/unknown subject: this sample is retained as detector evidence but excluded from jersey OCR training/evaluation.")
+        else:
+            st.warning("Choose a subject type before saving this legacy annotation.")
+
     team_gt = st.selectbox(
         "Team GT (optional)",
         teams_for_gt,
@@ -216,33 +302,46 @@ def main() -> None:
         return same_track["sample_id"].astype(str).tolist()
 
     def advance_after_save() -> None:
-        # In the default unreviewed queue the saved sample disappears on rerun, so keep
-        # the same index. Incrementing here would skip the next unreviewed sample.
-        if status == "unreviewed":
+        st.session_state[forced_key] = ""
+        if status in {"unreviewed", "needs subject review"}:
+            # Saved row disappears from these queues on rerun. Keeping the same index
+            # advances to the row that shifted into its place instead of skipping it.
             st.session_state[index_key] = index
         else:
-            st.session_state[index_key] = min(len(queue) - 1, index + 1)
+            st.session_state[index_key] = min(max(len(queue) - 1, 0), index + 1)
 
     previous_col, save_col, unreadable_col, next_col = st.columns(4)
     with previous_col:
-        if st.button("← Previous", use_container_width=True):
-            st.session_state[index_key] = max(0, index - 1)
-            st.rerun()
+        if st.button("← Previous", use_container_width=True, disabled=len(history) < 2):
+            history = list(st.session_state.get(history_key, []))
+            if len(history) >= 2:
+                history.pop()  # current sample
+                previous_sample = history[-1]
+                st.session_state[history_key] = history
+                st.session_state[forced_key] = previous_sample
+                st.rerun()
     with next_col:
         if st.button("Next →", use_container_width=True):
-            st.session_state[index_key] = min(len(queue) - 1, index + 1)
+            if forced_sample_id:
+                st.session_state[forced_key] = ""
+            else:
+                st.session_state[index_key] = min(len(queue) - 1, index + 1)
             st.rerun()
 
+    save_label = "Save & next" if subject_type == "player" else "Save subject & next"
     with save_col:
-        if st.button("Save & next", type="primary", use_container_width=True):
+        if st.button(save_label, type="primary", use_container_width=True):
             if not reviewer.strip():
                 st.error("Reviewer is required.")
-            elif not _valid_label(jersey_gt):
-                st.error("Jersey GT must be a number from 0 to 99, or 'unreadable'.")
+            elif not subject_type:
+                st.error("Subject type is required.")
+            elif subject_type == "player" and not _valid_player_label(jersey_gt):
+                st.error("For a player, Jersey GT must be a number from 0 to 99, or 'unreadable'.")
             else:
                 updated = _save_rows(
                     annotations,
                     target_ids(),
+                    subject_type,
                     jersey_gt,
                     visibility,
                     team_gt,
@@ -255,13 +354,18 @@ def main() -> None:
                 st.rerun()
 
     with unreadable_col:
-        if st.button("Unreadable & next", use_container_width=True):
+        if st.button(
+            "Player unreadable & next",
+            use_container_width=True,
+            disabled=subject_type != "player",
+        ):
             if not reviewer.strip():
                 st.error("Reviewer is required.")
             else:
                 updated = _save_rows(
                     annotations,
                     target_ids(),
+                    "player",
                     "unreadable",
                     "unreadable",
                     team_gt,
