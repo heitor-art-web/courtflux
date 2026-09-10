@@ -20,7 +20,16 @@ if str(ROOT) not in sys.path:
 from services.vision.team_only_analyzer import TeamOnlyAnalyzer
 
 CANONICAL_MODEL = ROOT / "weights" / "model_v1.0.0.pt"
-VALID_VISIBILITY = {"clear", "partial", "unreadable"}
+PLAYER_VISIBILITY = {"clear", "partial", "unreadable"}
+NON_PLAYER_VISIBILITY = "not_applicable"
+VALID_SUBJECT_TYPES = {
+    "player",
+    "referee",
+    "cameraman_staff",
+    "other_non_player",
+    "unknown",
+}
+NON_PLAYER_SUBJECT_TYPES = {"referee", "cameraman_staff", "other_non_player"}
 
 MANIFEST_FIELDS = [
     "sample_id", "video", "frame_id", "timestamp_sec", "track_id",
@@ -30,8 +39,8 @@ MANIFEST_FIELDS = [
     "torso_sharpness", "player_crop", "torso_crop",
 ]
 ANNOTATION_FIELDS = [
-    "sample_id", "jersey_gt", "visibility", "team_gt", "identity_group",
-    "reviewer", "notes", "annotated_at",
+    "sample_id", "subject_type", "jersey_gt", "visibility", "team_gt",
+    "identity_group", "reviewer", "notes", "annotated_at",
 ]
 
 
@@ -104,9 +113,20 @@ def _label_kind(value: str) -> str:
         return "missing"
     if value == "unreadable":
         return "unreadable"
+    if value == "not_applicable":
+        return "not_applicable"
     if value.isdigit() and 0 <= int(value) <= 99:
         return "number"
     return "invalid"
+
+
+def _normalize_annotation_row(row: dict[str, str]) -> dict[str, str]:
+    """Read legacy annotation CSVs without guessing ambiguous unreadable rows."""
+    normalized = {field: str(row.get(field, "") or "") for field in ANNOTATION_FIELDS}
+    kind = _label_kind(normalized["jersey_gt"])
+    if not normalized["subject_type"] and kind == "number":
+        normalized["subject_type"] = "player"
+    return normalized
 
 
 def _split_for_group(group: str, seed: int, train: float, val: float) -> str:
@@ -272,9 +292,12 @@ def extract(args: argparse.Namespace) -> int:
         "inference_conf": float(args.inference_conf),
         "device": args.device,
         "annotation_policy": {
-            "jersey_gt": "0-99 or unreadable; never infer a number from roster membership",
-            "visibility": sorted(VALID_VISIBILITY),
+            "subject_type": sorted(VALID_SUBJECT_TYPES),
+            "player_jersey_gt": "0-99 or unreadable; never infer a number from roster membership",
+            "player_visibility": sorted(PLAYER_VISIBILITY),
+            "non_player": "use jersey_gt=not_applicable and visibility=not_applicable",
             "identity_group": "optional physical-player group used to prevent split leakage",
+            "quality": "retain blurry/unreadable player crops so an OCR quality gate can be calibrated later",
         },
     }
     (output_dir / "extraction.json").write_text(
@@ -290,7 +313,8 @@ def _validate_and_join(
     manifest_path: Path, annotations_path: Path
 ) -> tuple[list[dict[str, str]], list[str]]:
     manifest = _read_csv(manifest_path)
-    annotations = _read_csv(annotations_path) if annotations_path.exists() else []
+    raw_annotations = _read_csv(annotations_path) if annotations_path.exists() else []
+    annotations = [_normalize_annotation_row(row) for row in raw_annotations]
     errors: list[str] = []
     manifest_by_id: dict[str, dict[str, str]] = {}
 
@@ -315,14 +339,42 @@ def _validate_and_join(
         if sample_id in annotation_by_id:
             errors.append(f"duplicate annotation sample_id: {sample_id}")
         annotation_by_id[sample_id] = row
+
+        subject_type = row.get("subject_type", "").strip().lower()
         kind = _label_kind(row.get("jersey_gt", ""))
-        if kind == "invalid":
-            errors.append(f"{sample_id}: jersey_gt must be 0-99 or unreadable")
         visibility = row.get("visibility", "").strip().lower()
-        if kind != "missing" and visibility not in VALID_VISIBILITY:
+
+        if kind == "missing" and not subject_type:
+            continue
+        if not subject_type:
             errors.append(
-                f"{sample_id}: visibility must be one of {sorted(VALID_VISIBILITY)}"
+                f"{sample_id}: subject_type is required; legacy unreadable rows must be reviewed"
             )
+            continue
+        if subject_type not in VALID_SUBJECT_TYPES:
+            errors.append(
+                f"{sample_id}: invalid subject_type {subject_type!r}; expected one of {sorted(VALID_SUBJECT_TYPES)}"
+            )
+            continue
+
+        if subject_type == "player":
+            if kind not in {"number", "unreadable"}:
+                errors.append(
+                    f"{sample_id}: player jersey_gt must be 0-99 or unreadable"
+                )
+            if visibility not in PLAYER_VISIBILITY:
+                errors.append(
+                    f"{sample_id}: player visibility must be one of {sorted(PLAYER_VISIBILITY)}"
+                )
+        else:
+            if kind != "not_applicable":
+                errors.append(
+                    f"{sample_id}: non-player/unknown jersey_gt must be not_applicable"
+                )
+            if visibility != NON_PLAYER_VISIBILITY:
+                errors.append(
+                    f"{sample_id}: non-player/unknown visibility must be not_applicable"
+                )
 
     joined: list[dict[str, str]] = []
     track_numbers: defaultdict[tuple[str, str], set[str]] = defaultdict(set)
@@ -333,8 +385,21 @@ def _validate_and_join(
             if field != "sample_id":
                 row[field] = annotation.get(field, "")
         row["label_kind"] = _label_kind(row.get("jersey_gt", ""))
+        subject_type = row.get("subject_type", "").strip().lower()
+        row["ocr_eligible"] = str(
+            subject_type == "player" and row["label_kind"] in {"number", "unreadable"}
+        ).lower()
+        if subject_type in NON_PLAYER_SUBJECT_TYPES:
+            row["dataset_role"] = "detector_negative"
+        elif subject_type == "player":
+            row["dataset_role"] = "ocr"
+        elif subject_type == "unknown":
+            row["dataset_role"] = "excluded_unknown"
+        else:
+            row["dataset_role"] = "unreviewed"
         joined.append(row)
-        if row["label_kind"] == "number":
+
+        if subject_type == "player" and row["label_kind"] == "number":
             key = (row.get("video", ""), row.get("track_id", ""))
             track_numbers[key].add(str(int(row["jersey_gt"])))
 
@@ -357,16 +422,28 @@ def validate(args: argparse.Namespace) -> int:
         raise FileNotFoundError(manifest_path)
     joined, errors = _validate_and_join(manifest_path, annotations_path)
     kinds = Counter(row["label_kind"] for row in joined)
+    subjects = Counter(row.get("subject_type", "") or "missing" for row in joined)
+    roles = Counter(row.get("dataset_role", "") for row in joined)
     numbers = Counter(
-        str(int(row["jersey_gt"])) for row in joined if row["label_kind"] == "number"
+        str(int(row["jersey_gt"]))
+        for row in joined
+        if row.get("subject_type") == "player" and row["label_kind"] == "number"
+    )
+    reviewed_rows = sum(
+        1 for row in joined if row.get("dataset_role") in {"ocr", "detector_negative", "excluded_unknown"}
     )
     summary = {
         "manifest_rows": len(joined),
-        "annotated_rows": kinds["number"] + kinds["unreadable"],
+        "reviewed_rows": reviewed_rows,
+        "ocr_eligible_rows": roles["ocr"],
+        "detector_negative_rows": roles["detector_negative"],
+        "unknown_subject_rows": roles["excluded_unknown"],
         "numeric_rows": kinds["number"],
         "unreadable_rows": kinds["unreadable"],
+        "not_applicable_rows": kinds["not_applicable"],
         "missing_rows": kinds["missing"],
         "invalid_rows": kinds["invalid"],
+        "subject_distribution": dict(sorted(subjects.items())),
         "numeric_distribution": dict(sorted(numbers.items(), key=lambda item: int(item[0]))),
         "errors": errors,
     }
@@ -396,7 +473,7 @@ def export(args: argparse.Namespace) -> int:
 
     reviewed: list[dict[str, str]] = []
     for row in joined:
-        if row["label_kind"] not in {"number", "unreadable"}:
+        if row.get("dataset_role") not in {"ocr", "detector_negative", "excluded_unknown"}:
             continue
         identity_group = row.get("identity_group", "").strip()
         fallback_group = f"{row.get('video', '')}|track:{row.get('track_id', '')}"
@@ -411,19 +488,28 @@ def export(args: argparse.Namespace) -> int:
 
     export_fields = MANIFEST_FIELDS + [
         field for field in ANNOTATION_FIELDS if field != "sample_id"
-    ] + ["label_kind", "split_group", "split"]
+    ] + ["label_kind", "ocr_eligible", "dataset_role", "split_group", "split"]
     _write_csv(output_path, export_fields, reviewed)
     report = {
         "created_at": _utc_now(),
         "ground_truth": str(output_path),
         "rows": len(reviewed),
+        "ocr_eligible_rows": sum(row["ocr_eligible"] == "true" for row in reviewed),
+        "detector_negative_rows": sum(row["dataset_role"] == "detector_negative" for row in reviewed),
+        "unknown_subject_rows": sum(row["dataset_role"] == "excluded_unknown" for row in reviewed),
         "split_counts": dict(Counter(row["split"] for row in reviewed)),
         "label_counts": dict(Counter(row["label_kind"] for row in reviewed)),
+        "subject_counts": dict(Counter(row.get("subject_type", "") for row in reviewed)),
+        "dataset_role_counts": dict(Counter(row["dataset_role"] for row in reviewed)),
         "seed": int(args.seed),
         "split_ratios": {"train": train, "val": val, "test": test},
         "grouping": (
             "identity_group when annotated; otherwise video+track_id. Set identity_group "
             "across fragmented tracks of the same physical player before model evaluation."
+        ),
+        "ocr_policy": (
+            "Only dataset_role=ocr / ocr_eligible=true rows are jersey OCR samples. "
+            "Non-player detections remain in the ground truth as detector_negative evidence."
         ),
     }
     output_path.with_suffix(".summary.json").write_text(
