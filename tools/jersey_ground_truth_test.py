@@ -8,6 +8,7 @@ from jersey_ground_truth import (
     ANNOTATION_FIELDS,
     MANIFEST_FIELDS,
     _label_kind,
+    _normalize_annotation_row,
     _split_for_group,
     _validate_and_join,
 )
@@ -27,9 +28,19 @@ def main() -> int:
     assert _label_kind("99") == "number"
     assert _label_kind("100") == "invalid"
     assert _label_kind("unreadable") == "unreadable"
+    assert _label_kind("not_applicable") == "not_applicable"
     assert _split_for_group("player-a", 42, 0.7, 0.15) == _split_for_group(
         "player-a", 42, 0.7, 0.15
     )
+
+    legacy_numeric = _normalize_annotation_row(
+        {"sample_id": "legacy", "jersey_gt": "14", "visibility": "clear"}
+    )
+    assert legacy_numeric["subject_type"] == "player"
+    legacy_unreadable = _normalize_annotation_row(
+        {"sample_id": "legacy-u", "jersey_gt": "unreadable", "visibility": "unreadable"}
+    )
+    assert legacy_unreadable["subject_type"] == ""
 
     with tempfile.TemporaryDirectory() as temp:
         root = Path(temp)
@@ -37,7 +48,7 @@ def main() -> int:
         annotations = root / "annotations.csv"
         base = {field: "" for field in MANIFEST_FIELDS}
         rows = []
-        for index in (1, 2):
+        for index in (1, 2, 3):
             row = dict(base)
             row.update(
                 {
@@ -45,7 +56,7 @@ def main() -> int:
                     "video": "/tmp/game.mp4",
                     "frame_id": str(index),
                     "timestamp_sec": str(index / 25),
-                    "track_id": "10",
+                    "track_id": "10" if index < 3 else "20",
                     "player_crop": f"crops/player/s{index}.jpg",
                     "torso_crop": f"crops/torso/s{index}.jpg",
                 }
@@ -57,6 +68,7 @@ def main() -> int:
         a1.update(
             {
                 "sample_id": "s1",
+                "subject_type": "player",
                 "jersey_gt": "14",
                 "visibility": "clear",
                 "reviewer": "test",
@@ -64,15 +76,43 @@ def main() -> int:
         )
         a2 = dict(a1)
         a2.update({"sample_id": "s2", "jersey_gt": "14", "visibility": "partial"})
-        _write(annotations, ANNOTATION_FIELDS, [a1, a2])
+        a3 = {field: "" for field in ANNOTATION_FIELDS}
+        a3.update(
+            {
+                "sample_id": "s3",
+                "subject_type": "referee",
+                "jersey_gt": "not_applicable",
+                "visibility": "not_applicable",
+                "reviewer": "test",
+            }
+        )
+        _write(annotations, ANNOTATION_FIELDS, [a1, a2, a3])
         joined, errors = _validate_and_join(manifest, annotations)
-        assert len(joined) == 2
+        assert len(joined) == 3
         assert not errors
+        by_id = {row["sample_id"]: row for row in joined}
+        assert by_id["s1"]["ocr_eligible"] == "true"
+        assert by_id["s3"]["ocr_eligible"] == "false"
+        assert by_id["s3"]["dataset_role"] == "detector_negative"
 
         a2["jersey_gt"] = "7"
-        _write(annotations, ANNOTATION_FIELDS, [a1, a2])
+        _write(annotations, ANNOTATION_FIELDS, [a1, a2, a3])
         _, errors = _validate_and_join(manifest, annotations)
         assert any("track conflict" in error for error in errors)
+
+        legacy_bad = {
+            "sample_id": "s2",
+            "jersey_gt": "unreadable",
+            "visibility": "unreadable",
+            "reviewer": "test",
+        }
+        legacy_fields = [
+            "sample_id", "jersey_gt", "visibility", "team_gt", "identity_group",
+            "reviewer", "notes", "annotated_at",
+        ]
+        _write(annotations, legacy_fields, [legacy_bad])
+        _, errors = _validate_and_join(manifest, annotations)
+        assert any("subject_type is required" in error for error in errors)
 
     print("jersey ground truth smoke tests: PASS")
     return 0
