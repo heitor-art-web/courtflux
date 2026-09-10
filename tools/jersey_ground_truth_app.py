@@ -82,6 +82,7 @@ def _save_rows(
 
 
 def main() -> None:
+    st.set_page_config(page_title="CourtFlux Jersey OCR Ground Truth", layout="wide")
     args = _args()
     manifest_path = Path(args.manifest).expanduser().resolve()
     annotations_path = (
@@ -97,7 +98,6 @@ def main() -> None:
     annotations = _read_annotations(annotations_path)
     reviewed_ids = set(annotations["sample_id"].tolist())
 
-    st.set_page_config(page_title="CourtFlux Jersey OCR Ground Truth", layout="wide")
     st.title("CourtFlux · Jersey OCR Ground Truth")
     st.caption(
         "Annotate what is actually visible in the crop. Do not infer a number from the roster "
@@ -207,6 +207,22 @@ def main() -> None:
         help="Use only after visually checking that the track does not contain an ID switch.",
     )
 
+    def target_ids() -> list[str]:
+        if not propagate:
+            return [sample_id]
+        same_track = manifest[
+            (manifest["video"] == row["video"]) & (manifest["track_id"] == row["track_id"])
+        ]
+        return same_track["sample_id"].astype(str).tolist()
+
+    def advance_after_save() -> None:
+        # In the default unreviewed queue the saved sample disappears on rerun, so keep
+        # the same index. Incrementing here would skip the next unreviewed sample.
+        if status == "unreviewed":
+            st.session_state[index_key] = index
+        else:
+            st.session_state[index_key] = min(len(queue) - 1, index + 1)
+
     previous_col, save_col, unreadable_col, next_col = st.columns(4)
     with previous_col:
         if st.button("← Previous", use_container_width=True):
@@ -216,14 +232,6 @@ def main() -> None:
         if st.button("Next →", use_container_width=True):
             st.session_state[index_key] = min(len(queue) - 1, index + 1)
             st.rerun()
-
-    def target_ids() -> list[str]:
-        if not propagate:
-            return [sample_id]
-        same_track = manifest[
-            (manifest["video"] == row["video"]) & (manifest["track_id"] == row["track_id"])
-        ]
-        return same_track["sample_id"].astype(str).tolist()
 
     with save_col:
         if st.button("Save & next", type="primary", use_container_width=True):
@@ -243,7 +251,7 @@ def main() -> None:
                     notes,
                 )
                 _atomic_write(annotations_path, updated)
-                st.session_state[index_key] = min(len(queue) - 1, index + 1)
+                advance_after_save()
                 st.rerun()
 
     with unreadable_col:
@@ -262,7 +270,7 @@ def main() -> None:
                     notes,
                 )
                 _atomic_write(annotations_path, updated)
-                st.session_state[index_key] = min(len(queue) - 1, index + 1)
+                advance_after_save()
                 st.rerun()
 
     st.divider()
