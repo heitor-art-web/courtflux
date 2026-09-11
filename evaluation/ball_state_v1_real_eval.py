@@ -231,6 +231,7 @@ def main() -> None:
             annotation = annotations[frame_id]
             direct_correct = matches_truth(direct, annotation, args.point_margin_px)
             state_correct = matches_truth(prediction, annotation, args.point_margin_px)
+            state_point_error = point_error(prediction, annotation)
             records.append(
                 {
                     "frame_id": frame_id,
@@ -242,8 +243,10 @@ def main() -> None:
                     "direct_point_error_px": point_error(direct, annotation),
                     "state": state.as_dict(),
                     "state_prediction": prediction,
+                    "state_prediction_correct": state_correct,
+                    "state_prediction_point_error_px": state_point_error,
                     "state_correct": state_correct,
-                    "state_point_error_px": point_error(prediction, annotation),
+                    "state_point_error_px": state_point_error,
                 }
             )
 
@@ -359,6 +362,7 @@ def main() -> None:
             "BallState predicted means short-gap temporal prediction and is never counted as a direct observation.",
             "BallState missing is explicit UNKNOWN and exposes no synthetic position.",
             "The direct baseline uses the same v1.1.0 detector pass and operational basketball confidence threshold.",
+            "Uncertainty is currently a descriptive upstream-evidence value (1 - confidence), not a calibrated probability.",
             "This Porto-Ovarense segment remains calibration/integration evidence, not independent P1 exit validation.",
         ],
     }
