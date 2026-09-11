@@ -47,12 +47,22 @@ function setupSourceSelector(group: HTMLElement) {
   });
 }
 
+function clarifyAnalysisProjection(root: ParentNode) {
+  root.querySelectorAll<HTMLElement>('div[class*="reviewRows"] > div').forEach((row) => {
+    const label = row.querySelector<HTMLElement>("span");
+    if (label?.textContent?.trim() !== "Remaining after") return;
+    label.textContent = "Projected remaining after successful run";
+    row.title = "Estimate only. Analysis minutes are recorded after a run completes successfully.";
+  });
+}
+
 export function InteractionA11yBridge() {
   useEffect(() => {
     const enhance = (root: ParentNode = document) => {
       root.querySelectorAll<HTMLElement>('[role="radiogroup"]').forEach(setupRadioGroup);
       root.querySelectorAll<HTMLElement>('[role="tab"]').forEach(setupTabs);
       root.querySelectorAll<HTMLElement>('[aria-label="Video source"]').forEach(setupSourceSelector);
+      clarifyAnalysisProjection(root);
     };
 
     const onKeyDown = (event: KeyboardEvent) => {
