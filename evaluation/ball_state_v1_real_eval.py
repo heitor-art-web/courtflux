@@ -5,7 +5,6 @@ import json
 from collections import Counter, defaultdict
 from datetime import datetime
 from pathlib import Path
-from types import SimpleNamespace
 from typing import Any
 
 import cv2
@@ -14,7 +13,8 @@ from ultralytics import YOLO
 from core.ball_state import BallState, BallStateStatus
 from core.config import Settings, settings
 from evaluation.ball_temporal_v1_real_eval import (
-    extract_ball_candidates,
+    box_center,
+    class_name,
     load_annotations,
     matches_truth,
     point_error,
@@ -22,6 +22,8 @@ from evaluation.ball_temporal_v1_real_eval import (
 )
 from services.vision.ball_state_v1 import BallStateEstimatorV1
 
+
+P1_DETECTOR_CLASSES = ("basketball", "player", "referee", "rim", "backboard")
 
 REQUIRED_PROVENANCE_KEYS = {
     "detector_model",
@@ -54,7 +56,10 @@ def parse_args() -> argparse.Namespace:
         "--ball-conf",
         type=float,
         default=settings.ball_candidate_confidence,
-        help="Operational BallState candidate threshold. Default is the frozen P1 v1.1.0 value.",
+        help=(
+            "Operational BallState candidate threshold. The same low inference threshold "
+            "is used for diagnostic counts of the other P1 detector classes."
+        ),
     )
     parser.add_argument("--nms-iou", type=float, default=0.5)
     parser.add_argument("--max-det", type=int, default=100)
@@ -65,6 +70,70 @@ def parse_args() -> argparse.Namespace:
         help="Output directory; defaults to evaluation/ball_state_v1_real/<timestamp>.",
     )
     return parser.parse_args()
+
+
+def canonical_detector_class(name: str) -> str | None:
+    value = str(name).strip().lower().replace("-", "_").replace(" ", "_")
+    if "basketball" in value or value in {"ball", "sports_ball"}:
+        return "basketball"
+    if "player" in value:
+        return "player"
+    if "referee" in value or value in {"ref", "official"}:
+        return "referee"
+    if "backboard" in value:
+        return "backboard"
+    if "rim" in value:
+        return "rim"
+    return None
+
+
+def infer_p1_detections(
+    model: YOLO,
+    frame: Any,
+    *,
+    confidence: float,
+    nms_iou: float,
+    imgsz: int,
+    max_det: int,
+    device: str,
+) -> tuple[list[dict[str, Any]], Counter[str], int]:
+    """Run the detector once and expose ball candidates plus P1 class diagnostics."""
+    results = model.predict(
+        frame,
+        conf=max(0.001, float(confidence)),
+        iou=float(nms_iou),
+        imgsz=int(imgsz),
+        max_det=int(max_det),
+        device=device,
+        verbose=False,
+    )
+    counts: Counter[str] = Counter({name: 0 for name in P1_DETECTOR_CLASSES})
+    candidates: list[dict[str, Any]] = []
+    total_predictions = 0
+
+    if not results or results[0].boxes is None:
+        return candidates, counts, total_predictions
+
+    for box in results[0].boxes:
+        total_predictions += 1
+        cls_id = int(box.cls[0])
+        raw_name = class_name(model.names, cls_id)
+        canonical = canonical_detector_class(raw_name)
+        if canonical is not None:
+            counts[canonical] += 1
+        if canonical != "basketball":
+            continue
+        xyxy = [float(value) for value in box.xyxy[0].tolist()]
+        candidates.append(
+            {
+                "class_id": cls_id,
+                "class_name": raw_name,
+                "confidence": float(box.conf[0]),
+                "box": xyxy,
+                "center": box_center(xyxy),
+            }
+        )
+    return candidates, counts, total_predictions
 
 
 def state_prediction(state: BallState) -> dict[str, Any] | None:
@@ -182,13 +251,6 @@ def main() -> None:
     )
     estimator = BallStateEstimatorV1(config=config)
     model = YOLO(str(model_path))
-    infer_args = SimpleNamespace(
-        ball_conf=float(args.ball_conf),
-        nms_iou=float(args.nms_iou),
-        imgsz=int(args.imgsz),
-        max_det=int(args.max_det),
-        device=args.device,
-    )
 
     capture = cv2.VideoCapture(str(video_path))
     if not capture.isOpened():
@@ -199,7 +261,11 @@ def main() -> None:
     records: list[dict[str, Any]] = []
     source_counts: Counter[str] = Counter()
     status_counts_all: Counter[str] = Counter()
+    detector_class_counts_all: Counter[str] = Counter(
+        {name: 0 for name in P1_DETECTOR_CLASSES}
+    )
     candidate_total = 0
+    all_prediction_total = 0
     provenance_complete = 0
     provenance_checked = 0
     processed = 0
@@ -210,8 +276,18 @@ def main() -> None:
         if not ok:
             raise RuntimeError(f"Could not read frame {frame_id}")
         timestamp_sec = frame_id / fps if fps > 0 else None
-        candidates = extract_ball_candidates(model, frame, infer_args)
+        candidates, frame_class_counts, frame_prediction_total = infer_p1_detections(
+            model,
+            frame,
+            confidence=float(args.ball_conf),
+            nms_iou=float(args.nms_iou),
+            imgsz=int(args.imgsz),
+            max_det=int(args.max_det),
+            device=args.device,
+        )
         candidate_total += len(candidates)
+        all_prediction_total += frame_prediction_total
+        detector_class_counts_all.update(frame_class_counts)
         direct = max(candidates, key=lambda item: item["confidence"]) if candidates else None
         state = estimator.update(
             candidates,
@@ -237,6 +313,8 @@ def main() -> None:
                     "frame_id": frame_id,
                     "timestamp_sec": timestamp_sec,
                     "visible": bool(annotation["visible"]),
+                    "detector_class_counts": dict(frame_class_counts),
+                    "detector_predictions_total": frame_prediction_total,
                     "basketball_candidates": len(candidates),
                     "direct": direct,
                     "direct_correct": direct_correct,
@@ -251,14 +329,23 @@ def main() -> None:
             )
 
         if processed == 1 or processed % 100 == 0 or processed == total_frames:
-            counts = " ".join(
+            frame_counts_text = " ".join(
+                f"{name}={frame_class_counts.get(name, 0)}" for name in P1_DETECTOR_CLASSES
+            )
+            cumulative_counts_text = " ".join(
+                f"{name}={detector_class_counts_all.get(name, 0)}"
+                for name in P1_DETECTOR_CLASSES
+            )
+            state_counts_text = " ".join(
                 f"{name}={status_counts_all.get(name, 0)}"
                 for name in ("observed", "predicted", "missing")
             )
             print(
                 f"[BallState] [{processed}/{total_frames}] "
                 f"{100.0 * processed / max(total_frames, 1):.1f}% frame={frame_id} "
-                f"basketball_candidates={len(candidates)} cumulative[{counts}]",
+                f"detections[{frame_counts_text} total={frame_prediction_total}] "
+                f"cumulative[{cumulative_counts_text}] "
+                f"state[{state_counts_text}]",
                 flush=True,
             )
 
@@ -310,16 +397,39 @@ def main() -> None:
             "baseline_status": config.detector_baseline_status,
             "device": args.device,
             "imgsz": args.imgsz,
+            "inference_confidence": args.ball_conf,
             "ball_candidate_confidence": args.ball_conf,
             "nms_iou": args.nms_iou,
             "max_det": args.max_det,
+        },
+        "detector_class_diagnostics": {
+            "classes": list(P1_DETECTOR_CLASSES),
+            "counts_total": {
+                name: detector_class_counts_all.get(name, 0)
+                for name in P1_DETECTOR_CLASSES
+            },
+            "mean_per_processed_frame": {
+                name: (
+                    detector_class_counts_all.get(name, 0) / processed
+                    if processed
+                    else 0.0
+                )
+                for name in P1_DETECTOR_CLASSES
+            },
+            "all_predictions_total": all_prediction_total,
+            "threshold_semantics": (
+                "Diagnostic counts from the same detector pass at the BallState inference "
+                "threshold; these are not per-class calibrated operating thresholds."
+            ),
         },
         "ball_state_metadata": estimator.metadata(),
         "all_processed_state_counts": dict(status_counts_all),
         "annotated_state_counts": dict(annotated_status_counts),
         "candidate_diagnostics": {
             "basketball_candidates_total": candidate_total,
-            "basketball_candidates_mean_per_processed_frame": candidate_total / processed if processed else 0.0,
+            "basketball_candidates_mean_per_processed_frame": (
+                candidate_total / processed if processed else 0.0
+            ),
         },
         "direct_baseline": direct_metrics,
         "ball_state": state_metrics,
@@ -327,10 +437,14 @@ def main() -> None:
             "visible_recall": state_metrics["visible_recall"] - direct_metrics["visible_recall"],
             "decision_precision": (
                 None
-                if state_metrics["decision_precision"] is None or direct_metrics["decision_precision"] is None
-                else state_metrics["decision_precision"] - direct_metrics["decision_precision"]
+                if state_metrics["decision_precision"] is None
+                or direct_metrics["decision_precision"] is None
+                else state_metrics["decision_precision"]
+                - direct_metrics["decision_precision"]
             ),
-            "output_coverage": state_metrics["output_coverage"] - direct_metrics["output_coverage"],
+            "output_coverage": (
+                state_metrics["output_coverage"] - direct_metrics["output_coverage"]
+            ),
             "recovered_visible_frames": recovered,
             "regressed_visible_frames": regressed,
         },
@@ -339,7 +453,9 @@ def main() -> None:
             "visible_frames_marked_missing": missing_visible,
             "visible_missing_rate": missing_visible / visible_frames if visible_frames else 0.0,
             "invisible_frames_marked_missing": missing_invisible,
-            "invisible_abstention_rate": missing_invisible / invisible_frames if invisible_frames else 0.0,
+            "invisible_abstention_rate": (
+                missing_invisible / invisible_frames if invisible_frames else 0.0
+            ),
         },
         "source_counts_all_processed_frames": dict(source_counts),
         "uncertainty": uncertainty_summary(records),
@@ -347,7 +463,9 @@ def main() -> None:
             "required_keys": sorted(REQUIRED_PROVENANCE_KEYS),
             "frames_checked": provenance_checked,
             "complete_frames": provenance_complete,
-            "completeness_rate": provenance_complete / provenance_checked if provenance_checked else 0.0,
+            "completeness_rate": (
+                provenance_complete / provenance_checked if provenance_checked else 0.0
+            ),
         },
         "scope_guard": {
             "p2_event_semantics": False,
@@ -358,6 +476,9 @@ def main() -> None:
             "made_miss": False,
         },
         "notes": [
+            "BallState consumes only basketball candidates; player/referee/rim/backboard are detector diagnostics in this runner.",
+            "All five P1 detector classes are counted from the same single inference pass, so logging does not duplicate detector inference.",
+            "The multi-class counts here use the BallState inference confidence and are not substitutes for per-class calibrated detector evaluation.",
             "BallState observed means direct detector evidence selected by the trajectory-aware tracker.",
             "BallState predicted means short-gap temporal prediction and is never counted as a direct observation.",
             "BallState missing is explicit UNKNOWN and exposes no synthetic position.",
@@ -384,6 +505,13 @@ def main() -> None:
     print(
         f"state:  recall={state_metrics['visible_recall']:.3f} "
         f"precision={precision:.3f} coverage={state_metrics['output_coverage']:.3f}"
+    )
+    print(
+        "detector totals: "
+        + " ".join(
+            f"{name}={detector_class_counts_all.get(name, 0)}"
+            for name in P1_DETECTOR_CLASSES
+        )
     )
     print(
         "annotated status: "
