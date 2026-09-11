@@ -14,6 +14,7 @@ class DiagnosticPreview:
     """Lightweight annotated preview shared by local and web Beta Lab runs."""
 
     _PALETTE = [(255, 120, 40), (40, 90, 255), (80, 210, 120), (220, 80, 220)]
+    _REFEREE_COLOR = (0, 215, 255)
 
     def __init__(
         self,
@@ -196,7 +197,7 @@ class DiagnosticPreview:
             player_name = str(player.get("player_name") or "").strip()
             color = self._color_for_team(team)
             cv2.rectangle(canvas, (x1, y1), (x2, y2), color, 2)
-            parts = [f"T{track_id}", team]
+            parts = [f"P T{track_id}", team]
             if team_conf is not None: parts.append(f"team:{float(team_conf):.2f}")
             if jersey is not None and str(jersey).strip(): parts.append(f"#{jersey}")
             if player_name: parts.append(player_name)
@@ -206,6 +207,24 @@ class DiagnosticPreview:
             top = max(0, y1 - th - baseline - 8)
             cv2.rectangle(canvas, (x1, top), (min(width - 1, x1 + tw + 8), y1), color, -1)
             cv2.putText(canvas, label, (x1 + 4, max(th + 2, y1 - 5)), cv2.FONT_HERSHEY_SIMPLEX, 0.44, (255, 255, 255), 1, cv2.LINE_AA)
+
+        referees = list(getattr(frame_state, "referees", []) or [])
+        for referee in referees:
+            if not isinstance(referee, dict):
+                continue
+            box = self._safe_box(referee.get("box"), width, height)
+            if box is None:
+                continue
+            x1, y1, x2, y2 = box
+            track_id = referee.get("track_id", -1)
+            conf = referee.get("confidence")
+            color = self._REFEREE_COLOR
+            cv2.rectangle(canvas, (x1, y1), (x2, y2), color, 2)
+            label = f"REF T{track_id}" + (f" det:{float(conf):.2f}" if conf is not None else "")
+            (tw, th), baseline = cv2.getTextSize(label, cv2.FONT_HERSHEY_SIMPLEX, 0.46, 1)
+            top = max(0, y1 - th - baseline - 8)
+            cv2.rectangle(canvas, (x1, top), (min(width - 1, x1 + tw + 8), y1), color, -1)
+            cv2.putText(canvas, label, (x1 + 4, max(th + 2, y1 - 5)), cv2.FONT_HERSHEY_SIMPLEX, 0.46, (20, 20, 20), 1, cv2.LINE_AA)
 
         ball = getattr(frame_state, "ball", None)
         if isinstance(ball, dict):
@@ -227,7 +246,10 @@ class DiagnosticPreview:
                 team = str(player["team"]); team_counts[team] = team_counts.get(team, 0) + 1
             if isinstance(player, dict) and (player.get("shirt_num") or player.get("shirt_number")):
                 identified += 1
-        status = f"frame {frame_id} | {timestamp:.2f}s | players {len(players)} | identified {identified}"
+        status = (
+            f"frame {frame_id} | {timestamp:.2f}s | players {len(players)} | refs {len(referees)} "
+            f"| identified {identified}"
+        )
         if team_counts: status += " | " + " / ".join(f"{name} {count}" for name, count in team_counts.items())
         cv2.rectangle(canvas, (8, 8), (min(width - 8, 18 + len(status) * 8), 38), (20, 20, 20), -1)
         cv2.putText(canvas, status, (14, 29), cv2.FONT_HERSHEY_SIMPLEX, 0.52, (245, 245, 245), 1, cv2.LINE_AA)
