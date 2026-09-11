@@ -15,6 +15,8 @@ class DiagnosticPreview:
 
     _PALETTE = [(255, 120, 40), (40, 90, 255), (80, 210, 120), (220, 80, 220)]
     _REFEREE_COLOR = (0, 215, 255)
+    _OFF_COURT_COLOR = (120, 120, 120)
+    _COURT_COLOR = (70, 220, 70)
 
     def __init__(
         self,
@@ -77,6 +79,17 @@ class DiagnosticPreview:
         x1 = max(0, min(width - 1, x1)); x2 = max(0, min(width - 1, x2))
         y1 = max(0, min(height - 1, y1)); y2 = max(0, min(height - 1, y2))
         return (x1, y1, x2, y2) if x2 > x1 and y2 > y1 else None
+
+    @staticmethod
+    def _court_payload(frame_state: Any) -> dict[str, Any]:
+        state = getattr(frame_state, "court_state", None)
+        if state is None:
+            return dict((getattr(frame_state, "diagnostics", {}) or {}).get("court_state", {}) or {})
+        if hasattr(state, "as_dict"):
+            return dict(state.as_dict())
+        if isinstance(state, dict):
+            return dict(state)
+        return {}
 
     @staticmethod
     def _even_video_frame(canvas: np.ndarray) -> np.ndarray:
@@ -181,6 +194,15 @@ class DiagnosticPreview:
 
         canvas = frame.copy()
         height, width = canvas.shape[:2]
+        court = self._court_payload(frame_state)
+        polygon = court.get("court_polygon_px")
+        if isinstance(polygon, list) and len(polygon) >= 3:
+            try:
+                points = np.asarray(polygon, dtype=np.int32).reshape(-1, 1, 2)
+                cv2.polylines(canvas, [points], True, self._COURT_COLOR, 2, cv2.LINE_AA)
+            except (TypeError, ValueError, cv2.error):
+                pass
+
         players = list(getattr(frame_state, "players", []) or [])
         for player in players:
             if not isinstance(player, dict):
@@ -189,18 +211,28 @@ class DiagnosticPreview:
             if box is None:
                 continue
             x1, y1, x2, y2 = box
+            active_on_court = player.get("active_on_court")
+            off_court = active_on_court is False
             team = str(player.get("team") or "Unknown")
             jersey = player.get("shirt_num") or player.get("shirt_number")
             track_id = player.get("track_id", -1)
             detection_conf = player.get("confidence")
             team_conf = player.get("team_confidence")
             player_name = str(player.get("player_name") or "").strip()
-            color = self._color_for_team(team)
+            color = self._OFF_COURT_COLOR if off_court else self._color_for_team(team)
             cv2.rectangle(canvas, (x1, y1), (x2, y2), color, 2)
-            parts = [f"P T{track_id}", team]
-            if team_conf is not None: parts.append(f"team:{float(team_conf):.2f}")
-            if jersey is not None and str(jersey).strip(): parts.append(f"#{jersey}")
-            if player_name: parts.append(player_name)
+            parts = [f"P T{track_id}"]
+            if off_court:
+                parts.append("OFFCOURT")
+            else:
+                parts.append(team)
+                if team_conf is not None: parts.append(f"team:{float(team_conf):.2f}")
+                if jersey is not None and str(jersey).strip(): parts.append(f"#{jersey}")
+                if player_name: parts.append(player_name)
+            if active_on_court is True:
+                parts.append("COURT")
+            elif active_on_court is None:
+                parts.append("COURT?")
             if detection_conf is not None: parts.append(f"det:{float(detection_conf):.2f}")
             label = " ".join(parts)
             (tw, th), baseline = cv2.getTextSize(label, cv2.FONT_HERSHEY_SIMPLEX, 0.44, 1)
@@ -218,9 +250,16 @@ class DiagnosticPreview:
             x1, y1, x2, y2 = box
             track_id = referee.get("track_id", -1)
             conf = referee.get("confidence")
-            color = self._REFEREE_COLOR
+            off_court = referee.get("active_on_court") is False
+            color = self._OFF_COURT_COLOR if off_court else self._REFEREE_COLOR
             cv2.rectangle(canvas, (x1, y1), (x2, y2), color, 2)
-            label = f"REF T{track_id}" + (f" det:{float(conf):.2f}" if conf is not None else "")
+            label = f"REF T{track_id}" + (" OFFCOURT" if off_court else "")
+            if referee.get("active_on_court") is True:
+                label += " COURT"
+            elif referee.get("active_on_court") is None:
+                label += " COURT?"
+            if conf is not None:
+                label += f" det:{float(conf):.2f}"
             (tw, th), baseline = cv2.getTextSize(label, cv2.FONT_HERSHEY_SIMPLEX, 0.46, 1)
             top = max(0, y1 - th - baseline - 8)
             cv2.rectangle(canvas, (x1, top), (min(width - 1, x1 + tw + 8), y1), color, -1)
@@ -242,9 +281,9 @@ class DiagnosticPreview:
         timestamp = float(getattr(frame_state, "timestamp", 0.0) or 0.0)
         team_counts: dict[str, int] = {}; identified = 0
         for player in players:
-            if isinstance(player, dict) and player.get("team"):
+            if isinstance(player, dict) and player.get("active_on_court") is not False and player.get("team"):
                 team = str(player["team"]); team_counts[team] = team_counts.get(team, 0) + 1
-            if isinstance(player, dict) and (player.get("shirt_num") or player.get("shirt_number")):
+            if isinstance(player, dict) and player.get("active_on_court") is not False and (player.get("shirt_num") or player.get("shirt_number")):
                 identified += 1
         status = (
             f"frame {frame_id} | {timestamp:.2f}s | players {len(players)} | refs {len(referees)} "
@@ -253,6 +292,31 @@ class DiagnosticPreview:
         if team_counts: status += " | " + " / ".join(f"{name} {count}" for name, count in team_counts.items())
         cv2.rectangle(canvas, (8, 8), (min(width - 8, 18 + len(status) * 8), 38), (20, 20, 20), -1)
         cv2.putText(canvas, status, (14, 29), cv2.FONT_HERSHEY_SIMPLEX, 0.52, (245, 245, 245), 1, cv2.LINE_AA)
+
+        if court:
+            mode = str(court.get("mode") or "unknown")
+            eligible = bool(court.get("analysis_eligible", False))
+            reason = str(court.get("eligibility_reason") or "unknown")
+            on_players = int(court.get("on_court_player_count", 0) or 0)
+            on_refs = int(court.get("on_court_referee_count", 0) or 0)
+            ratio = court.get("court_surface_ratio")
+            court_line = (
+                f"COURT {mode} | metrics:{'YES' if eligible else 'NO'} | "
+                f"on-court P{on_players}/R{on_refs} | {reason}"
+            )
+            if ratio is not None:
+                court_line += f" | surface:{float(ratio):.2f}"
+            cv2.rectangle(canvas, (8, 42), (min(width - 8, 18 + len(court_line) * 8), 72), (20, 20, 20), -1)
+            cv2.putText(
+                canvas,
+                court_line,
+                (14, 63),
+                cv2.FONT_HERSHEY_SIMPLEX,
+                0.48,
+                (245, 245, 245),
+                1,
+                cv2.LINE_AA,
+            )
 
         if width > self.max_width:
             scale = self.max_width / float(width)
