@@ -202,7 +202,7 @@ def infer_cache(
         if offset == 1 or offset % 100 == 0 or offset == total:
             print(
                 f"[{label}] inference [{offset}/{total}] {100.0 * offset / max(total, 1):.1f}% "
-                f"frame={frame_id} candidates={len(candidates)}",
+                f"frame={frame_id} basketball_candidates={len(candidates)}",
                 flush=True,
             )
     capture.release()
@@ -555,7 +555,7 @@ def main() -> None:
             "v1.1.0_status": "Detector challenger with stronger supervised benchmark; threshold and small tracker policy sweep performed here.",
         },
         "notes": [
-            "Each detector is run once at the minimum requested confidence; higher thresholds are replayed by filtering the same post-NMS ball candidate cache.",
+            "Each detector is run once at the minimum requested confidence; higher thresholds are replayed by filtering the same post-NMS basketball candidate cache.",
             "Threshold calibration is performed for both models so score calibration differences are not mistaken for detector capability differences.",
             "The v1.1.0 tracker sweep is intentionally small: temporal max_prediction_gap 1..4; trajectory uses loose/medium gates, gaps 2/4, and a small score/protection policy set.",
             "This same Porto-Ovarense GT is calibration/tuning evidence. Final promotion still requires evaluation on additional held-out videos with the chosen settings frozen.",
