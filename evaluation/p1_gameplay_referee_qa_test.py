@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import inspect
 from pathlib import Path
 from types import SimpleNamespace
 import tempfile
@@ -39,6 +40,18 @@ def test_gameplay_scene_cut_resets_grace() -> None:
     for _ in range(4):
         assert filt.is_gameplay(cut) is False
         assert filt.last_diagnostics["has_court_evidence"] is False
+
+
+def test_referee_parser_matches_split_ball_pipeline_contract() -> None:
+    signature = inspect.signature(PerformanceDetector._parse)
+    params = list(signature.parameters.values())
+    assert [param.name for param in params] == [
+        "self",
+        "frame_state",
+        "tracked_results",
+        "ball_results",
+    ]
+    assert params[-1].default is None
 
 
 def test_referee_class_is_tracked_but_separate() -> None:
@@ -85,6 +98,7 @@ def test_preview_renders_referee_entity() -> None:
 
 def main() -> None:
     test_gameplay_scene_cut_resets_grace()
+    test_referee_parser_matches_split_ball_pipeline_contract()
     test_referee_class_is_tracked_but_separate()
     test_preview_renders_referee_entity()
     print("p1_gameplay_referee_qa_test: PASS")
