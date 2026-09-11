@@ -10,11 +10,30 @@ from services.vision.ball_trajectory_consistency import (
 
 
 class TrajectoryAwareBallTrackerV1(TemporalBallTrackerV1):
-    """TemporalBallTrackerV1 with explicit trajectory-consistency candidate ranking."""
+    """TemporalBallTrackerV1 with explicit trajectory-consistency candidate ranking.
 
-    def __init__(self, *args, trajectory: BallTrajectoryConsistencyV1 | None = None, **kwargs) -> None:
+    The optional override-policy controls let evaluation distinguish trajectory evidence
+    from promotion policy. Defaults preserve the original v1 behavior.
+    """
+
+    def __init__(
+        self,
+        *args,
+        trajectory: BallTrajectoryConsistencyV1 | None = None,
+        min_trajectory_score: float = 0.0,
+        protect_direct_confidence: float | None = None,
+        override_score_margin: float = 0.0,
+        **kwargs,
+    ) -> None:
         super().__init__(*args, **kwargs)
         self.trajectory = trajectory or BallTrajectoryConsistencyV1()
+        self.min_trajectory_score = max(0.0, min(float(min_trajectory_score), 1.0))
+        self.protect_direct_confidence = (
+            None
+            if protect_direct_confidence is None
+            else max(0.0, min(float(protect_direct_confidence), 1.0))
+        )
+        self.override_score_margin = max(0.0, float(override_score_margin))
         self.last_area: float | None = None
 
     @staticmethod
@@ -67,9 +86,6 @@ class TrajectoryAwareBallTrackerV1(TemporalBallTrackerV1):
         if self.last_frame_id is not None:
             age = int(frame_id) - int(self.last_frame_id)
             if age > self.max_prediction_gap:
-                # Expire before trajectory scoring. The frame that crosses the short-gap
-                # budget is always missing, even if a smooth/high-confidence candidate is
-                # present; a later frame may seed a new track from clean state.
                 expired_age = max(age, 0)
                 self._reset()
                 return BallTemporalDecision(
@@ -104,6 +120,7 @@ class TrajectoryAwareBallTrackerV1(TemporalBallTrackerV1):
         assert self.last_center is not None
 
         scored: list[tuple[float, int, BallTrajectoryScore]] = []
+        details_by_index: dict[int, BallTrajectoryScore] = {}
         for index, candidate in enumerate(candidates):
             details = self.trajectory.score_candidate(
                 candidate,
@@ -114,22 +131,49 @@ class TrajectoryAwareBallTrackerV1(TemporalBallTrackerV1):
                 dt=dt,
                 frame_diagonal=diagonal,
             )
-            if details.plausible:
+            details_by_index[index] = details
+            if details.plausible and details.score >= self.min_trajectory_score:
                 scored.append((details.score, index, details))
 
         if scored:
             scored.sort(key=lambda item: item[0], reverse=True)
-            _, index, details = scored[0]
+            _, best_index, best_details = scored[0]
+            direct_index = max(
+                range(len(candidates)),
+                key=lambda idx: float(candidates[idx].get("confidence", 0.0)),
+            )
+            direct_details = details_by_index[direct_index]
+            direct_is_eligible = (
+                direct_details.plausible
+                and direct_details.score >= self.min_trajectory_score
+            )
+            direct_confidence = float(candidates[direct_index].get("confidence", 0.0))
+
+            selected_index = best_index
+            selected_details = best_details
+            source = "detector_trajectory_consistent"
+
+            if best_index != direct_index and direct_is_eligible:
+                protected = (
+                    self.protect_direct_confidence is not None
+                    and direct_confidence >= self.protect_direct_confidence
+                )
+                margin_met = best_details.score >= (
+                    direct_details.score + self.override_score_margin
+                )
+                if protected or not margin_met:
+                    selected_index = direct_index
+                    selected_details = direct_details
+                    source = "detector_direct_protected"
+
             return self._accept_trajectory_direct(
-                candidates[index],
+                candidates[selected_index],
                 frame_id=frame_id,
-                selected_index=index,
-                details=details,
-                source="detector_trajectory_consistent",
+                selected_index=selected_index,
+                details=selected_details,
+                source=source,
             )
 
-        # No candidate satisfied the trajectory gates. Preserve the conservative temporal
-        # semantics: bridge only the short gap and then return missing/UNKNOWN upstream.
         return super().update([], frame_id=frame_id, frame_shape=frame_shape)
 
     def metadata(self) -> dict[str, Any]:
@@ -139,6 +183,11 @@ class TrajectoryAwareBallTrackerV1(TemporalBallTrackerV1):
                 "version": "trajectory_aware_ball_tracker_v1",
                 "trajectory_consistency": True,
                 "trajectory": self.trajectory.metadata(),
+                "override_policy": {
+                    "min_trajectory_score": self.min_trajectory_score,
+                    "protect_direct_confidence": self.protect_direct_confidence,
+                    "override_score_margin": self.override_score_margin,
+                },
                 "reacquisition": False,
             }
         )
