@@ -10,6 +10,7 @@ class FrameState:
 
     Single source of truth using standard Python dictionaries for player/ball detections,
     supporting camera tracking metadata, diagnostics, backboard ROI, and backward-compatible aliases.
+    Referees are kept separate from players so they never enter PlayerState, team, or jersey identity.
     """
 
     # Primary Video Metadata
@@ -29,6 +30,7 @@ class FrameState:
 
     # Detected Entities (Pure Dictionaries)
     players: List[Dict[str, Any]] = field(default_factory=list)
+    referees: List[Dict[str, Any]] = field(default_factory=list)
     ball: Optional[Dict[str, Any]] = None
     ball_handler: Optional[Dict[str, Any]] = None
 

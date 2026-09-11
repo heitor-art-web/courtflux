@@ -76,26 +76,48 @@ class GameplayFilter:
         edge_score = max(0.0, 1.0 - edge_ratio / 0.12)
 
         confidence = 0.45 * court_score + 0.35 * motion_score + 0.20 * edge_score
-
-        # Baseline behaviour retained for the first diagnostic comparison.
-        if scene_cut:
-            confidence += 0.10
-
         confidence = min(confidence, 1.0)
-        vote = confidence > 0.70
+
+        # Gameplay needs some actual court evidence. This prevents close-ups, crowd shots,
+        # benches, score graphics, and other moving broadcast content from winning on motion alone.
+        court_vote_floor = max(0.01, self.min_court_ratio * 0.60)
+        court_grace_floor = max(0.01, self.min_court_ratio * 0.40)
+        has_court_evidence = court_ratio >= court_vote_floor
+        vote = confidence > 0.70 and has_court_evidence and not scene_cut
+
+        # A scene cut is a boundary, not positive gameplay evidence. Reset temporal state so
+        # grace from the previous camera shot cannot bleed into replays/close-ups/graphics.
+        if scene_cut:
+            self.gameplay_votes.clear()
+            self.grace_counter = 0
+
         self.gameplay_votes.append(vote)
         voted_gameplay = sum(self.gameplay_votes) >= 5
 
         used_grace = False
-        if voted_gameplay:
+        if scene_cut:
+            result = False
+        elif voted_gameplay:
             self.grace_counter = self.max_grace_frames
             result = True
-        elif self.grace_counter > 0:
+        elif self.grace_counter > 0 and court_ratio >= court_grace_floor:
             self.grace_counter -= 1
             used_grace = True
             result = True
         else:
+            self.grace_counter = 0
             result = False
+
+        if scene_cut:
+            reason = "scene_cut_reset"
+        elif voted_gameplay:
+            reason = "temporal_vote"
+        elif used_grace:
+            reason = "court_supported_grace"
+        elif not has_court_evidence:
+            reason = "insufficient_court_evidence"
+        else:
+            reason = "insufficient_temporal_votes"
 
         self.last_diagnostics = {
             "scene_similarity": round(float(similarity), 4),
@@ -103,6 +125,9 @@ class GameplayFilter:
             "scene_cut": bool(scene_cut),
             "court_ratio": round(float(court_ratio), 5),
             "court_score": round(float(court_score), 4),
+            "court_vote_floor": round(float(court_vote_floor), 5),
+            "court_grace_floor": round(float(court_grace_floor), 5),
+            "has_court_evidence": bool(has_court_evidence),
             "motion_ratio": round(float(motion_ratio), 5) if motion_ratio is not None else None,
             "motion_score": round(float(motion_score), 4),
             "edge_ratio": round(float(edge_ratio), 5),
@@ -112,6 +137,7 @@ class GameplayFilter:
             "votes_true": int(sum(self.gameplay_votes)),
             "votes_window": int(len(self.gameplay_votes)),
             "used_grace": bool(used_grace),
+            "reason": reason,
             "result": bool(result),
         }
         return result
