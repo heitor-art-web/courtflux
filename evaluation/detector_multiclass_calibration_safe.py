@@ -1,12 +1,21 @@
 from __future__ import annotations
 
 import json
+from collections import Counter
 from pathlib import Path
 from typing import Any
 
 from ultralytics import YOLO
 
 import evaluation.detector_multiclass_calibration as base
+
+
+def _format_class_counts(counts: Counter[str], requested_classes: list[str]) -> str:
+    ordered = [
+        f"{class_name}={counts.get(class_name, 0)}"
+        for class_name in requested_classes
+    ]
+    return " ".join(ordered)
 
 
 def run_detector_once_safe(
@@ -32,6 +41,7 @@ def run_detector_once_safe(
     )
     records: list[dict[str, Any]] = []
     detections_out = output_dir / f"detections_{label}.jsonl"
+    cumulative_counts: Counter[str] = Counter()
 
     with detections_out.open("w", encoding="utf-8") as handle:
         for index, source_path in enumerate(image_paths, start=1):
@@ -60,11 +70,19 @@ def run_detector_once_safe(
             records.append(row)
             handle.write(json.dumps(row) + "\n")
 
+            frame_counts: Counter[str] = Counter(
+                pred["class_name"]
+                for pred in preds
+                if pred["class_name"] in requested_classes
+            )
+            cumulative_counts.update(frame_counts)
+
             if index == 1 or index % 25 == 0 or index == len(image_paths):
                 print(
                     f"[{label}] [{index}/{len(image_paths)}] "
                     f"{100.0 * index / max(len(image_paths), 1):.1f}% "
-                    f"predictions={len(preds)}",
+                    f"frame[{_format_class_counts(frame_counts, requested_classes)} total={sum(frame_counts.values())}] "
+                    f"cumulative[{_format_class_counts(cumulative_counts, requested_classes)} total={sum(cumulative_counts.values())}]",
                     flush=True,
                 )
 
@@ -77,6 +95,7 @@ def run_detector_once_safe(
         ],
         "low_conf_detection_file": str(detections_out),
         "inference_mode": "single_image_to_avoid_nms_batch_timeout",
+        "low_conf_detection_counts_by_class": dict(cumulative_counts),
     }
     return records, diagnostics
 
