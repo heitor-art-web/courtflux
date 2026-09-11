@@ -28,8 +28,47 @@ label[class*="uploadBox"]:focus-within {
   outline-offset: 3px;
 }
 
+/* New Analysis already exposes honest stage text. Make that in-flight state
+   prominent enough that users can see the submission is actively progressing. */
+div[class*="stageBox"] {
+  position: relative;
+  min-height: 46px;
+  display: flex;
+  align-items: center;
+  padding-left: 42px !important;
+  border-color: #8bbce7 !important;
+  color: #234f75 !important;
+  font-size: 0.82rem !important;
+  font-weight: 800;
+}
+
+div[class*="stageBox"]::before {
+  content: "";
+  position: absolute;
+  left: 14px;
+  width: 16px;
+  height: 16px;
+  border: 2px solid rgba(49, 91, 128, 0.24);
+  border-top-color: #315b80;
+  border-radius: 50%;
+  animation: courtflux-analysis-spin 0.8s linear infinite;
+}
+
+button[aria-busy="true"] {
+  cursor: progress;
+}
+
+@keyframes courtflux-analysis-spin {
+  to { transform: rotate(360deg); }
+}
+
 @media (prefers-reduced-motion: reduce) {
   .skip-link {
     transition: none;
+  }
+
+  div[class*="stageBox"]::before {
+    animation: none;
+    border-color: #315b80;
   }
 }
