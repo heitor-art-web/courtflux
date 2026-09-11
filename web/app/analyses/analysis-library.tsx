@@ -70,22 +70,13 @@ function sourceLabel(kind: LibraryAnalysis["sourceKind"]) {
 
 function retentionCopy(analysis: LibraryAnalysis) {
   if (analysis.sourceKind === "youtube") {
-    return {
-      label: "YouTube source · Results saved in CourtFlux",
-      className: styles.retentionNeutral,
-    };
+    return { label: "YouTube source · Results saved in CourtFlux", className: styles.retentionNeutral };
   }
   if (analysis.sourceKind !== "upload") {
-    return {
-      label: "Results saved in CourtFlux",
-      className: styles.retentionNeutral,
-    };
+    return { label: "Results saved in CourtFlux", className: styles.retentionNeutral };
   }
   if (analysis.sourceDeletedAt) {
-    return {
-      label: "Source video no longer stored · Results preserved",
-      className: styles.retentionPreserved,
-    };
+    return { label: "Source video no longer stored · Results preserved", className: styles.retentionPreserved };
   }
   if (analysis.sourceExpiresAt) {
     return {
@@ -94,19 +85,12 @@ function retentionCopy(analysis: LibraryAnalysis) {
     };
   }
   return {
-    label: analysis.sourceRetentionKnown
-      ? "Uploaded source follows CourtFlux retention policy"
-      : "Uploaded source · Retention status unavailable",
+    label: analysis.sourceRetentionKnown ? "Uploaded source follows CourtFlux retention policy" : "Uploaded source · Retention status unavailable",
     className: styles.retentionNeutral,
   };
 }
 
-export function AnalysisLibrary({
-  analyses,
-  totalCount,
-  canStartAnalysis,
-  maxItems,
-}: {
+export function AnalysisLibrary({ analyses, totalCount, canStartAnalysis, maxItems }: {
   analyses: LibraryAnalysis[];
   totalCount: number;
   canStartAnalysis: boolean;
@@ -156,12 +140,7 @@ export function AnalysisLibrary({
         <div className={styles.controls}>
           <label className={styles.searchField}>
             <span className="sr-only">Search analyses</span>
-            <input
-              type="search"
-              value={query}
-              onChange={(event) => setQuery(event.target.value)}
-              placeholder="Search matchup, team or competition"
-            />
+            <input type="search" value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Search matchup, team or competition" />
           </label>
           <label className={styles.selectField}>
             <span>Status</span>
@@ -182,15 +161,7 @@ export function AnalysisLibrary({
             </select>
           </label>
           {activeFilters ? (
-            <button
-              type="button"
-              className={styles.clearButton}
-              onClick={() => {
-                setQuery("");
-                setStatus("all");
-                setSource("all");
-              }}
-            >
+            <button type="button" className={styles.clearButton} onClick={() => { setQuery(""); setStatus("all"); setSource("all"); }}>
               Clear filters
             </button>
           ) : null}
@@ -206,11 +177,15 @@ export function AnalysisLibrary({
             {filtered.map((analysis) => {
               const retention = retentionCopy(analysis);
               const duration = formatMinutes(analysis.durationMinutes);
-              const actionLabel = analysis.status === "completed"
-                ? "View results"
-                : analysis.status === "queued" || analysis.status === "running"
-                  ? "Track analysis"
-                  : "Open analysis";
+              const retryable = canStartAnalysis && (analysis.status === "failed" || analysis.status === "canceled");
+              const actionLabel = retryable
+                ? "Edit and retry"
+                : analysis.status === "completed"
+                  ? "View results"
+                  : analysis.status === "queued" || analysis.status === "running"
+                    ? "Track analysis"
+                    : "Open analysis";
+              const actionHref = retryable ? `/analysis/new?retry=${analysis.id}` : `/analysis/${analysis.id}`;
 
               return (
                 <article className={styles.analysisCard} key={analysis.id}>
@@ -228,8 +203,8 @@ export function AnalysisLibrary({
                     <div className={`${styles.retention} ${retention.className}`}>{retention.label}</div>
                   </div>
                   <div className={styles.cardAction}>
-                    <Link href={`/analysis/${analysis.id}`}>{actionLabel}<span aria-hidden="true">→</span></Link>
-                    <small>Analysis {analysis.id.slice(0, 8)}</small>
+                    <Link href={actionHref}>{actionLabel}<span aria-hidden="true">→</span></Link>
+                    {retryable ? <small>Previous run stays in history</small> : <small>Analysis {analysis.id.slice(0, 8)}</small>}
                   </div>
                 </article>
               );
@@ -238,21 +213,9 @@ export function AnalysisLibrary({
         ) : (
           <div className={styles.emptyState}>
             <strong>{analyses.length ? "No analyses match those filters." : "No analyses yet."}</strong>
-            <p>
-              {analyses.length
-                ? "Try a different team, competition, status or source."
-                : "Your completed and in-progress basketball analyses will appear here after your first submission."}
-            </p>
+            <p>{analyses.length ? "Try a different team, competition, status or source." : "Your completed and in-progress basketball analyses will appear here after your first submission."}</p>
             {analyses.length ? (
-              <button
-                type="button"
-                className={styles.secondaryButton}
-                onClick={() => {
-                  setQuery("");
-                  setStatus("all");
-                  setSource("all");
-                }}
-              >
+              <button type="button" className={styles.secondaryButton} onClick={() => { setQuery(""); setStatus("all"); setSource("all"); }}>
                 Show all analyses
               </button>
             ) : canStartAnalysis ? (
