@@ -1,14 +1,26 @@
 const LOCAL_WORKER_URL = "http://127.0.0.1:8787";
 
+function workerBaseUrl() {
+  const configured = process.env.WORKER_API_URL?.trim();
+  if (configured) return configured.replace(/\/$/, "");
+  if (process.env.NODE_ENV !== "production") return LOCAL_WORKER_URL;
+  throw new Error("CourtFlux analysis worker is not configured for this environment");
+}
+
 export async function workerFetch(path: string, init: RequestInit = {}) {
-  const baseUrl = (process.env.WORKER_API_URL ?? LOCAL_WORKER_URL).replace(/\/$/, "");
+  const baseUrl = workerBaseUrl();
   const token = process.env.WORKER_API_TOKEN?.trim();
 
   const headers = new Headers(init.headers);
   if (token) headers.set("Authorization", `Bearer ${token}`);
   if (init.body && !headers.has("Content-Type")) headers.set("Content-Type", "application/json");
 
-  return fetch(`${baseUrl}${path}`, { ...init, headers, cache: "no-store" });
+  try {
+    return await fetch(`${baseUrl}${path}`, { ...init, headers, cache: "no-store" });
+  } catch (error) {
+    const detail = error instanceof Error ? error.message : String(error);
+    throw new Error(`CourtFlux analysis worker is unreachable: ${detail}`);
+  }
 }
 
 export async function proxyWorkerResponse(response: Response) {
