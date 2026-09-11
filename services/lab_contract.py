@@ -2,10 +2,10 @@ from __future__ import annotations
 
 LAB_DEFAULTS = {
     "video_source": "https://www.youtube.com/watch?v=OwiQgAMqyUs",
-    "model": "weights/model_v1.0.0.pt",
-    "detector_conf": 0.10,
+    "model": "weights/model_v1.1.0.pt",
+    "detector_conf": 0.40,
     "inference_conf": 0.03,
-    "ball_conf": 0.03,
+    "ball_conf": 0.075,
     "imgsz": 960,
     "device": "mps",
     "tracker": "botsort.yaml",
