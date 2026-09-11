@@ -40,9 +40,13 @@ class PlayerStateEstimatorV1:
         if raw is None:
             return None
         try:
-            return int(raw)
+            track_id = int(raw)
         except (TypeError, ValueError):
             return None
+        # The established tracking baseline uses -1 for detections that have not been
+        # assigned a persistent tracker identity. Such observations are useful diagnostics,
+        # but they must never become canonical PlayerState identities.
+        return track_id if track_id >= 0 else None
 
     @staticmethod
     def _bbox(row: dict[str, Any]) -> tuple[int, int, int, int] | None:
@@ -201,6 +205,7 @@ class PlayerStateEstimatorV1:
             "detector_version": self.config.detector_version,
             "memory_frames": self.memory_frames,
             "requires_upstream_track_id": True,
+            "negative_track_ids_are_untracked": True,
             "tracking_association_owned_upstream": True,
             "referees_are_player_states": False,
             "identity_resolution": "deferred_to_identity_consolidation",
