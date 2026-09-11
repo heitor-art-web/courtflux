@@ -33,11 +33,13 @@ export function AuthForm({ initialMode }: { initialMode: AuthMode }) {
         return;
       }
 
+      const confirmationUrl = `${window.location.origin}/auth/confirm`;
       const { data, error: authError } = await supabase.auth.signUp({
         email,
         password,
         options: {
           data: { full_name: fullName.trim() || undefined },
+          emailRedirectTo: confirmationUrl,
         },
       });
       if (authError) throw authError;
@@ -48,7 +50,7 @@ export function AuthForm({ initialMode }: { initialMode: AuthMode }) {
         return;
       }
 
-      setMessage("Account created. Check your email to confirm the account, then sign in. CourtFlux will guide you through role and team setup next.");
+      setMessage("Account created. Check your email to confirm the account. The confirmation link will return you to CourtFlux and continue onboarding.");
       setMode("login");
     } catch {
       setError(
