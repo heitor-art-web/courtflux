@@ -105,19 +105,26 @@ class PerformanceDetector(SmartPerformanceDetector):
             kwargs["classes"] = class_ids
         return self.model.track(frame, **kwargs)
 
-    def _parse(self, frame_state: Any, results: Any) -> None:
-        """Preserve normal player/ball parsing and expose referees independently."""
-        super()._parse(frame_state, results)
+    def _parse(
+        self,
+        frame_state: Any,
+        tracked_results: Any,
+        ball_results: Any = None,
+    ) -> None:
+        """Preserve split player/ball parsing and expose referees independently."""
+        super()._parse(frame_state, tracked_results, ball_results)
         referees: list[dict[str, Any]] = []
         raw_referees = 0
-        if results and results[0].boxes is not None:
+        if tracked_results and tracked_results[0].boxes is not None:
             names = getattr(self.model, "names", {}) or {}
-            for box in results[0].boxes:
+            for box in tracked_results[0].boxes:
                 cls_id = int(box.cls[0])
                 if isinstance(names, dict):
                     cls_name = str(names.get(cls_id, cls_id)).lower()
                 else:
-                    cls_name = str(names[cls_id] if 0 <= cls_id < len(names) else cls_id).lower()
+                    cls_name = str(
+                        names[cls_id] if 0 <= cls_id < len(names) else cls_id
+                    ).lower()
                 if not self._is_referee_class(cls_name):
                     continue
                 raw_referees += 1
@@ -165,7 +172,9 @@ class PerformanceDetector(SmartPerformanceDetector):
             "available": bool(tracker.available) if tracker is not None else False,
             "profile": tracker.profile if tracker is not None else None,
             "identity_model": (
-                tracker._identity_model_diagnostics() if tracker is not None else {"loaded": False}
+                tracker._identity_model_diagnostics()
+                if tracker is not None
+                else {"loaded": False}
             ),
             "safety": {
                 "lost_can_emit_concrete_output": False,
