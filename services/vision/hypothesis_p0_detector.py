@@ -13,14 +13,18 @@ class PerformanceDetector(SmartPerformanceDetector):
 
     Default behaviour is unchanged. Set ``BASKETBALL_BALL_HYPOTHESIS_TRACKER=1`` to
     run OC-SORT+CIoU in parallel and expose lifecycle/identity diagnostics. Set
-    ``BASKETBALL_BALL_HYPOTHESIS_OUTPUT=1`` only for an explicit experimental run;
-    in that mode concrete ball output is emitted exclusively from an observed TRACKED
+    ``BASKETBALL_BALL_HYPOTHESIS_OUTPUT=1`` only for an explicit experimental run; in
+    that mode concrete ball output is emitted exclusively from an observed TRACKED
     hypothesis approved by the frozen temporal seed model. LOST/TENTATIVE hypotheses
     are never emitted.
+
+    Player and referee detections share YOLO/BoT-SORT inference, but referees are parsed
+    into ``FrameState.referees`` and never enter PlayerState/team/jersey identity.
     """
 
     def __init__(self, *args: Any, **kwargs: Any) -> None:
         super().__init__(*args, **kwargs)
+        self.referee_conf_thresh = self._env_conf("BASKETBALL_REFEREE_CONF", 0.50)
         self.ball_hypothesis_enabled = self._env_bool(
             "BASKETBALL_BALL_HYPOTHESIS_TRACKER",
             False,
@@ -60,6 +64,93 @@ class PerformanceDetector(SmartPerformanceDetector):
             )
         else:
             print("🏀 OC-SORT hypothesis tracker: off", flush=True)
+        print(
+            f"🟨 Referee tracking: on conf={self.referee_conf_thresh:.2f} "
+            "(separate from PlayerState/team/jersey)",
+            flush=True,
+        )
+
+    @staticmethod
+    def _is_referee_class(name: str) -> bool:
+        value = str(name).lower().replace("-", "_").replace(" ", "_")
+        return "referee" in value or value in {"ref", "official", "officials"}
+
+    def _tracked_entity_class_ids(self) -> list[int]:
+        names = getattr(self.model, "names", {}) or {}
+        items = names.items() if isinstance(names, dict) else enumerate(names)
+        class_ids = []
+        for class_id, name in items:
+            normalized = str(name).lower()
+            if self._is_player_class(normalized) or self._is_referee_class(normalized):
+                class_ids.append(int(class_id))
+        return sorted(set(class_ids))
+
+    def _track(self, frame: Any):
+        """Track players and referees while keeping split ball detection independent."""
+        if not bool(getattr(self, "split_ball_detection", False)):
+            return super()._track(frame)
+
+        kwargs: dict[str, Any] = {
+            "persist": True,
+            "tracker": self.tracker,
+            "conf": self.player_conf_thresh,
+            "iou": self.iou,
+            "imgsz": self.imgsz,
+            "max_det": self.max_det,
+            "device": self.device,
+            "verbose": False,
+        }
+        class_ids = self._tracked_entity_class_ids()
+        if class_ids:
+            kwargs["classes"] = class_ids
+        return self.model.track(frame, **kwargs)
+
+    def _parse(self, frame_state: Any, results: Any) -> None:
+        """Preserve normal player/ball parsing and expose referees independently."""
+        super()._parse(frame_state, results)
+        referees: list[dict[str, Any]] = []
+        raw_referees = 0
+        if results and results[0].boxes is not None:
+            names = getattr(self.model, "names", {}) or {}
+            for box in results[0].boxes:
+                cls_id = int(box.cls[0])
+                if isinstance(names, dict):
+                    cls_name = str(names.get(cls_id, cls_id)).lower()
+                else:
+                    cls_name = str(names[cls_id] if 0 <= cls_id < len(names) else cls_id).lower()
+                if not self._is_referee_class(cls_name):
+                    continue
+                raw_referees += 1
+                conf = float(box.conf[0])
+                if conf < self.referee_conf_thresh:
+                    continue
+                x1, y1, x2, y2 = map(int, box.xyxy[0].tolist())
+                if x2 <= x1 or y2 <= y1:
+                    continue
+                track_id = int(box.id[0]) if box.id is not None else -1
+                referees.append(
+                    {
+                        "track_id": track_id,
+                        "box": [x1, y1, x2, y2],
+                        "center": ((x1 + x2) / 2.0, (y1 + y2) / 2.0),
+                        "confidence": conf,
+                        "class_name": cls_name,
+                    }
+                )
+
+        frame_state.referees = referees
+        diag = frame_state.diagnostics.setdefault("detector", {})
+        diag["raw_referee_candidates"] = int(raw_referees)
+        diag["accepted_referee_candidates"] = len(referees)
+        diag["referee_conf"] = round(float(self.referee_conf_thresh), 6)
+        diag["referee_predictions"] = [
+            {
+                "track_id": int(referee.get("track_id", -1)),
+                "box": list(referee.get("box", [])),
+                "confidence": round(float(referee.get("confidence", 0.0)), 6),
+            }
+            for referee in referees
+        ]
 
     def _tracker_config(self) -> dict[str, Any]:
         config = super()._tracker_config()
