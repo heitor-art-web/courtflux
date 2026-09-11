@@ -26,6 +26,12 @@ def main() -> None:
                 "box": [200, 20, 220, 60],
                 "confidence": 0.8,
             },
+            {
+                "track_id": -1,
+                "class_name": "player",
+                "box": [230, 20, 250, 60],
+                "confidence": 0.85,
+            },
         ],
         frame_id=10,
         timestamp_sec=1.0,
@@ -45,7 +51,7 @@ def main() -> None:
     diagnostics = estimator.last_diagnostics
     assert diagnostics["player_states"] == 1
     assert diagnostics["referee_excluded"] == 1
-    assert diagnostics["player_missing_track_id"] == 1
+    assert diagnostics["player_missing_track_id"] == 2
 
     second = estimator.update(
         [
@@ -77,6 +83,7 @@ def main() -> None:
 
     metadata = estimator.metadata()
     assert metadata["requires_upstream_track_id"] is True
+    assert metadata["negative_track_ids_are_untracked"] is True
     assert metadata["tracking_association_owned_upstream"] is True
     assert metadata["referees_are_player_states"] is False
     assert metadata["identity_resolution"] == "deferred_to_identity_consolidation"
