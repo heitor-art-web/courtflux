@@ -4,6 +4,7 @@ import statistics
 
 import numpy as np
 
+from services.vision.court_state_v1 import CourtStateEstimatorV1
 from services.vision.diagnostic_preview import DiagnosticPreview
 
 
@@ -33,6 +34,7 @@ class Pipeline:
         self.db_conn = db_conn
         self.detection_only = bool(detection_only)
         self.persist_results = bool(persist_results)
+        self.court_state_estimator = CourtStateEstimatorV1()
         self._camera_tracker_initialized = False
         self._renderer_closed = False
 
@@ -102,8 +104,7 @@ class Pipeline:
 
         Court coordinates are serialized only when calibration is explicitly valid and
         the projected point is plausible on a FIBA court. Frame-size and box-height
-        diagnostics let the evaluator distinguish broadcast close-ups from wide views
-        without changing GameplayFilter policy.
+        diagnostics let the evaluator distinguish broadcast close-ups from wide views.
         """
         detector_diag = frame_state.diagnostics.setdefault("detector", {})
         existing = list(detector_diag.get("team_predictions", []) or [])
@@ -174,6 +175,9 @@ class Pipeline:
                     "homography_source": homography_source,
                     "homography_reprojection_rmse_px": reprojection_rmse_px,
                     "active_on_court": player.get("active_on_court"),
+                    "identity_eligible": player.get("identity_eligible"),
+                    "court_eligibility_source": player.get("court_eligibility_source"),
+                    "local_court_surface_ratio": player.get("local_court_surface_ratio"),
                     "frame_width": frame_w,
                     "frame_height": frame_h,
                     "player_box_height_ratio": (
@@ -191,7 +195,7 @@ class Pipeline:
         )
 
         detector_diag["team_predictions"] = snapshots
-        detector_diag["p1_tracking_schema"] = 2
+        detector_diag["p1_tracking_schema"] = 3
         detector_diag["p1_tracking_frame"] = {
             "frame_width": frame_w,
             "frame_height": frame_h,
@@ -206,6 +210,25 @@ class Pipeline:
             "homography_reprojection_rmse_px": reprojection_rmse_px,
         }
         return frame_state
+
+    @staticmethod
+    def _apply_court_identity_gate(frame_state):
+        """Suppress identity claims only for explicit off-court detections.
+
+        The detection remains in ``frame_state.players`` for visual QA. UNKNOWN/ambiguous
+        court eligibility is intentionally not rejected.
+        """
+        for player in list(getattr(frame_state, "players", []) or []):
+            if not isinstance(player, dict) or player.get("active_on_court") is not False:
+                continue
+            player["team"] = None
+            player["team_confidence"] = 0.0
+            player["team_margin"] = 0.0
+            player["shirt_num"] = None
+            player["shirt_number"] = None
+            player["player_name"] = None
+            player["identity_eligible"] = False
+            player["identity_rejection_reason"] = "explicit_off_court"
 
     def process(self, frame_state):
         self.profiler.start("Total")
@@ -240,6 +263,22 @@ class Pipeline:
             frame_state = self.camera_tracker.project_entities(frame_state)
             self.profiler.stop("Court Projection")
 
+        self.profiler.start("CourtState")
+        court_state = self.court_state_estimator.update(
+            frame_state,
+            gameplay_diagnostics=frame_state.diagnostics.get("gameplay_filter", {}) or {},
+        )
+        frame_state.court_state = court_state
+        frame_state.diagnostics["court_state"] = court_state.as_dict()
+        self._apply_court_identity_gate(frame_state)
+        if self.detection_only:
+            frame_state.valid_gameplay = bool(court_state.analysis_eligible)
+            gameplay_diag = frame_state.diagnostics.setdefault("gameplay_filter", {})
+            gameplay_diag["pre_court_state_result"] = bool(is_gameplay)
+            gameplay_diag["post_court_state_result"] = bool(frame_state.valid_gameplay)
+            gameplay_diag["post_court_state_reason"] = court_state.eligibility_reason
+        self.profiler.stop("CourtState")
+
         frame_state = self._enrich_player_tracking_diagnostics(frame_state)
         detector_diag = frame_state.diagnostics.get("detector", {}) or {}
         for name, milliseconds in (detector_diag.get("timing_ms", {}) or {}).items():
@@ -254,13 +293,21 @@ class Pipeline:
             if not detector_ball_source:
                 detector_ball_source = "detector" if getattr(frame_state, "ball", None) is not None else "missing"
             camera_diag = frame_state.diagnostics.get("camera", {}) or {}
+            analysis_players = [
+                player
+                for player in list(getattr(frame_state, "players", []) or [])
+                if not isinstance(player, dict) or player.get("active_on_court") is not False
+            ]
             frame_state.diagnostics.setdefault("analytics", {}).update(
                 {
                     "ball_source": detector_ball_source,
-                    "players_final": len(getattr(frame_state, "players", []) or []),
+                    "players_final": len(analysis_players),
+                    "players_detected_total": len(getattr(frame_state, "players", []) or []),
                     "homography_active": bool(camera_diag.get("valid", False)),
                     "homography_diagnostic_only": self.camera_tracker is not None,
                     "detection_only": True,
+                    "court_state_mode": court_state.mode,
+                    "court_state_analysis_eligible": court_state.analysis_eligible,
                 }
             )
 
