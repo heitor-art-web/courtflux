@@ -45,6 +45,18 @@ type Summary = {
   [key: string]: unknown;
 };
 
+type WorkerProgress = {
+  phase: string | null;
+  percent: number | null;
+  processed_seconds: number | null;
+  total_seconds: number | null;
+  frames_processed: number | null;
+  elapsed_sec: number | null;
+  eta_sec: number | null;
+  estimated_completion_at: string | null;
+  last_progress_at: string | null;
+};
+
 type AnalysisData = {
   run: {
     id: string;
@@ -68,6 +80,16 @@ type AnalysisData = {
     completed_at: string | null;
     created_at: string;
     updated_at: string;
+  } | null;
+  worker: {
+    status: string | null;
+    started_at: string | null;
+    completed_at: string | null;
+    progress: WorkerProgress | null;
+    artifacts: {
+      preview: boolean;
+      analysis_video: boolean;
+    } | null;
   } | null;
   game: {
     id: string;
@@ -122,6 +144,13 @@ function formatDateTime(value: string | null | undefined) {
   }).format(date);
 }
 
+function formatExpectedTime(value: string | null | undefined) {
+  if (!value) return "Calculating…";
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return "Calculating…";
+  return new Intl.DateTimeFormat("en", { hour: "2-digit", minute: "2-digit" }).format(date);
+}
+
 function formatClock(seconds: number | null | undefined) {
   if (typeof seconds !== "number" || !Number.isFinite(seconds)) return "—";
   const total = Math.max(0, Math.round(seconds));
@@ -131,6 +160,17 @@ function formatClock(seconds: number | null | undefined) {
   return hours > 0
     ? `${hours}:${String(minutes).padStart(2, "0")}:${String(secs).padStart(2, "0")}`
     : `${minutes}:${String(secs).padStart(2, "0")}`;
+}
+
+function formatCompactDuration(seconds: number | null | undefined) {
+  if (typeof seconds !== "number" || !Number.isFinite(seconds)) return "Calculating…";
+  const total = Math.max(0, Math.round(seconds));
+  if (total < 60) return `${total}s`;
+  const hours = Math.floor(total / 3600);
+  const minutes = Math.floor((total % 3600) / 60);
+  const secs = total % 60;
+  if (hours > 0) return `${hours}h ${minutes}m`;
+  return secs >= 30 ? `${minutes + 1} min` : `${minutes}m ${secs}s`;
 }
 
 function formatDuration(start: number | null, end: number | null) {
@@ -189,6 +229,7 @@ export function AnalysisView({ runId }: { runId: string }) {
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(true);
   const [tab, setTab] = useState<Tab>("overview");
+  const [refreshTick, setRefreshTick] = useState(0);
 
   useEffect(() => {
     let cancelled = false;
@@ -202,6 +243,7 @@ export function AnalysisView({ runId }: { runId: string }) {
         if (cancelled) return;
 
         setData(payload);
+        setRefreshTick((value) => value + 1);
         setError("");
         setLoading(false);
 
@@ -242,6 +284,22 @@ export function AnalysisView({ runId }: { runId: string }) {
   const isComplete = status === "completed";
   const isFailed = status === "failed" || status === "canceled";
   const sourceDeleted = Boolean(data?.source.retention?.deleted_at);
+  const workerProgress = data?.worker?.progress ?? null;
+  const progressPercent = isComplete
+    ? 100
+    : typeof workerProgress?.percent === "number"
+      ? clampPercent(workerProgress.percent)
+      : 0;
+  const previewAvailable = Boolean(data?.worker?.artifacts?.preview);
+  const analysedVideoAvailable = Boolean(data?.worker?.artifacts?.analysis_video);
+  const lastProgressMs = workerProgress?.last_progress_at ? new Date(workerProgress.last_progress_at).getTime() : Number.NaN;
+  const progressStalled = status === "running"
+    && Number.isFinite(lastProgressMs)
+    && Date.now() - lastProgressMs > 120_000
+    && progressPercent < 99;
+  const liveElapsed = status === "running" && data?.job?.started_at
+    ? Math.max(0, (Date.now() - new Date(data.job.started_at).getTime()) / 1000)
+    : workerProgress?.elapsed_sec;
 
   const sourceLabel = useMemo(() => {
     if (!data) return "—";
@@ -302,6 +360,20 @@ export function AnalysisView({ runId }: { runId: string }) {
     );
   }
 
+  const trackingNote = status === "running"
+    ? workerProgress?.phase === "preparing"
+      ? "Preparing source and analysis model"
+      : workerProgress?.phase === "finalizing"
+        ? "Tracking complete · finalizing analysed video"
+        : typeof workerProgress?.percent === "number"
+          ? `${Math.round(progressPercent)}% · ${formatClock(workerProgress.processed_seconds)} of ${formatClock(workerProgress.total_seconds)} analysed`
+          : "Player and ball tracking in progress"
+    : isComplete
+      ? "Tracking pass completed"
+      : isFailed
+        ? "Processing stopped"
+        : "Starts after queue";
+
   const steps = [
     { label: "Received", note: "Analysis request saved", state: "done" },
     {
@@ -311,7 +383,7 @@ export function AnalysisView({ runId }: { runId: string }) {
     },
     {
       label: "Track video",
-      note: status === "running" ? "Player and ball tracking in progress" : isComplete ? "Tracking pass completed" : isFailed ? "Processing stopped" : "Starts after queue",
+      note: trackingNote,
       state: status === "running" ? "active" : isComplete ? "done" : "idle",
     },
     {
@@ -364,8 +436,10 @@ export function AnalysisView({ runId }: { runId: string }) {
 
       <section className={styles.progressPanel} aria-labelledby="progress-title">
         <div className={styles.progressHeader}>
-          <div><h2 id="progress-title">Processing progress</h2><p>Real run states only — CourtFlux does not invent a percentage when the worker has not reported one.</p></div>
-          <span className={statusClass(status)}>{status}</span>
+          <div>
+            <h2 id="progress-title">Processing progress</h2>
+            <p>Progress is based on the video timestamp actually processed by the worker. ETA appears once CourtFlux has enough tracking data to estimate the current pace.</p>
+          </div>
         </div>
         <div className={styles.timeline}>
           {steps.map((step, index) => (
@@ -376,6 +450,45 @@ export function AnalysisView({ runId }: { runId: string }) {
             </div>
           ))}
         </div>
+
+        {status === "running" ? (
+          <div className={styles.progressDetail} aria-live="polite">
+            {workerProgress?.phase === "preparing" || !workerProgress ? (
+              <div className={styles.progressWaiting}>
+                <strong>Preparing the analysis…</strong>
+                <span>CourtFlux is preparing the source and model. A percentage and ETA will appear after frame tracking begins.</span>
+              </div>
+            ) : (
+              <>
+                <div className={styles.progressMeterHeader}>
+                  <strong>{workerProgress.phase === "finalizing" ? "Finalizing analysed video" : "Track video"}</strong>
+                  <span>{Math.round(progressPercent)}%</span>
+                </div>
+                <div
+                  className={styles.progressMeter}
+                  role="progressbar"
+                  aria-label="Video analysis progress"
+                  aria-valuemin={0}
+                  aria-valuemax={100}
+                  aria-valuenow={Math.round(progressPercent)}
+                >
+                  <div className={styles.progressMeterFill} style={{ width: `${progressPercent}%` }} />
+                </div>
+                <div className={styles.progressStats}>
+                  <div><span>Video analysed</span><strong>{formatClock(workerProgress.processed_seconds)} / {formatClock(workerProgress.total_seconds)}</strong></div>
+                  <div><span>Elapsed</span><strong>{formatCompactDuration(liveElapsed)}</strong></div>
+                  <div><span>Estimated remaining</span><strong>{workerProgress.phase === "finalizing" ? "Finalizing…" : workerProgress.eta_sec == null ? "Calculating…" : `~${formatCompactDuration(workerProgress.eta_sec)}`}</strong></div>
+                  <div><span>Expected ready</span><strong>{workerProgress.phase === "finalizing" ? "Soon" : formatExpectedTime(workerProgress.estimated_completion_at)}</strong></div>
+                </div>
+              </>
+            )}
+            {progressStalled ? (
+              <div className={styles.progressWarning}>
+                Processing has not reported new video progress for over two minutes. The run is still marked running, but it may be slower than expected.
+              </div>
+            ) : null}
+          </div>
+        ) : null}
       </section>
 
       <section className={styles.metaGrid} aria-label="Analysis details">
@@ -403,23 +516,59 @@ export function AnalysisView({ runId }: { runId: string }) {
 
       <div className={styles.contentGrid}>
         <div className={styles.stack}>
-          <section className={styles.videoCard} aria-labelledby="video-title">
+          <section className={styles.videoCard} aria-labelledby="analysed-video-title">
             <div className={styles.panelHeader}>
-              <div><h2 id="video-title">Source video</h2><p>Use the original footage alongside the measured tracking summary while the source is retained.</p></div>
+              <div>
+                <h2 id="analysed-video-title">CourtFlux analysed video</h2>
+                <p>{isComplete ? "Review the annotated tracking output produced by this run." : "Watch the latest annotated frame while CourtFlux processes the video. The final analysed video becomes playable when the run completes."}</p>
+              </div>
             </div>
             <div className={styles.videoFrame}>
-              {data.source.kind === "upload" && data.source.playable_url ? (
-                <video src={data.source.playable_url} controls preload="metadata">Your browser does not support video playback.</video>
+              {isComplete && analysedVideoAvailable ? (
+                <video src={`/api/analyses/${encodeURIComponent(runId)}/preview-video`} controls preload="metadata">Your browser does not support video playback.</video>
+              ) : previewAvailable ? (
+                <img src={`/api/analyses/${encodeURIComponent(runId)}/preview?v=${refreshTick}`} alt="Latest CourtFlux annotated analysis preview" />
               ) : (
                 <div className={styles.videoPlaceholder}>
-                  <strong>{sourceDeleted ? "Source video removed" : data.source.kind === "youtube" ? "YouTube source" : "Video preview unavailable"}</strong>
-                  <span>{sourceDeleted ? "CourtFlux deleted this uploaded source after its 60-day retention period. The derived analysis results and statistics remain available." : data.source.kind === "youtube" ? "Open the original recording in YouTube while reviewing the CourtFlux evidence." : "The worker source is not exposed as a browser-playable URL."}</span>
+                  <strong>{isComplete ? "Analysed video unavailable" : "Preparing analysed preview"}</strong>
+                  <span>{isComplete ? "The worker has not exposed a final analysed video for this run." : "The first annotated frame will appear after CourtFlux starts tracking the video."}</span>
                 </div>
               )}
             </div>
-            {data.source.kind === "youtube" && data.source.playable_url ? (
-              <a className={styles.externalLink} href={data.source.playable_url} target="_blank" rel="noreferrer">Open source video ↗</a>
+            {isActive && previewAvailable ? (
+              <div className={styles.livePreviewMeta}><span className={styles.liveDot} aria-hidden="true" />Live annotated preview · refreshes with analysis progress</div>
             ) : null}
+            {isComplete && !analysedVideoAvailable && previewAvailable ? (
+              <div className={styles.infoBox}>The latest annotated frame is available, but the final analysed MP4 is not currently exposed by the worker.</div>
+            ) : null}
+          </section>
+
+          <section className={styles.videoCard} aria-labelledby="video-title">
+            <div className={styles.panelHeader}>
+              <div>
+                <h2 id="video-title">Source video</h2>
+                <p>{data.source.kind === "youtube" ? "The original recording stays on YouTube and opens externally." : "Use the retained original footage alongside the CourtFlux analysis."}</p>
+              </div>
+            </div>
+
+            {data.source.kind === "youtube" ? (
+              <div className={styles.sourceExternalCard}>
+                <div><strong>YouTube source</strong><span>Open the original recording in a new tab when you want to compare it with CourtFlux evidence.</span></div>
+                {data.source.playable_url ? <a className={styles.externalLink} href={data.source.playable_url} target="_blank" rel="noreferrer">Open source video ↗</a> : null}
+              </div>
+            ) : (
+              <div className={styles.videoFrame}>
+                {data.source.kind === "upload" && data.source.playable_url ? (
+                  <video src={data.source.playable_url} controls preload="metadata">Your browser does not support video playback.</video>
+                ) : (
+                  <div className={styles.videoPlaceholder}>
+                    <strong>{sourceDeleted ? "Source video removed" : "Video preview unavailable"}</strong>
+                    <span>{sourceDeleted ? "CourtFlux deleted this uploaded source after its 60-day retention period. The derived analysis results and statistics remain available." : "The worker source is not exposed as a browser-playable URL."}</span>
+                  </div>
+                )}
+              </div>
+            )}
+
             {data.source.kind === "upload" && data.source.retention ? (
               <div className={styles.infoBox}>
                 <strong>Source-video retention.</strong>{" "}
