@@ -81,7 +81,7 @@ class DiagnosticPreview:
         jersey = player.get("shirt_num") or player.get("shirt_number")
         player_name = str(player.get("player_name") or "").strip()
         if jersey is None or not str(jersey).strip():
-            return ""
+            return "#? UNKNOWN"
         number = f"#{str(jersey).strip()}"
         return f"{number} {player_name}" if player_name else number
 
