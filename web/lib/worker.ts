@@ -49,7 +49,6 @@ export async function workerFetch(path: string, init: RequestInit = {}) {
 }
 
 export async function proxyWorkerResponse(response: Response) {
-  const body = await response.arrayBuffer();
   const headers = new Headers();
   headers.set("Content-Type", response.headers.get("Content-Type") ?? "application/octet-stream");
   headers.set("Cache-Control", "no-store");
@@ -66,5 +65,5 @@ export async function proxyWorkerResponse(response: Response) {
     if (value) headers.set(name, value);
   }
 
-  return new Response(body, { status: response.status, headers });
+  return new Response(response.body, { status: response.status, headers });
 }
