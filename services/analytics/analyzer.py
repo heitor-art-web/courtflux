@@ -42,6 +42,41 @@ def _env_bool(name: str, fallback: bool = False) -> bool:
     return raw.strip().lower() not in {"0", "false", "no", "off"}
 
 
+def _generate_identity_debug(summary_path: Path, run_dir: Path) -> dict | None:
+    try:
+        from evaluation.p1_jersey_probe import build_identity_debug
+
+        debug = build_identity_debug(
+            summary_path=summary_path,
+            output_root=run_dir / "identity_debug",
+            max_cases=80,
+        )
+        payload = json.loads(summary_path.read_text(encoding="utf-8"))
+        extra = dict(payload.get("extra") or {})
+        extra["identity_debug"] = debug
+        payload["extra"] = extra
+        summary_path.write_text(
+            json.dumps(payload, indent=2, ensure_ascii=False) + "\n",
+            encoding="utf-8",
+        )
+        print(
+            "[IDENTITY_DEBUG] "
+            f"attempts={debug.get('attempts', 0)} "
+            f"accepted={debug.get('accepted', 0)} "
+            f"high_quality_abstentions={debug.get('high_quality_abstentions', 0)} "
+            f"contact_sheets={debug.get('contact_sheets', 0)} "
+            f"dir={(run_dir / 'identity_debug').resolve()}",
+            flush=True,
+        )
+        return debug
+    except Exception as exc:
+        print(
+            f"⚠️ Identity debug artifact generation failed: {type(exc).__name__}: {exc}",
+            flush=True,
+        )
+        return None
+
+
 def resolve_device(requested: str | None) -> str:
     if requested:
         requested = requested.lower().strip()
@@ -72,7 +107,7 @@ def main(
     match_config_path: str | None = None,
     detection_only: bool = False,
     enable_jersey: bool = True,
-    jersey_interval_frames: int = 12,
+    jersey_interval_frames: int = 24,
     db_batch_size: int = 100,
     diagnostics_batch_size: int = 100,
     persist_results: bool = True,
@@ -311,6 +346,13 @@ def main(
             extra["legacy_metrics_file"] = str(metrics_path)
 
         summary_path = diagnostics.finish(extra=extra, performance=performance)
+        identity_debug_enabled = bool(
+            detection_only
+            and enable_jersey
+            and _env_bool("BASKETBALL_IDENTITY_DEBUG", True)
+        )
+        if identity_debug_enabled:
+            _generate_identity_debug(summary_path, diagnostics.run_dir)
         print(f"[SUMMARY] {summary_path.resolve()}", flush=True)
         print("\n✅ Analysis completed successfully.", flush=True)
 
@@ -372,7 +414,7 @@ if __name__ == "__main__":
     parser.add_argument("--reset-db", action="store_true", help="Reset SQLite before the run")
     parser.add_argument("--detection-only", action="store_true", help="Skip tactical analytics; court calibration can be enabled diagnostically via env")
     parser.add_argument("--no-jersey", action="store_true", help="Disable temporal jersey recognition")
-    parser.add_argument("--jersey-interval", type=int, default=12, help="Frames between jersey attempts per tracked player")
+    parser.add_argument("--jersey-interval", type=int, default=24, help="Frames between jersey attempts per tracked player")
     parser.add_argument("--db-batch-size", type=int, default=100, help="Frames buffered per SQLite commit")
     parser.add_argument("--diagnostics-batch-size", type=int, default=100, help="Frame records buffered per JSONL write")
     parser.add_argument("--no-persist", action="store_true", help="Do not write SQLite during the benchmark")
