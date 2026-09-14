@@ -13,7 +13,7 @@ Where did it happen?
 What does it mean tactically?
 ```
 
-CourtFlux is in active development. The P0 vision/evaluation foundation is complete and P1 is consolidating reliable perception/game-state interfaces under an explicit confidence-aware contract.
+CourtFlux is in active development. The P0 vision/evaluation foundation is complete and P1 is now in final exit validation: the canonical runtime, CourtState, BallState, PlayerState, team evidence, visual QA and performance work are integrated on `main`; human-GT Jersey validation remains the principal open P1 gate.
 
 ---
 
@@ -21,7 +21,7 @@ CourtFlux is in active development. The P0 vision/evaluation foundation is compl
 
 ```text
 P0 — VISION FOUNDATION                         ✅ COMPLETE
-P1 — PERCEPTION + GAME STATE                  ← CURRENT PHASE
+P1 — PERCEPTION + GAME STATE                  ← CURRENT PHASE / EXIT VALIDATION
 P2 — BASKETBALL UNDERSTANDING
 P3 — STRUCTURED ANALYTICS + ACTIONS
 P4 — TACTICAL INTELLIGENCE
@@ -39,10 +39,12 @@ Current P1 execution status:
 5. BallState                                                     ✅ complete / integrated
 6. PlayerState                                                   ✅ complete / integrated
 7. CourtState                                                    ✅ complete / integrated
-8. Single-forward runtime + P1 correctness cleanup               ✅ validated
+8. Single-forward runtime + P1 correctness cleanup               ✅ merged / validated
 9. Smart Ball ablation                                           ✅ complete → OFF by default
-10. Jersey identification correctness                            🔄 active validation / GT pending
-11. Integrated visual QA + P1 exit                               ⏳ pending
+10. Team identity correctness                                    ✅ closed for P1
+11. Integrated visual QA                                         ✅ passed
+12. Jersey identification correctness                            🔄 human GT pending
+13. P1 exit / v1.2.0 release gate                                ⏳ pending Jersey GT + final release validation
 
 SAM2 → deferred / contingency backlog
 ```
@@ -276,7 +278,7 @@ ball evidence when reliable
 
 ## Current P1 runtime baseline — 2026-09-14
 
-The current integrated P1 runtime reference is the Porto/Ovarense `0–60 s` run `20260914_095237_751840`, produced from the `feature/p1-correctness-cleanup` line after the fallback CourtState distance-transform cleanup. The reference branch commit for that run is `0ad78a2324c06fdd6b7f9f955a6641aacfd876da`; the run summary itself did not embed a Git SHA, so this commit is recorded as the intended tested branch state.
+The current integrated P1 runtime reference is the Porto/Ovarense `0–60 s` run `20260914_140057_772692`. It was produced from the final `feature/p1-correctness-cleanup` state immediately before PR #46 was merged to `main`; the merged runtime is represented by merge commit `f13126497a99edf15973461cbb7ed870540308fc`.
 
 Configuration:
 
@@ -302,23 +304,27 @@ Measured baseline:
 ```text
 metric eligible                 62.89%
 players / gameplay frame         8.521
-team classification rate        99.43%
-jersey identification rate      40.13%
+team classification rate        99.50%
+jersey identification rate      27.40%
 ball direct                      62.08%
 ball predicted hold              27.44%
 ball effective trajectory        89.51%
 ball missing                     10.49%
-YOLO full-frame                  36.927 ms/frame
-entity tracker                   10.933 ms/frame
-Jersey runtime                    7.349 ms/frame
-team classification               4.300 ms/frame
-detector total                   60.548 ms/frame
-total pipeline                   63.414 ms/frame
-analysis FPS                     14.652
-wall time                        101.489 s
+YOLO full-frame                  26.930 ms/frame
+entity tracker                    8.161 ms/frame
+Jersey runtime                    5.524 ms/frame
+team classification               3.527 ms/frame
+detector total                   44.810 ms/frame
+total pipeline                   49.430 ms/frame
+analysis FPS                     18.604
+wall time                         79.927 s
 ```
 
-These Jersey values are runtime identification/coverage diagnostics, **not correctness claims**. Human GT is still required before promoting a Jersey recognizer or declaring P1 identity complete.
+This is the preferred P1 runtime/performance baseline. Smart Ball is truly OFF in this run: there is no `Detector/smart_ball` stage in the profiler.
+
+Team classification is considered **closed for P1** after visual QA. Residual misclassifications are known and accepted at this phase; `team_classification_rate` is coverage, not an accuracy claim.
+
+Jersey is intentionally more conservative after the P1 correctness gate. In this run, the runtime recorded 305 Jersey attempts, 45 identified tracks and 170 `raw_roster_disagreement` rejections. The lower 27.4% identification rate is therefore not interpreted as a regression by itself: unsupported roster-conditioned rewrites are now rejected instead of being silently accepted. These Jersey values remain coverage/acceptance diagnostics, **not correctness claims**. Human GT is still required before promoting a Jersey recognizer or declaring P1 identity complete.
 
 Smart Ball four-mode ablation on the same `0–60 s` contract selected `off` as the P1 default:
 
@@ -390,7 +396,7 @@ Evaluation includes:
 
 Roster information may validate identity evidence but must never rewrite an unsupported OCR/JNR prediction into an apparently correct result.
 
-The current Lab/runtime Jersey implementation uses the EfficientNet-B0 checkpoint path. The separate ViT-B uncertainty-aware challenger remains under validation. No Jersey winner is promoted without human GT.
+The current Lab/runtime Jersey implementation uses the EfficientNet-B0 checkpoint path with a P1 raw-vs-roster consistency gate. The separate ViT-B uncertainty-aware challenger remains under validation. No Jersey winner is promoted without human GT.
 
 ## P1.4 — Temporal Ball Tracker v1 — COMPLETE / INTEGRATED
 
@@ -430,7 +436,9 @@ CourtState has two explicit evidence modes:
 - calibrated geometry may assert `ONCOURT` or `OFFCOURT` from projected FIBA bounds;
 - uncalibrated image-space fallback may assert positive court-surface evidence, but weak/negative HSV evidence abstains to `UNKNOWN` instead of forcing `OFFCOURT`.
 
-## P1.9 — Persistent Team + Jersey Evidence — RUNTIME INTEGRATED / CORRECTNESS ACTIVE
+Visual QA on the integrated Porto/Ovarense regression run passed the intended P1 behavior for on-court players and referee/cameraman off-court handling.
+
+## P1.9 — Persistent Team + Jersey Evidence — TEAM CLOSED / JERSEY GT PENDING
 
 P1 owns enough identity persistence to support later basketball reasoning:
 
@@ -448,7 +456,9 @@ roster candidate when supported
 
 Perfect cross-camera or cross-game person ReID is not a P1 requirement. Difficult identity merges may remain `UNKNOWN`.
 
-Team evidence is temporally persisted and re-scored conservatively. Jersey remains ON in the integrated product configuration, while Jersey correctness/promotion remains gated on human GT.
+Team evidence is temporally persisted and re-scored conservatively. The current Black-vs-Blue identity failure mode was reduced by making dark pixels mutually exclusive with chromatic team masks, requiring accepted frame-level team evidence before temporal accumulation and making active kits explicit. Visual QA still found some incorrect team labels, but the current behavior is accepted as sufficient for P1 and Team classification is closed.
+
+Jersey remains ON in the integrated product configuration. The current correctness wrapper rejects roster-conditioned candidates when raw canonical OCR disagrees instead of forcing the roster number. Jersey correctness/promotion remains gated on human GT.
 
 ## P1.10 — Exit Contract
 
@@ -462,7 +472,19 @@ team + jersey identity evidence
 timestamps + provenance + uncertainty
 ```
 
-The remaining exit work is dominated by measured Jersey correctness, integrated visual QA and final P1 release validation.
+Current exit assessment:
+
+```text
+canonical P1 runtime/state contract     ✅
+player / referee / CourtState visual QA ✅
+ball runtime + continuity               ✅
+team identity                           ✅ closed for P1
+runtime performance                     ✅
+Jersey human-GT correctness             🔄 remaining gate
+final v1.2.0 release validation         ⏳ after Jersey GT
+```
+
+P1 is therefore **near exit but not yet formally complete**. The remaining blocking work is human-GT Jersey correctness and the final release gate; further Team or Smart Ball tuning is not on the P1 critical path unless a new regression is found.
 
 ---
 
@@ -670,7 +692,7 @@ It may be revisited for severe track fragmentation, hard occlusions, cleaner pla
 - `weights/model_v1.1.0.pt` integrated detector baseline;
 - player detection + BoT-SORT / ByteTrack paths;
 - single-forward full-frame inference path;
-- team classification infrastructure + temporal persistence;
+- team classification infrastructure + temporal persistence, closed for P1;
 - Jersey runtime path with Jersey ON in integrated validation;
 - MPS / CUDA / CPU execution paths;
 - detection-only performance pipeline;
@@ -680,13 +702,14 @@ It may be revisited for severe track fragmentation, hard occlusions, cleaner pla
 - confidence-aware ball candidates + temporal association;
 - BallState, PlayerState and CourtState canonical runtime;
 - conservative fallback CourtState abstention;
-- court geometry / homography and player `court_xy` projection.
+- court geometry / homography and player `court_xy` projection;
+- integrated P1 visual QA for player/court/referee behavior;
+- Smart Ball OFF default with single-forward runtime validated at 18.604 FPS on the Porto/Ovarense 0–60 s reference run.
 
 ### Working / under validation
 
 - jersey-number correctness and model promotion;
 - track-level jersey identity policy;
-- integrated visual QA;
 - long-sequence homography stability.
 
 ### Not yet production-ready
@@ -756,16 +779,14 @@ For normal P1 visual validation, use the **Worker + web Lab** flow below. The ol
 
 ### 1. Select the branch you want to test
 
-For the current P1 consolidation work:
+The current P1 consolidation work is merged. Use `main`:
 
 ```bash
 git fetch origin
-git switch feature/p1-correctness-cleanup
-git pull --ff-only origin feature/p1-correctness-cleanup
+git switch main
+git pull --ff-only origin main
 source .venv/bin/activate
 ```
-
-When the work is merged, replace the feature branch above with `main`.
 
 ### 2. Run the P1 smoke tests before a visual run
 
@@ -774,11 +795,11 @@ PYTHONPATH=. python evaluation/court_state_v1_test.py
 PYTHONPATH=. python evaluation/p1_correctness_cleanup_test.py
 PYTHONPATH=. python evaluation/p1_runtime_consolidation_test.py
 PYTHONPATH=. python evaluation/p1_identity_runtime_optimization_test.py
+PYTHONPATH=. python evaluation/p1_team_identity_correctness_test.py
+PYTHONPATH=. python evaluation/p1_jersey_acceptance_test.py
 PYTHONPATH=. python evaluation/p1_gameplay_referee_qa_test.py
 PYTHONPATH=. python evaluation/ball_candidate_pipeline_test.py
 ```
-
-The expected result is six `PASS` results.
 
 Optional syntax check for the current P1 runtime path:
 
@@ -818,53 +839,31 @@ Jersey              ON
 jersey interval     24 frames
 ```
 
-Start the worker from the repository root:
+The development worker listens on `127.0.0.1:8787`. On the current development Mac it may be managed by the `com.courtflux.worker` launchd service; if so, restart it with:
+
+```bash
+launchctl kickstart -k gui/$(id -u)/com.courtflux.worker
+```
+
+For a manual worker process:
 
 ```bash
 source .venv/bin/activate
 
-export WORKER_API_TOKEN="courtflux-local-dev"
+export WORKER_API_TOKEN="$(cat ~/.config/courtflux/worker-api-token)"
 export WORKER_HOST="127.0.0.1"
 export WORKER_PORT="8787"
-
-export BASKETBALL_SINGLE_FORWARD=1
-export BASKETBALL_SMART_BALL_MODE=off
-export BASKETBALL_BALL_CROP_IMGSZ=640
-export BASKETBALL_INFERENCE_CONF=0.03
-export BASKETBALL_BALL_CONF=0.075
 
 python3 -m services.worker_api
 ```
 
-A healthy startup ends with something similar to:
+A healthy startup listens on:
 
 ```text
-Uvicorn running on http://127.0.0.1:8787
+http://127.0.0.1:8787
 ```
 
-Keep this terminal open while using the Lab.
-
-#### If port 8787 is already in use
-
-Check which process owns the port:
-
-```bash
-lsof -nP -iTCP:8787 -sTCP:LISTEN
-```
-
-Stop the old worker using the PID shown by `lsof`:
-
-```bash
-kill <PID>
-```
-
-Confirm the port is free:
-
-```bash
-lsof -nP -iTCP:8787 -sTCP:LISTEN
-```
-
-The last command should return no listener before starting the new worker. This matters because an old worker keeps the Python code and environment variables from the process that originally launched it.
+The ngrok tunnel used by the current beta setup remains pointed at local port `8787`.
 
 ### 4. Start the web Lab
 
@@ -994,8 +993,8 @@ Benchmark claims must always record the exact model, thresholds, tracker, device
 
 ✅ **P0 Vision Foundation Complete**
 
-🚧 **Current phase: P1 — Perception + Game State**
+🚧 **Current phase: P1 — Perception + Game State / exit validation**
 
 Current priority:
 
-> Finish human-GT Jersey correctness validation, run final integrated visual QA on the current baseline, then close the P1 exit contract and prepare the v1.2.0 release before entering P2 basketball semantics.
+> Finish human-GT Jersey correctness validation, then run the final P1 release gate and prepare v1.2.0 before entering P2 basketball semantics.
