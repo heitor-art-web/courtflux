@@ -230,6 +230,7 @@ export function AnalysisView({ runId }: { runId: string }) {
   const [loading, setLoading] = useState(true);
   const [tab, setTab] = useState<Tab>("overview");
   const [refreshTick, setRefreshTick] = useState(0);
+  const [observedAtMs, setObservedAtMs] = useState<number | null>(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -243,6 +244,7 @@ export function AnalysisView({ runId }: { runId: string }) {
         if (cancelled) return;
 
         setData(payload);
+        setObservedAtMs(Date.now());
         setRefreshTick((value) => value + 1);
         setError("");
         setLoading(false);
@@ -294,11 +296,12 @@ export function AnalysisView({ runId }: { runId: string }) {
   const analysedVideoAvailable = Boolean(data?.worker?.artifacts?.analysis_video);
   const lastProgressMs = workerProgress?.last_progress_at ? new Date(workerProgress.last_progress_at).getTime() : Number.NaN;
   const progressStalled = status === "running"
+    && observedAtMs !== null
     && Number.isFinite(lastProgressMs)
-    && Date.now() - lastProgressMs > 120_000
+    && observedAtMs - lastProgressMs > 120_000
     && progressPercent < 99;
-  const liveElapsed = status === "running" && data?.job?.started_at
-    ? Math.max(0, (Date.now() - new Date(data.job.started_at).getTime()) / 1000)
+  const liveElapsed = status === "running" && data?.job?.started_at && observedAtMs !== null
+    ? Math.max(0, (observedAtMs - new Date(data.job.started_at).getTime()) / 1000)
     : workerProgress?.elapsed_sec;
 
   const sourceLabel = useMemo(() => {
@@ -527,7 +530,13 @@ export function AnalysisView({ runId }: { runId: string }) {
               {isComplete && analysedVideoAvailable ? (
                 <video src={`/api/analyses/${encodeURIComponent(runId)}/preview-video`} controls preload="metadata">Your browser does not support video playback.</video>
               ) : previewAvailable ? (
-                <img src={`/api/analyses/${encodeURIComponent(runId)}/preview?v=${refreshTick}`} alt="Latest CourtFlux annotated analysis preview" />
+                <Image
+                  src={`/api/analyses/${encodeURIComponent(runId)}/preview?v=${refreshTick}`}
+                  alt="Latest CourtFlux annotated analysis preview"
+                  width={1100}
+                  height={619}
+                  unoptimized
+                />
               ) : (
                 <div className={styles.videoPlaceholder}>
                   <strong>{isComplete ? "Analysed video unavailable" : "Preparing analysed preview"}</strong>
