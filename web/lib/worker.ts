@@ -53,7 +53,18 @@ export async function proxyWorkerResponse(response: Response) {
   const headers = new Headers();
   headers.set("Content-Type", response.headers.get("Content-Type") ?? "application/octet-stream");
   headers.set("Cache-Control", "no-store");
-  const disposition = response.headers.get("Content-Disposition");
-  if (disposition) headers.set("Content-Disposition", disposition);
+
+  for (const name of [
+    "Content-Disposition",
+    "Content-Range",
+    "Accept-Ranges",
+    "Content-Length",
+    "ETag",
+    "Last-Modified",
+  ]) {
+    const value = response.headers.get(name);
+    if (value) headers.set(name, value);
+  }
+
   return new Response(body, { status: response.status, headers });
 }
