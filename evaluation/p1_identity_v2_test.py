@@ -121,6 +121,67 @@ def test_strong_single_digit_evidence_still_allows_number() -> None:
     assert result["candidate_posterior"] > 0.80
 
 
+def test_recalibrated_runtime_scale_single_digit_can_pass() -> None:
+    # Runtime v3 joint pair scores are much smaller than the old vote posterior.
+    # A stable one-digit candidate around the observed strong tail should pass,
+    # but only with strong no-tens evidence across almost all crops.
+    rows = [
+        _digit_row(
+            tens={0: 0.68, 6: 0.12, 2: 0.08, 4: 0.07, 1: 0.05},
+            ones={4: 0.46, 6: 0.20, 8: 0.14, 9: 0.10, 1: 0.10},
+            quality=0.95,
+        )
+        for _ in range(8)
+    ]
+    result = PerformanceJerseyAnalyzer._probabilistic_digit_consensus(rows)
+
+    assert result["candidate_number"] == "4"
+    assert result["candidate_count"] == 8
+    assert result["single_digit_gate"]["passed"] is True
+    accepted, reason = PerformanceJerseyAnalyzer._acceptance_decision(
+        candidate="4",
+        support=result["candidate_count"],
+        single_digit_gate=result["single_digit_gate"],
+        posterior=result["candidate_posterior"],
+        margin=result["candidate_margin"],
+        team_name="Ovarense",
+        valid_roster_numbers=["4", "7", "10", "11", "12", "13", "21", "22", "23", "41"],
+        roster_valid=True,
+    )
+    assert accepted is True
+    assert reason == "accepted"
+
+
+def test_recalibrated_gate_keeps_ambiguous_single_digit_unknown() -> None:
+    accepted, reason = PerformanceJerseyAnalyzer._acceptance_decision(
+        candidate="4",
+        support=8,
+        single_digit_gate={"required": True, "passed": False},
+        posterior=0.24,
+        margin=0.08,
+        team_name="Ovarense",
+        valid_roster_numbers=["4", "21", "23"],
+        roster_valid=True,
+    )
+    assert accepted is False
+    assert reason == "ambiguous_single_digit_tens"
+
+
+def test_recalibrated_gate_accepts_supported_two_digit_runtime_score() -> None:
+    accepted, reason = PerformanceJerseyAnalyzer._acceptance_decision(
+        candidate="21",
+        support=3,
+        single_digit_gate={"required": False, "passed": True},
+        posterior=0.20,
+        margin=0.04,
+        team_name="Ovarense",
+        valid_roster_numbers=["4", "21", "23"],
+        roster_valid=True,
+    )
+    assert accepted is True
+    assert reason == "accepted"
+
+
 def test_team_reversal_unlocks_old_identity() -> None:
     detector = _detector()
     profile = detector._profile(9)
@@ -172,6 +233,9 @@ def main() -> None:
     test_digit_probability_consensus_recovers_two_digit_candidate()
     test_ambiguous_tens_rejects_single_digit_collapse()
     test_strong_single_digit_evidence_still_allows_number()
+    test_recalibrated_runtime_scale_single_digit_can_pass()
+    test_recalibrated_gate_keeps_ambiguous_single_digit_unknown()
+    test_recalibrated_gate_accepts_supported_two_digit_runtime_score()
     test_team_reversal_unlocks_old_identity()
     test_recent_jersey_evidence_can_reverse_old_number()
     print("p1_identity_v2_test: PASS")
