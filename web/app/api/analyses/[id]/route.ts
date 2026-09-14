@@ -1,5 +1,6 @@
 import { createAdminClient } from "@/lib/supabase/admin";
 import { createClient } from "@/lib/supabase/server";
+import { workerFetch } from "@/lib/worker";
 
 export const dynamic = "force-dynamic";
 
@@ -19,6 +20,42 @@ function sourceKind(value: string | null) {
   if (value.startsWith("supabase://")) return "upload";
   if (/youtu(?:\.be|be\.com)/i.test(value)) return "youtube";
   return "other";
+}
+
+function publicWorkerState(value: unknown) {
+  if (!value || typeof value !== "object") return null;
+  const state = value as Record<string, unknown>;
+  const progress = state.progress && typeof state.progress === "object"
+    ? state.progress as Record<string, unknown>
+    : null;
+  const artifacts = state.artifacts && typeof state.artifacts === "object"
+    ? state.artifacts as Record<string, unknown>
+    : null;
+
+  return {
+    status: typeof state.status === "string" ? state.status : null,
+    started_at: typeof state.started_at === "string" ? state.started_at : null,
+    completed_at: typeof state.completed_at === "string" ? state.completed_at : null,
+    progress: progress
+      ? {
+          phase: typeof progress.phase === "string" ? progress.phase : null,
+          percent: typeof progress.percent === "number" ? progress.percent : null,
+          processed_seconds: typeof progress.processed_seconds === "number" ? progress.processed_seconds : null,
+          total_seconds: typeof progress.total_seconds === "number" ? progress.total_seconds : null,
+          frames_processed: typeof progress.frames_processed === "number" ? progress.frames_processed : null,
+          elapsed_sec: typeof progress.elapsed_sec === "number" ? progress.elapsed_sec : null,
+          eta_sec: typeof progress.eta_sec === "number" ? progress.eta_sec : null,
+          estimated_completion_at: typeof progress.estimated_completion_at === "string" ? progress.estimated_completion_at : null,
+          last_progress_at: typeof progress.last_progress_at === "string" ? progress.last_progress_at : null,
+        }
+      : null,
+    artifacts: artifacts
+      ? {
+          preview: artifacts.preview === true,
+          analysis_video: artifacts.analysis_video === true,
+        }
+      : null,
+  };
 }
 
 export async function GET(
@@ -76,6 +113,20 @@ export async function GET(
 
     if (jobError) throw jobError;
 
+    let worker = null;
+    if (job?.id) {
+      try {
+        const response = await workerFetch(`/jobs/${encodeURIComponent(job.id)}`, {
+          signal: AbortSignal.timeout(2500),
+        });
+        if (response.ok) {
+          worker = publicWorkerState(await response.json());
+        }
+      } catch {
+        // The durable Supabase state remains authoritative if the worker is temporarily unreachable.
+      }
+    }
+
     const game = Array.isArray(run.games) ? run.games[0] : run.games;
     const kind = sourceKind(run.video_source);
     let playableUrl: string | null = kind === "youtube" ? run.video_source : null;
@@ -131,6 +182,7 @@ export async function GET(
             updated_at: job.updated_at,
           }
         : null,
+      worker,
       game: game
         ? {
             id: game.id,
