@@ -1,6 +1,8 @@
 # Jersey OCR ground truth workflow
 
-This workflow creates an auditable jersey-number ground truth from CourtFlux tracked detections. It is intentionally independent from both the legacy jersey OCR and the Roboflow challenger so model predictions cannot leak into the labels.
+This workflow creates an auditable jersey-number ground truth from CourtFlux tracked detections. It is intentionally independent from Jersey model predictions so model output cannot leak into the labels.
+
+For the active P1 exit gate, use the current v1.1 detector/tracker operating point documented in `docs/p1_jersey_exit_gate.md`.
 
 ## What is ground truth here?
 
@@ -13,46 +15,48 @@ Each reviewed sample links a concrete video frame/detection crop to the human-re
 - `identity_group`: optional stable physical-player identity across fragmented track IDs;
 - reviewer, timestamp and notes.
 
-The match roster is context only. **Never infer `jersey_gt` because a number is or is not present in the roster.** Likewise, do not consult legacy/Roboflow OCR output while annotating.
+The match roster is context only. **Never infer `jersey_gt` because a number is or is not present in the roster.** Likewise, do not consult Jersey recognizer output while annotating.
 
 `unreadable` means a real basketball player whose number cannot be read from the sample. Referees, camera operators and other false-positive detections are not `unreadable`; label their `subject_type` instead. These detections remain in the ground truth as detector-negative evidence but are excluded from jersey OCR training/evaluation.
 
 Generated crops/manifests live under `data/`, which is already ignored by git. The tooling itself is versioned under `tools/`.
 
-## 1. Extract crops
+## 1. Extract crops for the P1 exit gate
 
 For the FC Porto vs Ovarense source video:
 
 ```bash
-cd /Users/user/Documents/server/projects/courtflux-jersey
-source /Users/user/Documents/server/projects/courtflux/.venv/bin/activate
+cd /Users/user/Documents/server/projects/courtflux
+source .venv/bin/activate
 
 PYTHONPATH=. python tools/jersey_ground_truth.py extract \
-  --video /Users/user/Documents/server/projects/courtflux/data/OwiQgAMqyUs.mp4 \
+  --video data/OwiQgAMqyUs.mp4 \
   --match-config data/match_config.json \
-  --output-dir data/jersey_ground_truth/porto_ovarense_v1 \
+  --output-dir data/jersey_ground_truth/porto_ovarense_p1_v110 \
+  --model weights/model_v1.1.0.pt \
   --start 0 \
   --end 120 \
   --device mps \
   --tracker botsort.yaml \
   --imgsz 960 \
-  --player-conf 0.10 \
+  --player-conf 0.40 \
   --inference-conf 0.03 \
   --sample-every-sec 1.0 \
   --max-per-track 8
 ```
 
-The extractor uses the canonical `weights/model_v1.0.0.pt` detector, BoT-SORT and the same detector thresholds used by the P1 benchmark. It saves both the complete tracked crop and the same conservative torso region used by jersey recognition.
+The P1 exit dataset must be extracted with the current integrated detector `weights/model_v1.1.0.pt`, BoT-SORT and player confidence `0.40`. This supersedes the historical v1.0 extraction example.
 
-The manifest also stores `torso_sharpness`, player/torso dimensions and detector/team evidence. **Do not discard blurry samples during extraction.** Keep them and label real-player cases as `unreadable` when appropriate. That lets CourtFlux calibrate a cheap OCR quality gate from actual labelled data instead of choosing an arbitrary sharpness threshold.
+The manifest stores `torso_sharpness`, player/torso dimensions and detector/team evidence. **Do not discard blurry samples during extraction.** Keep them and label real-player cases as `unreadable` when appropriate. That lets CourtFlux measure false acceptance on genuinely unreadable evidence instead of hiding difficult examples.
 
 Outputs:
 
 ```text
-data/jersey_ground_truth/porto_ovarense_v1/
+data/jersey_ground_truth/porto_ovarense_p1_v110/
 ├── extraction.json
 ├── manifest.csv
 ├── annotations.csv
+├── track_reviews.csv
 └── crops/
     ├── player/
     └── torso/
@@ -66,7 +70,7 @@ Launch the local Streamlit reviewer:
 
 ```bash
 streamlit run tools/jersey_ground_truth_app.py -- \
-  --manifest data/jersey_ground_truth/porto_ovarense_v1/manifest.csv \
+  --manifest data/jersey_ground_truth/porto_ovarense_p1_v110/manifest.csv \
   --reviewer heitor
 ```
 
@@ -80,19 +84,15 @@ For each sample:
 6. optionally correct `team_gt`;
 7. use `identity_group` when multiple fragmented track IDs are known to belong to the same physical player.
 
+The P1 exit gate should start with **40–60 representative reviewed tracks**, blind to predictions. If both candidates pass and correct recall is within 10 percentage points, extend the reviewed set toward approximately 100 tracks before promotion.
+
 The UI can propagate a label across all samples in a video+track, but that option is deliberately off by default. Only use it after visually checking the track for ID switches.
-
-The `Previous` button follows the actual viewing history, including a sample that disappeared from the default `unreviewed` queue after it was saved. This allows recent mistakes to be corrected without switching the whole queue to `reviewed`.
-
-### Legacy annotations created before `subject_type`
-
-Existing numeric annotations are safely interpreted as `subject_type=player`. Existing `unreadable` rows are deliberately **not** guessed because some may be referees/camera staff. The reviewer exposes a `needs subject review` queue containing only those ambiguous legacy rows. Review that short queue before final export.
 
 ## 3. Validate annotations
 
 ```bash
 PYTHONPATH=. python tools/jersey_ground_truth.py validate \
-  --manifest data/jersey_ground_truth/porto_ovarense_v1/manifest.csv
+  --manifest data/jersey_ground_truth/porto_ovarense_p1_v110/manifest.csv
 ```
 
 Validation rejects malformed labels and enforces the subject contract:
@@ -104,12 +104,12 @@ Validation rejects malformed labels and enforces the subject contract:
 
 A track conflict can indicate either an annotation mistake or a tracker ID switch and must be reviewed before export.
 
-## 4. Export the training/evaluation ground truth
+## 4. Export the evaluation ground truth
 
 ```bash
 PYTHONPATH=. python tools/jersey_ground_truth.py export \
-  --manifest data/jersey_ground_truth/porto_ovarense_v1/manifest.csv \
-  --output data/jersey_ground_truth/porto_ovarense_v1/ground_truth.csv
+  --manifest data/jersey_ground_truth/porto_ovarense_p1_v110/manifest.csv \
+  --output data/jersey_ground_truth/porto_ovarense_p1_v110/ground_truth.csv
 ```
 
 The export retains all reviewed evidence and adds:
@@ -120,11 +120,22 @@ The export retains all reviewed evidence and adds:
 - `dataset_role=excluded_unknown` when the subject cannot be confidently classified;
 - deterministic `train`/`val`/`test` splits.
 
-OCR training/evaluation must use only `dataset_role=ocr` (equivalently `ocr_eligible=true`). Detector negatives remain available for later player/non-player gating work rather than being deleted.
+OCR evaluation must use only `dataset_role=ocr` (equivalently `ocr_eligible=true`). Detector negatives remain available for later player/non-player gating work rather than being deleted.
 
 Splitting is grouped by `identity_group` when supplied; otherwise it falls back to `video + track_id`. This grouping is important: random frame-level splitting would put nearly identical frames of the same player into training and validation and overstate OCR quality. Before using the split for a formal benchmark, fill `identity_group` across any fragmented tracks known to be the same physical player.
 
-Default split ratios are 70/15/15 and the seed is fixed. A companion `ground_truth.summary.json` records split, subject, label and dataset-role counts.
+## P1 Jersey acceptance criteria
+
+The promotion gate is defined in `docs/p1_jersey_exit_gate.md` and enforced by `evaluation/p1_jersey_exit_gate.py`:
+
+```text
+reviewed tracks                  >= 40
+selective / decision precision   >= 90%
+false accept on UNREADABLE       <= 5%
+winner                           highest correct recall among passers
+```
+
+If neither candidate passes, promote neither. `UNKNOWN` remains valid.
 
 ## OCR quality-gate calibration
 
@@ -140,32 +151,17 @@ Do not hard-code a blur threshold while collecting the first ground truth. After
 
 The goal is to find a cheap pre-OCR quality gate that rejects obviously hopeless crops while preserving readable numbers. A useful threshold must be measured against labelled data, not chosen from the sharpness value alone.
 
-Conceptually:
+## Acceptance criteria before using the GT
 
-```text
-detected track
-    ↓
-subject / team / track evidence
-    ↓
-cheap crop-quality gate
-    ↓
-keep best temporally separated crops
-    ↓
-jersey OCR
-```
-
-## Acceptance criteria before retraining
-
-Do not call the dataset ready merely because every row is labelled. Before retraining:
+Do not call the dataset ready merely because every row is labelled. Before evaluation:
 
 - there must be no validation errors;
 - every reviewed row must have a valid `subject_type`;
 - labels must come from visual evidence, not roster inference;
 - unreadable/partial real-player cases must be retained rather than silently discarded;
-- non-player detector false positives must not enter the OCR training set;
+- non-player detector false positives must not enter the OCR evaluation set;
 - obvious track ID switches must be separated or corrected;
 - known fragments of the same physical player should share `identity_group`;
-- validation/test groups must not contain the same physical player/image sequence as training;
 - report class, subject and visibility distributions before interpreting model accuracy.
 
-The first dataset can be small. A clean, diverse and leakage-resistant ground truth is more valuable than thousands of near-duplicate frames.
+A small clean, diverse and leakage-resistant ground truth is more valuable than thousands of near-duplicate frames.
