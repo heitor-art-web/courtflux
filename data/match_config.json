@@ -21,11 +21,11 @@
         "10": { "name": "Vladyslav Voytso", "position": "Forward" },
         "14": { "name": "Goncalo Delgado", "position": "Center" },
         "15": { "name": "Joao Guerreiro", "position": "Forward" },
-        "?_1": { "name": "Wes Washpun", "position": "Guard" },
-        "?_2": { "name": "Jhonathan Dunn", "position": "Guard" },
-        "?_3": { "name": "Corey Allen-Williams", "position": "Guard" },
-        "?_4": { "name": "Cornelius Hudson", "position": "Forward" },
-        "?_5": { "name": "Robert Beran", "position": "Forward" }
+        "41": { "name": "Wes Washpun", "position": "Guard" },
+        "16": { "name": "Jhonathan Dunn", "position": "Guard" },
+        "13": { "name": "Corey Allen-Williams", "position": "Guard" },
+        "24": { "name": "Cornelius Hudson", "position": "Forward" },
+        "20": { "name": "Robert Beran", "position": "Forward" }
       }
     },
     "Ovarense": {
@@ -37,13 +37,13 @@
         "4": { "name": "Rodrigo Soeiro", "position": "Guard" },
         "7": { "name": "Gustavo Teixeira", "position": "Guard" },
         "10": { "name": "Jalen Jenkins", "position": "Forward" },
-        "?_1": { "name": "Nuno Morais", "position": "Guard" },
-        "?_2": { "name": "Antonio Woods", "position": "Guard" },
-        "?_3": { "name": "Xavier Bishop", "position": "Guard" },
-        "?_4": { "name": "Nuno Delany", "position": "Forward" },
-        "?_5": { "name": "Jose Cardoso", "position": "Guard" },
-        "?_6": { "name": "Ruben Sa", "position": "Center" },
-        "?_7": { "name": "Marcuslon Jackson", "position": "Guard" }
+        "41": { "name": "Nuno Morais", "position": "Guard" },
+        "12": { "name": "Antonio Woods", "position": "Guard" },
+        "21": { "name": "Xavier Bishop", "position": "Guard" },
+        "11": { "name": "Nuno Delany", "position": "Forward" },
+        "13": { "name": "Jose Cardoso", "position": "Guard" },
+        "26": { "name": "Ruben Sa", "position": "Center" },
+        "5": { "name": "Marcuslon Jackson", "position": "Guard" }
       }
     }
   }
