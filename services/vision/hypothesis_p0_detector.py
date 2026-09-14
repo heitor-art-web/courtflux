@@ -1,9 +1,11 @@
 from __future__ import annotations
 
 import os
+from time import perf_counter
 from typing import Any
 
 from services.vision.ball_hypothesis_tracker import OCSortBallHypothesisTracker
+from services.vision.court_state_v1 import CourtStateEstimatorV1
 from services.vision.p0_association_detector import PerformanceDetector as P0PerformanceDetector
 from services.vision.smart_p0_detector import PerformanceDetector as SmartPerformanceDetector
 
@@ -20,11 +22,40 @@ class PerformanceDetector(SmartPerformanceDetector):
 
     Player and referee detections share YOLO/BoT-SORT inference, but referees are parsed
     into ``FrameState.referees`` and never enter PlayerState/team/jersey identity.
+
+    Before team/Jersey evidence is accumulated, CourtState evaluates the whole frame and
+    per-entity court eligibility. Identity evidence is accumulated only on analysis-
+    eligible frames and never from explicit ``active_on_court=False`` detections.
     """
 
     def __init__(self, *args: Any, **kwargs: Any) -> None:
         super().__init__(*args, **kwargs)
         self.referee_conf_thresh = self._env_conf("BASKETBALL_REFEREE_CONF", 0.50)
+        self.identity_court_estimator = CourtStateEstimatorV1()
+        self.team_stable_min_observations = self._env_int(
+            "BASKETBALL_TEAM_STABLE_MIN_OBSERVATIONS",
+            6,
+            1,
+            120,
+        )
+        self.team_stable_cadence_frames = self._env_int(
+            "BASKETBALL_TEAM_STABLE_CADENCE_FRAMES",
+            5,
+            1,
+            120,
+        )
+        self.team_stable_confidence = self._env_float(
+            "BASKETBALL_TEAM_STABLE_CONFIDENCE",
+            0.60,
+            0.0,
+            1.0,
+        )
+        self.team_stable_margin = self._env_float(
+            "BASKETBALL_TEAM_STABLE_MARGIN",
+            0.02,
+            0.0,
+            1.0,
+        )
         self.ball_hypothesis_enabled = self._env_bool(
             "BASKETBALL_BALL_HYPOTHESIS_TRACKER",
             False,
@@ -67,6 +98,14 @@ class PerformanceDetector(SmartPerformanceDetector):
         print(
             f"🟨 Referee tracking: on conf={self.referee_conf_thresh:.2f} "
             "(separate from PlayerState/team/jersey)",
+            flush=True,
+        )
+        print(
+            "👕 Team temporal cadence: "
+            f"stable_after={self.team_stable_min_observations}obs "
+            f"conf>={self.team_stable_confidence:.2f} "
+            f"margin>={self.team_stable_margin:.3f} "
+            f"rescore_every={self.team_stable_cadence_frames}f",
             flush=True,
         )
 
@@ -158,6 +197,187 @@ class PerformanceDetector(SmartPerformanceDetector):
             }
             for referee in referees
         ]
+
+    def _prepare_identity_court_gate(self, frame_state: Any) -> None:
+        """Build CourtState before identity evidence can mutate track profiles."""
+        diag = frame_state.diagnostics.setdefault("detector", {})
+        if bool(diag.get("identity_court_gate_prepared", False)):
+            return
+
+        court_state = self.identity_court_estimator.update(
+            frame_state,
+            gameplay_diagnostics=(
+                frame_state.diagnostics.get("gameplay_filter", {}) or {}
+            ),
+        )
+        frame_state.court_state = court_state
+        frame_state.diagnostics["court_state"] = court_state.as_dict()
+
+        players = [
+            player
+            for player in list(getattr(frame_state, "players", []) or [])
+            if isinstance(player, dict)
+        ]
+        explicit_off_court = sum(
+            1 for player in players if player.get("active_on_court") is False
+        )
+        eligible_entities = sum(
+            1 for player in players if player.get("active_on_court") is not False
+        )
+        eligible_for_identity = (
+            eligible_entities if court_state.analysis_eligible else 0
+        )
+
+        diag["identity_court_gate_prepared"] = True
+        diag["identity_frame_analysis_eligible"] = bool(court_state.analysis_eligible)
+        diag["identity_frame_eligibility_reason"] = court_state.eligibility_reason
+        diag["identity_players_total"] = len(players)
+        diag["identity_players_explicit_off_court"] = explicit_off_court
+        diag["identity_players_eligible"] = eligible_for_identity
+        diag["identity_court_gate_policy"] = (
+            "require_analysis_eligible_frame_and_exclude_explicit_off_court"
+        )
+
+    @staticmethod
+    def _identity_eligible_players(frame_state: Any) -> list[dict[str, Any]]:
+        court_state = getattr(frame_state, "court_state", None)
+        if court_state is not None and not bool(
+            getattr(court_state, "analysis_eligible", False)
+        ):
+            return []
+        return [
+            player
+            for player in list(getattr(frame_state, "players", []) or [])
+            if isinstance(player, dict) and player.get("active_on_court") is not False
+        ]
+
+    def _team_score_due(self, profile: dict[str, Any], frame_id: int) -> bool:
+        if profile.get("identity_locked") and profile.get("identity_team"):
+            return False
+        observations = int(profile.get("team_observations", 0) or 0)
+        stable = bool(
+            profile.get("team")
+            and observations >= self.team_stable_min_observations
+            and float(profile.get("team_confidence", 0.0) or 0.0) >= self.team_stable_confidence
+            and float(profile.get("team_margin", 0.0) or 0.0) >= self.team_stable_margin
+        )
+        if not stable:
+            return True
+        last_frame = int(profile.get("last_team_observation_frame", -10**9) or -10**9)
+        return frame_id - last_frame >= self.team_stable_cadence_frames
+
+    @staticmethod
+    def _reuse_team_profile(player: dict[str, Any], profile: dict[str, Any]) -> None:
+        if profile.get("identity_locked") and profile.get("identity_team"):
+            profile["team"] = profile["identity_team"]
+        player["team"] = profile.get("team")
+        player["team_confidence"] = round(float(profile.get("team_confidence", 0.0)), 4)
+        player["team_margin"] = round(float(profile.get("team_margin", 0.0)), 6)
+        player["shirt_num"] = profile.get("shirt_num")
+        player["player_name"] = profile.get("player_name")
+
+    def _assign_teams(self, frame_state: Any):
+        """Score team evidence only when needed; never charge Jersey buffering to team time."""
+        self._prepare_identity_court_gate(frame_state)
+        original_players = frame_state.players
+        eligible_players = self._identity_eligible_players(frame_state)
+        frame_id = int(getattr(frame_state, "frame_id", 0))
+        players_to_score: list[dict[str, Any]] = []
+        reused_players: list[dict[str, Any]] = []
+
+        for player in eligible_players:
+            track_id = int(player.get("track_id", -1))
+            if track_id < 0:
+                players_to_score.append(player)
+                continue
+            profile = self._profile(track_id)
+            if self._team_score_due(profile, frame_id):
+                players_to_score.append(player)
+            else:
+                self._reuse_team_profile(player, profile)
+                reused_players.append(player)
+
+        # Base _assign_teams historically also collected Jersey crops. Disable only that
+        # side effect here; _jerseys() below owns Jersey buffering and its timing.
+        previous_enable_jersey = self.enable_jersey
+        frame_state.players = players_to_score
+        self.enable_jersey = False
+        try:
+            result = super()._assign_teams(frame_state)
+        finally:
+            self.enable_jersey = previous_enable_jersey
+            frame_state.players = original_players
+
+        for player in players_to_score:
+            track_id = int(player.get("track_id", -1))
+            if track_id >= 0:
+                self._profile(track_id)["last_team_observation_frame"] = frame_id
+
+        diag = frame_state.diagnostics.setdefault("detector", {})
+        predictions = list(diag.get("team_predictions", []) or [])
+        for item in predictions:
+            if isinstance(item, dict):
+                item["rescored"] = True
+        predictions.extend(
+            {
+                "track_id": int(player.get("track_id", -1)),
+                "team": player.get("team"),
+                "confidence": player.get("team_confidence"),
+                "margin": player.get("team_margin"),
+                "scores": {},
+                "rescored": False,
+                "source": "persistent_team_profile",
+            }
+            for player in reused_players
+        )
+        diag["team_predictions"] = predictions
+        diag["team_runtime"] = {
+            "eligible_players": len(eligible_players),
+            "rescored_players": len(players_to_score),
+            "reused_players": len(reused_players),
+            "stable_min_observations": self.team_stable_min_observations,
+            "stable_confidence": round(self.team_stable_confidence, 6),
+            "stable_margin": round(self.team_stable_margin, 6),
+            "stable_cadence_frames": self.team_stable_cadence_frames,
+        }
+        return result
+
+    def _jerseys(self, frame_state: Any):
+        """Keep Jersey ON, but own its crop-buffer work inside Jersey timing."""
+        self._prepare_identity_court_gate(frame_state)
+        original_players = frame_state.players
+        eligible_players = self._identity_eligible_players(frame_state)
+        frame_state.players = eligible_players
+        buffer_started = perf_counter()
+        buffer_observations = 0
+        try:
+            if self.enable_jersey and hasattr(self.visual, "observe_track"):
+                frame = frame_state.frame
+                for player in eligible_players:
+                    track_id = int(player.get("track_id", -1))
+                    if track_id < 0:
+                        continue
+                    profile = self._profile(track_id)
+                    if profile.get("identity_locked"):
+                        continue
+                    x1, y1, x2, y2 = player["box"]
+                    crop = frame[
+                        max(0, y1):min(frame.shape[0], y2),
+                        max(0, x1):min(frame.shape[1], x2),
+                    ]
+                    self.visual.observe_track(crop, track_id)
+                    buffer_observations += 1
+            buffer_ms = (perf_counter() - buffer_started) * 1000.0
+            inference_started = perf_counter()
+            result = super()._jerseys(frame_state)
+            inference_ms = (perf_counter() - inference_started) * 1000.0
+            diag = frame_state.diagnostics.setdefault("detector", {})
+            diag["jersey_buffer_ms"] = round(buffer_ms, 4)
+            diag["jersey_buffer_observations"] = int(buffer_observations)
+            diag["jersey_inference_ms"] = round(inference_ms, 4)
+            return result
+        finally:
+            frame_state.players = original_players
 
     def _tracker_config(self) -> dict[str, Any]:
         config = super()._tracker_config()

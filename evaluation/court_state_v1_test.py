@@ -14,7 +14,6 @@ def _court_frame() -> np.ndarray:
     hsv[:, :, 1] = 180
     hsv[:, :, 2] = 200
     frame = cv2.cvtColor(hsv, cv2.COLOR_HSV2BGR)
-    # Synthetic sideline/non-court strip for an explicit off-court entity.
     frame[:, :72] = 0
     return frame
 
@@ -33,11 +32,11 @@ def _player(track_id: int, box: list[int], team: str = "FC Porto") -> dict:
     }
 
 
-def test_image_space_court_state_and_identity_gate() -> None:
+def test_image_space_fallback_abstains_on_negative_colour_evidence() -> None:
     frame = _court_frame()
     state = FrameState(frame_id=12, timestamp=0.48, frame=frame)
     state.players = [
-        _player(1, [10, 70, 55, 190], team="Ovarense"),  # explicit non-court strip
+        _player(1, [10, 70, 55, 190], team="Ovarense"),
         _player(2, [90, 80, 125, 180]),
         _player(3, [130, 75, 165, 180]),
         _player(4, [175, 78, 210, 182]),
@@ -56,17 +55,46 @@ def test_image_space_court_state_and_identity_gate() -> None:
     assert court.court_visible is True
     assert court.view_mode == "wide"
     assert court.player_count == 5
-    assert court.on_court_player_count == 4
     assert court.analysis_eligible is True
-    assert state.players[0]["active_on_court"] is False
-    assert state.players[0]["identity_eligible"] is False
+
+    # The dark strip is weak/negative colour evidence only. Without calibrated geometry
+    # the estimator must abstain rather than incorrectly excluding a possible player.
+    assert state.players[0]["active_on_court"] is None
+    assert state.players[0]["identity_eligible"] is True
+    assert state.players[0]["court_eligibility_source"] == "image_space_low_surface_unknown"
     assert state.players[1]["active_on_court"] is True
 
     Pipeline._apply_court_identity_gate(state)
-    assert state.players[0]["team"] is None
-    assert state.players[0]["shirt_num"] is None
-    assert state.players[0]["player_name"] is None
-    assert state.players[1]["team"] == "FC Porto"
+    assert state.players[0]["team"] == "Ovarense"
+    assert state.players[0]["shirt_num"] == "8"
+    assert state.players[0]["player_name"] == "Synthetic Player"
+
+
+def test_low_surface_near_court_remains_unknown() -> None:
+    hsv = np.zeros((240, 320, 3), dtype=np.uint8)
+    hsv[:, :, 0] = 15
+    hsv[:, :, 1] = 180
+    hsv[:, :, 2] = 200
+    frame = cv2.cvtColor(hsv, cv2.COLOR_HSV2BGR)
+    frame[178:199, 133:167] = 0
+
+    state = FrameState(frame_id=20, timestamp=0.80, frame=frame)
+    state.players = [
+        _player(7, [130, 80, 170, 185]),
+        _player(8, [190, 80, 225, 180]),
+        _player(9, [230, 82, 265, 182]),
+        _player(10, [270, 84, 305, 184]),
+    ]
+
+    estimator = CourtStateEstimatorV1()
+    court = estimator.update(state, gameplay_diagnostics={"court_ratio": 0.75})
+
+    ambiguous = state.players[0]
+    assert ambiguous["local_court_surface_ratio"] <= estimator.local_court_reject_ratio
+    assert ambiguous["active_on_court"] is None
+    assert ambiguous["identity_eligible"] is True
+    assert ambiguous["court_eligibility_source"] == "image_space_low_surface_unknown"
+    assert court.analysis_eligible is True
 
 
 def test_closeup_is_not_metric_eligible() -> None:
@@ -86,10 +114,9 @@ def test_closeup_is_not_metric_eligible() -> None:
     assert court.eligibility_reason == "not_wide_basketball_view"
 
 
-def test_calibrated_mode_uses_metric_bounds() -> None:
+def test_calibrated_mode_uses_metric_bounds_and_can_reject_offcourt() -> None:
     frame = _court_frame()
     state = FrameState(frame_id=14, timestamp=0.56, frame=frame)
-    # Simple synthetic pixel -> FIBA metre mapping.
     state.homography_matrix = np.array(
         [
             [28.0 / 320.0, 0.0, 0.0],
@@ -109,6 +136,7 @@ def test_calibrated_mode_uses_metric_bounds() -> None:
         _player(2, [130, 75, 165, 180]),
         _player(3, [175, 78, 210, 182]),
         _player(4, [220, 82, 255, 184]),
+        _player(99, [330, 80, 370, 180], team="Ovarense"),
     ]
 
     estimator = CourtStateEstimatorV1()
@@ -119,12 +147,20 @@ def test_calibrated_mode_uses_metric_bounds() -> None:
     assert court.on_court_player_count == 4
     assert court.analysis_eligible is True
     assert all(player.get("court_xy") is not None for player in state.players)
+    assert state.players[-1]["active_on_court"] is False
+    assert state.players[-1]["identity_eligible"] is False
+    assert state.players[-1]["court_eligibility_source"] == "calibrated_fiba_bounds"
+
+    Pipeline._apply_court_identity_gate(state)
+    assert state.players[-1]["team"] is None
+    assert state.players[-1]["shirt_num"] is None
 
 
 def main() -> None:
-    test_image_space_court_state_and_identity_gate()
+    test_image_space_fallback_abstains_on_negative_colour_evidence()
+    test_low_surface_near_court_remains_unknown()
     test_closeup_is_not_metric_eligible()
-    test_calibrated_mode_uses_metric_bounds()
+    test_calibrated_mode_uses_metric_bounds_and_can_reject_offcourt()
     print("court_state_v1_test: PASS")
 
 

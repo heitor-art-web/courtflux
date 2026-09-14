@@ -92,6 +92,24 @@ class DiagnosticPreview:
         return {}
 
     @staticmethod
+    def _ball_state_payload(frame_state: Any) -> dict[str, Any]:
+        state = getattr(frame_state, "ball_state", None)
+        if state is not None:
+            if hasattr(state, "as_dict"):
+                return dict(state.as_dict())
+            if isinstance(state, dict):
+                return dict(state)
+        ball = getattr(frame_state, "ball", None)
+        if not isinstance(ball, dict):
+            return {"status": "missing", "box": None, "confidence": 0.0, "source": "legacy_missing"}
+        return {
+            "status": "predicted" if bool(ball.get("interpolated")) else "observed",
+            "box": ball.get("box"),
+            "confidence": ball.get("confidence"),
+            "source": ball.get("source"),
+        }
+
+    @staticmethod
     def _even_video_frame(canvas: np.ndarray) -> np.ndarray:
         """Keep dimensions compatible with 4:2:0 browser video decoders."""
         height, width = canvas.shape[:2]
@@ -265,18 +283,18 @@ class DiagnosticPreview:
             cv2.rectangle(canvas, (x1, top), (min(width - 1, x1 + tw + 8), y1), color, -1)
             cv2.putText(canvas, label, (x1 + 4, max(th + 2, y1 - 5)), cv2.FONT_HERSHEY_SIMPLEX, 0.46, (20, 20, 20), 1, cv2.LINE_AA)
 
-        ball = getattr(frame_state, "ball", None)
-        if isinstance(ball, dict):
-            box = self._safe_box(ball.get("box"), width, height)
-            if box is not None:
-                x1, y1, x2, y2 = box
-                color = (0, 220, 255)
-                interpolated = bool(ball.get("interpolated"))
-                cv2.rectangle(canvas, (x1, y1), (x2, y2), color, 1 if interpolated else 2)
-                conf = ball.get("confidence")
-                prefix = "BALL PRED" if interpolated else "BALL"
-                label = prefix if conf is None else f"{prefix} {float(conf):.2f}"
-                cv2.putText(canvas, label, (x1, max(18, y1 - 6)), cv2.FONT_HERSHEY_SIMPLEX, 0.52, color, 2, cv2.LINE_AA)
+        ball_state = self._ball_state_payload(frame_state)
+        ball_status = str(ball_state.get("status") or "missing").lower()
+        ball_box = self._safe_box(ball_state.get("box"), width, height)
+        if ball_status != "missing" and ball_box is not None:
+            x1, y1, x2, y2 = ball_box
+            color = (0, 220, 255)
+            predicted = ball_status == "predicted"
+            cv2.rectangle(canvas, (x1, y1), (x2, y2), color, 1 if predicted else 2)
+            conf = ball_state.get("confidence")
+            prefix = "BALL PREDICTED" if predicted else "BALL OBSERVED"
+            label = prefix if conf is None else f"{prefix} {float(conf):.2f}"
+            cv2.putText(canvas, label, (x1, max(18, y1 - 6)), cv2.FONT_HERSHEY_SIMPLEX, 0.52, color, 2, cv2.LINE_AA)
 
         timestamp = float(getattr(frame_state, "timestamp", 0.0) or 0.0)
         team_counts: dict[str, int] = {}; identified = 0
@@ -285,9 +303,10 @@ class DiagnosticPreview:
                 team = str(player["team"]); team_counts[team] = team_counts.get(team, 0) + 1
             if isinstance(player, dict) and player.get("active_on_court") is not False and (player.get("shirt_num") or player.get("shirt_number")):
                 identified += 1
+        player_state_count = len(getattr(frame_state, "player_states", []) or [])
         status = (
-            f"frame {frame_id} | {timestamp:.2f}s | players {len(players)} | refs {len(referees)} "
-            f"| identified {identified}"
+            f"frame {frame_id} | {timestamp:.2f}s | det P{len(players)}/R{len(referees)} "
+            f"| PlayerState {player_state_count} | BallState {ball_status.upper()} | identified {identified}"
         )
         if team_counts: status += " | " + " / ".join(f"{name} {count}" for name, count in team_counts.items())
         cv2.rectangle(canvas, (8, 8), (min(width - 8, 18 + len(status) * 8), 38), (20, 20, 20), -1)
@@ -300,9 +319,10 @@ class DiagnosticPreview:
             on_players = int(court.get("on_court_player_count", 0) or 0)
             on_refs = int(court.get("on_court_referee_count", 0) or 0)
             ratio = court.get("court_surface_ratio")
+            basket_count = len(court.get("basket_evidence", []) or [])
             court_line = (
                 f"COURT {mode} | metrics:{'YES' if eligible else 'NO'} | "
-                f"on-court P{on_players}/R{on_refs} | {reason}"
+                f"on-court P{on_players}/R{on_refs} | basket-evidence:{basket_count} | {reason}"
             )
             if ratio is not None:
                 court_line += f" | surface:{float(ratio):.2f}"

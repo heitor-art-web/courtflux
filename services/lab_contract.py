@@ -15,6 +15,9 @@ LAB_DEFAULTS = {
     "persist_results": True,
     "live_preview": True,
     "preview_interval_frames": 15,
+    "single_forward": True,
+    "smart_ball_mode": "full",
+    "smart_ball_crop_imgsz": 640,
 }
 
 

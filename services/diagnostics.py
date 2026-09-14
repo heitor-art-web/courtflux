@@ -9,7 +9,7 @@ from typing import Any, Dict, Optional
 
 
 class RunDiagnostics:
-    """Write comparable beta diagnostics with buffered frame I/O and identity summaries."""
+    """Write comparable beta diagnostics with explicit metric-eligibility scope."""
 
     def __init__(
         self,
@@ -57,6 +57,9 @@ class RunDiagnostics:
         self._write_meta()
 
         self.total_frames = 0
+        self.inferred_frames = 0
+        # Backward-compatible name. In detection-only P1 runs this is now strictly the
+        # CourtState metric-eligible frame count, not every frame that reached inference.
         self.gameplay_frames = 0
         self.raw_player_detections = 0
         self.parsed_player_detections = 0
@@ -75,8 +78,8 @@ class RunDiagnostics:
         self.keypoint_model_frames = 0
         self.selected_ball_confidences: list[float] = []
 
-        # Direct-detector continuity. These deliberately ignore predicted_hold so that
-        # we can measure whether the detector itself is good enough for passes/shots.
+        # Direct-detector continuity. Metric segments are explicitly terminated when a
+        # frame is not eligible, so a replay/close-up can never connect two gameplay runs.
         self.ball_detection_streaks: list[int] = []
         self.ball_gap_lengths: list[int] = []
         self._current_ball_detection_streak = 0
@@ -88,7 +91,7 @@ class RunDiagnostics:
         self._last_ball_frame_id: int | None = None
 
         # Effective trajectory continuity includes accepted direct observations and
-        # conservative predicted_hold frames. It is kept separate from direct metrics.
+        # conservative predicted_hold frames, but only inside one metric-eligible segment.
         self.ball_trajectory_streaks: list[int] = []
         self.ball_trajectory_gap_lengths: list[int] = []
         self._current_ball_trajectory_streak = 0
@@ -102,9 +105,13 @@ class RunDiagnostics:
         self.team_counts: Dict[str, int] = {}
         self.detector_timing_ms = defaultdict(float)
         self.detector_timing_calls = defaultdict(int)
+
+        # Identity quality counters are metric-eligible only. All-frame Jersey attempt
+        # counters are kept separately for operational/runtime diagnostics.
         self.jersey_attempts = 0
         self.jersey_successes = 0
-
+        self.jersey_attempts_all = 0
+        self.jersey_successes_all = 0
         self.raw_jersey_predictions = defaultdict(int)
         self.jersey_candidate_predictions = defaultdict(int)
         self.jersey_rejection_reasons = defaultdict(int)
@@ -136,7 +143,10 @@ class RunDiagnostics:
             return None
 
         snapshot_path = self.run_dir / "match_config.json"
-        snapshot_path.write_text(json.dumps(data, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
+        snapshot_path.write_text(
+            json.dumps(data, indent=2, ensure_ascii=False) + "\n",
+            encoding="utf-8",
+        )
         metadata = data.get("metadata", {}) or {}
         teams = data.get("teams", {}) or {}
         self.config["match_config"] = {
@@ -155,13 +165,40 @@ class RunDiagnostics:
         if not self._frame_buffer:
             return
         with self.frames_path.open("a", encoding="utf-8") as fh:
-            fh.writelines(json.dumps(row, ensure_ascii=False) + "\n" for row in self._frame_buffer)
+            fh.writelines(
+                json.dumps(row, ensure_ascii=False) + "\n" for row in self._frame_buffer
+            )
         self._frame_buffer.clear()
+
+    def _close_metric_segment(self) -> None:
+        """Terminate continuity state at a metric-scope boundary.
+
+        Non-gameplay/replay/close-up frames are not treated as ball misses, and two valid
+        gameplay blocks on either side of an excluded block must not form one streak.
+        """
+        if self._current_ball_detection_streak > 0:
+            self.ball_detection_streaks.append(self._current_ball_detection_streak)
+            self._current_ball_detection_streak = 0
+        if self._current_ball_gap > 0:
+            self.ball_gap_lengths.append(self._current_ball_gap)
+            self._current_ball_gap = 0
+        if self._current_ball_trajectory_streak > 0:
+            self.ball_trajectory_streaks.append(self._current_ball_trajectory_streak)
+            self._current_ball_trajectory_streak = 0
+        if self._current_ball_trajectory_gap > 0:
+            self.ball_trajectory_gap_lengths.append(self._current_ball_trajectory_gap)
+            self._current_ball_trajectory_gap = 0
+        self._last_ball_center = None
+        self._last_ball_frame_id = None
 
     def log_frame(self, frame_state: Any) -> None:
         detector: Dict[str, Any] = frame_state.diagnostics.get("detector", {}) or {}
         analytics: Dict[str, Any] = frame_state.diagnostics.get("analytics", {}) or {}
         camera: Dict[str, Any] = frame_state.diagnostics.get("camera", {}) or {}
+        court_state: Dict[str, Any] = frame_state.diagnostics.get("court_state", {}) or {}
+
+        if detector:
+            self.inferred_frames += 1
 
         if not self._thresholds_captured and detector:
             captured = False
@@ -181,7 +218,13 @@ class RunDiagnostics:
         raw_ball_candidates = int(detector.get("raw_ball_candidates", 0) or 0)
         accepted_ball_candidates = int(detector.get("accepted_ball_candidates", 0) or 0)
         selected_ball = bool(detector.get("selected_ball", False))
-        ball_source = str(analytics.get("ball_source", "detector" if selected_ball else "missing") or "missing")
+        ball_source = str(
+            analytics.get(
+                "ball_source",
+                "detector" if selected_ball else "missing",
+            )
+            or "missing"
+        )
         selected_conf = detector.get("selected_ball_conf")
         selected_center = detector.get("selected_ball_center")
         association = detector.get("ball_association", {}) or {}
@@ -189,14 +232,20 @@ class RunDiagnostics:
         association_rejected = int(association.get("rejected_candidates", 0) or 0)
         trajectory_available = bool(selected_ball or ball_source == "predicted_hold")
         rejected_by_class = detector.get("rejected_outside_court_by_class", {}) or {}
-        ball_rejected = sum(int(count) for name, count in rejected_by_class.items() if "ball" in str(name).lower())
+        ball_rejected = sum(
+            int(count)
+            for name, count in rejected_by_class.items()
+            if "ball" in str(name).lower()
+        )
 
         detection_only = bool(self.config.get("detection_only"))
         homography_is_identity = bool(camera.get("homography_is_identity", True))
         homography_valid = False if detection_only else (
             bool(analytics.get("homography_active", False)) and not homography_is_identity
         )
-        keypoint_model_active = False if detection_only else bool(camera.get("keypoint_model_active", False))
+        keypoint_model_active = False if detection_only else bool(
+            camera.get("keypoint_model_active", False)
+        )
 
         players = list(getattr(frame_state, "players", []) or [])
         frame_team_counts: Dict[str, int] = {}
@@ -210,21 +259,10 @@ class RunDiagnostics:
                 team_name = str(team)
                 players_with_team += 1
                 frame_team_counts[team_name] = frame_team_counts.get(team_name, 0) + 1
-            team_conf = player.get("team_confidence")
-            team_margin = player.get("team_margin")
-            if team_conf is not None:
-                self.team_confidence_total += float(team_conf)
-                self.team_confidence_samples += 1
-            if team_margin is not None:
-                self.team_margin_total += float(team_margin)
-                self.team_margin_samples += 1
 
             jersey = player.get("shirt_num") or player.get("shirt_number")
             if jersey is not None and str(jersey).strip():
                 players_with_jersey += 1
-                track_id = player.get("track_id")
-                if isinstance(track_id, int) and track_id >= 0:
-                    self.identified_track_ids.add(track_id)
 
         timings = detector.get("timing_ms", {}) or {}
         for name, ms in timings.items():
@@ -233,34 +271,33 @@ class RunDiagnostics:
                 self.detector_timing_calls[str(name)] += 1
             except (TypeError, ValueError):
                 pass
-        self.jersey_attempts += int(detector.get("jersey_attempts", 0) or 0)
-        self.jersey_successes += int(detector.get("jersey_successes", 0) or 0)
+
+        frame_jersey_attempts = int(detector.get("jersey_attempts", 0) or 0)
+        frame_jersey_successes = int(detector.get("jersey_successes", 0) or 0)
+        self.jersey_attempts_all += frame_jersey_attempts
+        self.jersey_successes_all += frame_jersey_successes
 
         team_predictions = list(detector.get("team_predictions", []) or [])
         jersey_predictions = list(detector.get("jersey_predictions", []) or [])
-        for prediction in jersey_predictions:
-            if not isinstance(prediction, dict):
-                continue
-            raw = prediction.get("raw_canonical") or prediction.get("raw_number")
-            if raw is not None:
-                self.raw_jersey_predictions[str(raw)] += 1
-            candidate = prediction.get("candidate_number")
-            if candidate is not None:
-                self.jersey_candidate_predictions[str(candidate)] += 1
-            reason = str(prediction.get("rejection_reason") or "unknown")
-            self.jersey_rejection_reasons[reason] += 1
-            checkpoint = prediction.get("checkpoint")
-            if isinstance(checkpoint, dict) and checkpoint:
-                self.checkpoint_diagnostics = dict(checkpoint)
+
+        metric_reason = court_state.get("eligibility_reason")
+        if not metric_reason:
+            metric_reason = (
+                "legacy_valid_gameplay" if valid_gameplay else "legacy_not_valid_gameplay"
+            )
 
         record = {
             "frame_id": int(getattr(frame_state, "frame_id", 0)),
             "timestamp_sec": float(getattr(frame_state, "timestamp", 0.0)),
             "valid_gameplay": valid_gameplay,
+            "metric_eligible": valid_gameplay,
+            "metric_scope_reason": str(metric_reason),
             "raw_total": int(detector.get("raw_total", 0) or 0),
             "raw_class_counts": detector.get("raw_class_counts", {}) or {},
             "raw_player_candidates": int(detector.get("raw_player_candidates", 0) or 0),
-            "accepted_player_candidates": int(detector.get("accepted_player_candidates", 0) or 0),
+            "accepted_player_candidates": int(
+                detector.get("accepted_player_candidates", 0) or 0
+            ),
             "raw_ball_candidates": raw_ball_candidates,
             "accepted_ball_candidates": accepted_ball_candidates,
             "raw_ball_max_conf": detector.get("raw_ball_max_conf"),
@@ -285,6 +322,8 @@ class RunDiagnostics:
             "timing_ms": timings,
             "events": [str(event) for event in (getattr(frame_state, "events", []) or [])],
         }
+        if court_state:
+            record["court_state"] = court_state
         if not detection_only:
             record.update(
                 {
@@ -299,86 +338,127 @@ class RunDiagnostics:
             self._flush_frames()
 
         self.total_frames += 1
-        if valid_gameplay:
-            self.gameplay_frames += 1
-            self.raw_player_detections += record["raw_player_candidates"]
-            self.parsed_player_detections += record["parsed_players"]
-            self.final_player_detections += record["players_final"]
-            self.team_classified_detections += players_with_team
-            self.jersey_identified_detections += players_with_jersey
-            for team_name, count in frame_team_counts.items():
-                self.team_counts[team_name] = self.team_counts.get(team_name, 0) + int(count)
+        if not valid_gameplay:
+            self._close_metric_segment()
+            return
 
-            self.ball_rejected_outside_court += ball_rejected
-            self.raw_ball_candidates_total += raw_ball_candidates
-            self.accepted_ball_candidates_total += accepted_ball_candidates
-            if raw_ball_candidates > 0:
-                self.raw_ball_candidate_frames += 1
-            if raw_ball_candidates > 1:
-                self.multi_ball_candidate_frames += 1
+        self.gameplay_frames += 1
+        self.raw_player_detections += record["raw_player_candidates"]
+        self.parsed_player_detections += record["parsed_players"]
+        self.final_player_detections += record["players_final"]
+        self.team_classified_detections += players_with_team
+        self.jersey_identified_detections += players_with_jersey
+        for team_name, count in frame_team_counts.items():
+            self.team_counts[team_name] = self.team_counts.get(team_name, 0) + int(count)
 
-            if association:
-                self.ball_association_decision_frames += 1
-                self.ball_association_rejected_candidates += association_rejected
-                if association_rejected > 0:
-                    self.ball_association_rejection_frames += 1
+        # Identity quality statistics are intentionally metric-eligible only.
+        for player in players:
+            if not isinstance(player, dict):
+                continue
+            team_conf = player.get("team_confidence")
+            team_margin = player.get("team_margin")
+            if team_conf is not None:
+                self.team_confidence_total += float(team_conf)
+                self.team_confidence_samples += 1
+            if team_margin is not None:
+                self.team_margin_total += float(team_margin)
+                self.team_margin_samples += 1
+            jersey = player.get("shirt_num") or player.get("shirt_number")
+            if jersey is not None and str(jersey).strip():
+                track_id = player.get("track_id")
+                if isinstance(track_id, int) and track_id >= 0:
+                    self.identified_track_ids.add(track_id)
 
-            if selected_ball:
-                self.selected_ball_frames += 1
-                if self._current_ball_gap > 0:
-                    self.ball_gap_lengths.append(self._current_ball_gap)
-                    self.ball_reacquisitions += 1
-                    self._current_ball_gap = 0
-                self._current_ball_detection_streak += 1
+        self.jersey_attempts += frame_jersey_attempts
+        self.jersey_successes += frame_jersey_successes
+        for prediction in jersey_predictions:
+            if not isinstance(prediction, dict):
+                continue
+            raw = prediction.get("raw_canonical") or prediction.get("raw_number")
+            if raw is not None:
+                self.raw_jersey_predictions[str(raw)] += 1
+            candidate = prediction.get("candidate_number")
+            if candidate is not None:
+                self.jersey_candidate_predictions[str(candidate)] += 1
+            reason = str(prediction.get("rejection_reason") or "unknown")
+            self.jersey_rejection_reasons[reason] += 1
+            checkpoint = prediction.get("checkpoint")
+            if isinstance(checkpoint, dict) and checkpoint:
+                self.checkpoint_diagnostics = dict(checkpoint)
 
-                if selected_center is not None and len(selected_center) >= 2:
-                    center = (float(selected_center[0]), float(selected_center[1]))
-                    frame_id = int(record["frame_id"])
-                    if self._last_ball_center is not None and self._last_ball_frame_id is not None:
-                        delta_frames = max(frame_id - self._last_ball_frame_id, 1)
-                        dx = center[0] - self._last_ball_center[0]
-                        dy = center[1] - self._last_ball_center[1]
-                        distance = (dx * dx + dy * dy) ** 0.5
-                        frame = getattr(frame_state, "frame", None)
-                        if frame is not None and getattr(frame, "shape", None) is not None:
-                            height, width = frame.shape[:2]
-                            diagonal = max((float(width) ** 2 + float(height) ** 2) ** 0.5, 1.0)
-                            step_norm = distance / diagonal / delta_frames
-                            self.ball_center_step_norm.append(step_norm)
-                            if step_norm > 0.15:
-                                self.ball_large_jump_count += 1
-                    self._last_ball_center = center
-                    self._last_ball_frame_id = frame_id
-            else:
-                if self._current_ball_detection_streak > 0:
-                    self.ball_detection_streaks.append(self._current_ball_detection_streak)
-                    self._current_ball_detection_streak = 0
-                self._current_ball_gap += 1
+        self.ball_rejected_outside_court += ball_rejected
+        self.raw_ball_candidates_total += raw_ball_candidates
+        self.accepted_ball_candidates_total += accepted_ball_candidates
+        if raw_ball_candidates > 0:
+            self.raw_ball_candidate_frames += 1
+        if raw_ball_candidates > 1:
+            self.multi_ball_candidate_frames += 1
 
-            if trajectory_available:
-                if self._current_ball_trajectory_gap > 0:
-                    self.ball_trajectory_gap_lengths.append(self._current_ball_trajectory_gap)
-                    self.ball_trajectory_reacquisitions += 1
-                    self._current_ball_trajectory_gap = 0
-                self._current_ball_trajectory_streak += 1
-            else:
-                if self._current_ball_trajectory_streak > 0:
-                    self.ball_trajectory_streaks.append(self._current_ball_trajectory_streak)
-                    self._current_ball_trajectory_streak = 0
-                self._current_ball_trajectory_gap += 1
+        if association:
+            self.ball_association_decision_frames += 1
+            self.ball_association_rejected_candidates += association_rejected
+            if association_rejected > 0:
+                self.ball_association_rejection_frames += 1
 
-            if ball_source == "predicted_hold":
-                self.predicted_ball_frames += 1
-                if hold_age_frames > 0:
-                    self.ball_hold_ages.append(hold_age_frames)
-            elif ball_source == "missing":
-                self.missing_ball_frames += 1
-            if homography_valid:
-                self.valid_homography_frames += 1
-            if keypoint_model_active:
-                self.keypoint_model_frames += 1
-            if selected_conf is not None:
-                self.selected_ball_confidences.append(float(selected_conf))
+        if selected_ball:
+            self.selected_ball_frames += 1
+            if self._current_ball_gap > 0:
+                self.ball_gap_lengths.append(self._current_ball_gap)
+                self.ball_reacquisitions += 1
+                self._current_ball_gap = 0
+            self._current_ball_detection_streak += 1
+
+            if selected_center is not None and len(selected_center) >= 2:
+                center = (float(selected_center[0]), float(selected_center[1]))
+                frame_id = int(record["frame_id"])
+                if self._last_ball_center is not None and self._last_ball_frame_id is not None:
+                    delta_frames = max(frame_id - self._last_ball_frame_id, 1)
+                    dx = center[0] - self._last_ball_center[0]
+                    dy = center[1] - self._last_ball_center[1]
+                    distance = (dx * dx + dy * dy) ** 0.5
+                    frame = getattr(frame_state, "frame", None)
+                    if frame is not None and getattr(frame, "shape", None) is not None:
+                        height, width = frame.shape[:2]
+                        diagonal = max(
+                            (float(width) ** 2 + float(height) ** 2) ** 0.5,
+                            1.0,
+                        )
+                        step_norm = distance / diagonal / delta_frames
+                        self.ball_center_step_norm.append(step_norm)
+                        if step_norm > 0.15:
+                            self.ball_large_jump_count += 1
+                self._last_ball_center = center
+                self._last_ball_frame_id = frame_id
+        else:
+            if self._current_ball_detection_streak > 0:
+                self.ball_detection_streaks.append(self._current_ball_detection_streak)
+                self._current_ball_detection_streak = 0
+            self._current_ball_gap += 1
+
+        if trajectory_available:
+            if self._current_ball_trajectory_gap > 0:
+                self.ball_trajectory_gap_lengths.append(self._current_ball_trajectory_gap)
+                self.ball_trajectory_reacquisitions += 1
+                self._current_ball_trajectory_gap = 0
+            self._current_ball_trajectory_streak += 1
+        else:
+            if self._current_ball_trajectory_streak > 0:
+                self.ball_trajectory_streaks.append(self._current_ball_trajectory_streak)
+                self._current_ball_trajectory_streak = 0
+            self._current_ball_trajectory_gap += 1
+
+        if ball_source == "predicted_hold":
+            self.predicted_ball_frames += 1
+            if hold_age_frames > 0:
+                self.ball_hold_ages.append(hold_age_frames)
+        elif ball_source == "missing":
+            self.missing_ball_frames += 1
+        if homography_valid:
+            self.valid_homography_frames += 1
+        if keypoint_model_active:
+            self.keypoint_model_frames += 1
+        if selected_conf is not None:
+            self.selected_ball_confidences.append(float(selected_conf))
 
     @staticmethod
     def _rate(numerator: int, denominator: int) -> float:
@@ -390,18 +470,26 @@ class RunDiagnostics:
 
     @staticmethod
     def _sorted_counts(values: dict[str, int], limit: int = 20) -> dict[str, int]:
-        return dict(sorted(values.items(), key=lambda item: item[1], reverse=True)[:limit])
+        return dict(
+            sorted(values.items(), key=lambda item: item[1], reverse=True)[:limit]
+        )
 
     @staticmethod
     def _quantile(values: list[float] | list[int], q: float):
         if not values:
             return None
         ordered = sorted(values)
-        index = int(round((len(ordered) - 1) * max(0.0, min(float(q), 1.0))))
+        index = int(
+            round((len(ordered) - 1) * max(0.0, min(float(q), 1.0)))
+        )
         value = ordered[index]
         return round(float(value), 6) if isinstance(value, float) else int(value)
 
-    def finish(self, extra: Optional[Dict[str, Any]] = None, performance: Optional[Dict[str, Any]] = None) -> Path:
+    def finish(
+        self,
+        extra: Optional[Dict[str, Any]] = None,
+        performance: Optional[Dict[str, Any]] = None,
+    ) -> Path:
         self._flush_frames()
         confidences = sorted(self.selected_ball_confidences)
         mean_conf = round(sum(confidences) / len(confidences), 4) if confidences else None
@@ -424,7 +512,11 @@ class RunDiagnostics:
             trajectory_gap_lengths.append(self._current_ball_trajectory_gap)
 
         timing_summary = {}
-        for name, total_ms in sorted(self.detector_timing_ms.items(), key=lambda item: item[1], reverse=True):
+        for name, total_ms in sorted(
+            self.detector_timing_ms.items(),
+            key=lambda item: item[1],
+            reverse=True,
+        ):
             calls = self.detector_timing_calls[name]
             timing_summary[name] = {
                 "calls": calls,
@@ -432,33 +524,46 @@ class RunDiagnostics:
                 "avg_ms": round(total_ms / max(calls, 1), 3),
             }
 
-        avg_team_conf = self.team_confidence_total / max(self.team_confidence_samples, 1)
+        avg_team_conf = self.team_confidence_total / max(
+            self.team_confidence_samples,
+            1,
+        )
         avg_team_margin = self.team_margin_total / max(self.team_margin_samples, 1)
         identity_diagnostics = {
+            "scope": "metric_eligible_frames_only",
             "identified_tracks": len(self.identified_track_ids),
             "raw_prediction_counts": self._sorted_counts(self.raw_jersey_predictions),
-            "roster_candidate_counts": self._sorted_counts(self.jersey_candidate_predictions),
+            "roster_candidate_counts": self._sorted_counts(
+                self.jersey_candidate_predictions
+            ),
             "rejection_reasons": self._sorted_counts(self.jersey_rejection_reasons),
             "checkpoint": self.checkpoint_diagnostics,
             "avg_team_confidence": round(avg_team_conf, 4),
             "avg_team_margin": round(avg_team_margin, 6),
+            "jersey_attempts_all_inferred_frames": self.jersey_attempts_all,
+            "jersey_successes_all_inferred_frames": self.jersey_successes_all,
         }
 
         center_steps = self.ball_center_step_norm
         ball_continuity = {
-            "scope": "direct_associated_detections_only",
+            "scope": "direct_associated_detections_metric_eligible_segments_only",
+            "segment_boundary_policy": "reset_on_metric_ineligible_frame",
             "reacquisitions": self.ball_reacquisitions,
             "detection_streak_count": len(detection_streaks),
             "detection_streak_median_frames": self._quantile(detection_streaks, 0.50),
             "detection_streak_p90_frames": self._quantile(detection_streaks, 0.90),
-            "detection_streak_max_frames": max(detection_streaks) if detection_streaks else None,
+            "detection_streak_max_frames": (
+                max(detection_streaks) if detection_streaks else None
+            ),
             "miss_gap_count": len(gap_lengths),
             "miss_gap_median_frames": self._quantile(gap_lengths, 0.50),
             "miss_gap_p90_frames": self._quantile(gap_lengths, 0.90),
             "miss_gap_max_frames": max(gap_lengths) if gap_lengths else None,
             "center_step_norm_diag_median": self._quantile(center_steps, 0.50),
             "center_step_norm_diag_p90": self._quantile(center_steps, 0.90),
-            "center_step_norm_diag_max": round(max(center_steps), 6) if center_steps else None,
+            "center_step_norm_diag_max": (
+                round(max(center_steps), 6) if center_steps else None
+            ),
             "large_jump_rate_gt_0_15_diag_per_frame": self._rate(
                 self.ball_large_jump_count,
                 len(center_steps),
@@ -467,25 +572,58 @@ class RunDiagnostics:
 
         effective_frames = self.selected_ball_frames + self.predicted_ball_frames
         ball_trajectory = {
-            "scope": "direct_associated_plus_predicted_hold",
-            "effective_coverage_frame_rate": self._rate(effective_frames, self.gameplay_frames),
-            "direct_frame_rate": self._rate(self.selected_ball_frames, self.gameplay_frames),
-            "predicted_hold_frame_rate": self._rate(self.predicted_ball_frames, self.gameplay_frames),
-            "missing_frame_rate": self._rate(self.missing_ball_frames, self.gameplay_frames),
+            "scope": "direct_plus_predicted_hold_metric_eligible_segments_only",
+            "segment_boundary_policy": "reset_on_metric_ineligible_frame",
+            "effective_coverage_frame_rate": self._rate(
+                effective_frames,
+                self.gameplay_frames,
+            ),
+            "direct_frame_rate": self._rate(
+                self.selected_ball_frames,
+                self.gameplay_frames,
+            ),
+            "predicted_hold_frame_rate": self._rate(
+                self.predicted_ball_frames,
+                self.gameplay_frames,
+            ),
+            "missing_frame_rate": self._rate(
+                self.missing_ball_frames,
+                self.gameplay_frames,
+            ),
             "reacquisitions": self.ball_trajectory_reacquisitions,
             "trajectory_streak_count": len(trajectory_streaks),
-            "trajectory_streak_median_frames": self._quantile(trajectory_streaks, 0.50),
-            "trajectory_streak_p90_frames": self._quantile(trajectory_streaks, 0.90),
-            "trajectory_streak_max_frames": max(trajectory_streaks) if trajectory_streaks else None,
+            "trajectory_streak_median_frames": self._quantile(
+                trajectory_streaks,
+                0.50,
+            ),
+            "trajectory_streak_p90_frames": self._quantile(
+                trajectory_streaks,
+                0.90,
+            ),
+            "trajectory_streak_max_frames": (
+                max(trajectory_streaks) if trajectory_streaks else None
+            ),
             "trajectory_gap_count": len(trajectory_gap_lengths),
-            "trajectory_gap_median_frames": self._quantile(trajectory_gap_lengths, 0.50),
-            "trajectory_gap_p90_frames": self._quantile(trajectory_gap_lengths, 0.90),
-            "trajectory_gap_max_frames": max(trajectory_gap_lengths) if trajectory_gap_lengths else None,
+            "trajectory_gap_median_frames": self._quantile(
+                trajectory_gap_lengths,
+                0.50,
+            ),
+            "trajectory_gap_p90_frames": self._quantile(
+                trajectory_gap_lengths,
+                0.90,
+            ),
+            "trajectory_gap_max_frames": (
+                max(trajectory_gap_lengths) if trajectory_gap_lengths else None
+            ),
             "hold_age_median_frames": self._quantile(self.ball_hold_ages, 0.50),
             "hold_age_p90_frames": self._quantile(self.ball_hold_ages, 0.90),
-            "hold_age_max_frames": max(self.ball_hold_ages) if self.ball_hold_ages else None,
+            "hold_age_max_frames": (
+                max(self.ball_hold_ages) if self.ball_hold_ages else None
+            ),
             "association_decision_frames": self.ball_association_decision_frames,
-            "association_rejected_candidates_total": self.ball_association_rejected_candidates,
+            "association_rejected_candidates_total": (
+                self.ball_association_rejected_candidates
+            ),
             "association_frames_with_rejections": self.ball_association_rejection_frames,
             "association_frame_rejection_rate": self._rate(
                 self.ball_association_rejection_frames,
@@ -497,31 +635,92 @@ class RunDiagnostics:
             ),
         }
 
+        excluded_frames = max(0, self.total_frames - self.gameplay_frames)
+        metric_scope = {
+            "policy": (
+                "court_state_analysis_eligible"
+                if self.config.get("detection_only")
+                else "valid_gameplay"
+            ),
+            "frames_seen": self.total_frames,
+            "frames_with_detector_inference": self.inferred_frames,
+            "metric_eligible_frames": self.gameplay_frames,
+            "metric_excluded_frames": excluded_frames,
+            "metric_eligible_rate": self._rate(
+                self.gameplay_frames,
+                self.total_frames,
+            ),
+            "identity_quality_scope": "metric_eligible_frames_only",
+            "ball_quality_scope": "metric_eligible_frames_only",
+            "detector_timing_scope": "all_frames_with_detector_inference",
+        }
+
         summary = {
             **self.config,
             "elapsed_sec": round(time.perf_counter() - self.started, 2),
             "total_frames": self.total_frames,
             "gameplay_frames": self.gameplay_frames,
+            "metric_eligible_frames": self.gameplay_frames,
+            "metric_scope": metric_scope,
             "players": {
-                "raw_per_gameplay_frame": self._average(self.raw_player_detections, self.gameplay_frames),
-                "parsed_per_gameplay_frame": self._average(self.parsed_player_detections, self.gameplay_frames),
-                "final_per_gameplay_frame": self._average(self.final_player_detections, self.gameplay_frames),
-                "team_classification_rate": self._rate(self.team_classified_detections, self.final_player_detections),
-                "jersey_identification_rate": self._rate(self.jersey_identified_detections, self.final_player_detections),
+                "raw_per_gameplay_frame": self._average(
+                    self.raw_player_detections,
+                    self.gameplay_frames,
+                ),
+                "parsed_per_gameplay_frame": self._average(
+                    self.parsed_player_detections,
+                    self.gameplay_frames,
+                ),
+                "final_per_gameplay_frame": self._average(
+                    self.final_player_detections,
+                    self.gameplay_frames,
+                ),
+                "team_classification_rate": self._rate(
+                    self.team_classified_detections,
+                    self.final_player_detections,
+                ),
+                "jersey_identification_rate": self._rate(
+                    self.jersey_identified_detections,
+                    self.final_player_detections,
+                ),
                 "jersey_attempts": self.jersey_attempts,
                 "jersey_successes": self.jersey_successes,
                 "team_counts": self.team_counts,
                 "identity_diagnostics": identity_diagnostics,
             },
             "ball": {
-                "raw_candidate_frame_rate": self._rate(self.raw_ball_candidate_frames, self.gameplay_frames),
-                "selected_detection_frame_rate": self._rate(self.selected_ball_frames, self.gameplay_frames),
-                "predicted_hold_frame_rate": self._rate(self.predicted_ball_frames, self.gameplay_frames),
-                "effective_trajectory_frame_rate": self._rate(effective_frames, self.gameplay_frames),
-                "missing_frame_rate": self._rate(self.missing_ball_frames, self.gameplay_frames),
-                "raw_candidates_per_gameplay_frame": self._average(self.raw_ball_candidates_total, self.gameplay_frames),
-                "accepted_candidates_per_gameplay_frame": self._average(self.accepted_ball_candidates_total, self.gameplay_frames),
-                "multi_candidate_frame_rate": self._rate(self.multi_ball_candidate_frames, self.gameplay_frames),
+                "raw_candidate_frame_rate": self._rate(
+                    self.raw_ball_candidate_frames,
+                    self.gameplay_frames,
+                ),
+                "selected_detection_frame_rate": self._rate(
+                    self.selected_ball_frames,
+                    self.gameplay_frames,
+                ),
+                "predicted_hold_frame_rate": self._rate(
+                    self.predicted_ball_frames,
+                    self.gameplay_frames,
+                ),
+                "effective_trajectory_frame_rate": self._rate(
+                    effective_frames,
+                    self.gameplay_frames,
+                ),
+                "missing_frame_rate": self._rate(
+                    self.missing_ball_frames,
+                    self.gameplay_frames,
+                ),
+                "raw_candidates_per_gameplay_frame": self._average(
+                    self.raw_ball_candidates_total,
+                    self.gameplay_frames,
+                ),
+                "accepted_candidates_per_gameplay_frame": self._average(
+                    self.accepted_ball_candidates_total,
+                    self.gameplay_frames,
+                ),
+                "multi_candidate_frame_rate": self._rate(
+                    self.multi_ball_candidate_frames,
+                    self.gameplay_frames,
+                ),
                 "rejected_outside_court": self.ball_rejected_outside_court,
                 "selected_conf_mean": mean_conf,
                 "selected_conf_p10": p10_conf,
@@ -536,10 +735,19 @@ class RunDiagnostics:
         }
         if not self.config.get("detection_only"):
             summary["court"] = {
-                "keypoint_model_active_rate": self._rate(self.keypoint_model_frames, self.gameplay_frames),
-                "valid_homography_rate": self._rate(self.valid_homography_frames, self.gameplay_frames),
+                "keypoint_model_active_rate": self._rate(
+                    self.keypoint_model_frames,
+                    self.gameplay_frames,
+                ),
+                "valid_homography_rate": self._rate(
+                    self.valid_homography_frames,
+                    self.gameplay_frames,
+                ),
             }
-            summary["homography_active_rate"] = self._rate(self.valid_homography_frames, self.gameplay_frames)
+            summary["homography_active_rate"] = self._rate(
+                self.valid_homography_frames,
+                self.gameplay_frames,
+            )
         if extra:
             summary["extra"] = extra
 
