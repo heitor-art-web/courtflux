@@ -10,11 +10,14 @@ LAB_DEFAULTS = {
     "device": "mps",
     "tracker": "botsort.yaml",
     "detection_only": True,
-    "enable_jersey": False,
+    "enable_jersey": True,
     "jersey_interval_frames": 24,
     "persist_results": True,
     "live_preview": True,
     "preview_interval_frames": 15,
+    "single_forward": True,
+    "smart_ball_mode": "off",
+    "smart_ball_crop_imgsz": 640,
 }
 
 

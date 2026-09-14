@@ -67,6 +67,17 @@ type JobResult = {
 };
 
 const MAX_FILE_BYTES = 2 * 1024 * 1024 * 1024;
+const P1_ANALYSIS_PROFILE = {
+  model: "weights/model_v1.1.0.pt",
+  detectorConf: 0.40,
+  inferenceConf: 0.03,
+  ballConf: 0.075,
+  imgsz: 960,
+  tracker: "botsort.yaml",
+  jerseyIntervalFrames: 24,
+  previewIntervalFrames: 15,
+  smartBallCropImgsz: 640,
+} as const;
 
 function formatMinutes(value: number) {
   if (!Number.isFinite(value)) return "0";
@@ -149,7 +160,6 @@ export function NewAnalysisForm({
   const [awayColors, setAwayColors] = useState(initialDraft?.awayColors ?? "");
   const [homeRoster, setHomeRoster] = useState(initialDraft?.homeRoster ?? "");
   const [awayRoster, setAwayRoster] = useState(initialDraft?.awayRoster ?? "");
-  const [enableJersey, setEnableJersey] = useState(initialDraft?.enableJersey ?? false);
   const [rightsConfirmed, setRightsConfirmed] = useState(false);
   const [busy, setBusy] = useState(false);
   const [stage, setStage] = useState("");
@@ -304,14 +314,21 @@ export function NewAnalysisForm({
           video_source: source,
           start_time_sec: start * 60,
           end_time_sec: end * 60,
-          model: "weights/Model_v0.1.pt",
-          detector_conf: 0.1,
-          imgsz: 960,
-          tracker: "botsort.yaml",
+          model: P1_ANALYSIS_PROFILE.model,
+          detector_conf: P1_ANALYSIS_PROFILE.detectorConf,
+          inference_conf: P1_ANALYSIS_PROFILE.inferenceConf,
+          ball_conf: P1_ANALYSIS_PROFILE.ballConf,
+          imgsz: P1_ANALYSIS_PROFILE.imgsz,
+          tracker: P1_ANALYSIS_PROFILE.tracker,
           detection_only: true,
-          enable_jersey: enableJersey,
-          jersey_interval_frames: 12,
+          enable_jersey: true,
+          jersey_interval_frames: P1_ANALYSIS_PROFILE.jerseyIntervalFrames,
           persist_results: true,
+          live_preview: true,
+          preview_interval_frames: P1_ANALYSIS_PROFILE.previewIntervalFrames,
+          single_forward: true,
+          smart_ball_mode: "off",
+          smart_ball_crop_imgsz: P1_ANALYSIS_PROFILE.smartBallCropImgsz,
           db_batch_size: 100,
           diagnostics_batch_size: 100,
           match_config: matchConfig,
@@ -457,7 +474,7 @@ export function NewAnalysisForm({
                 <div className={styles.field}><label htmlFor="home-roster">{homeTeam.trim() || "Home team"} roster</label><textarea id="home-roster" value={homeRoster} onChange={(event) => setHomeRoster(event.target.value)} placeholder={"7 Jordan Smith\n12 Alex Brown"} /></div>
                 <div className={styles.field}><label htmlFor="away-roster">{awayTeam.trim() || "Away team"} roster</label><textarea id="away-roster" value={awayRoster} onChange={(event) => setAwayRoster(event.target.value)} placeholder={"4 Sam Lee\n21 Chris Jones"} /></div>
               </div>
-              <label className={styles.checkbox}><input type="checkbox" checked={enableJersey} onChange={(event) => setEnableJersey(event.target.checked)} /> Try experimental jersey-number recognition</label>
+              <div className={styles.scopeHint}><strong>P1 identity profile.</strong> Jersey recognition is always enabled for product analyses and uses the current 24-frame cadence. Roster data remains optional evidence.</div>
             </details>
           </section>
 
@@ -478,6 +495,7 @@ export function NewAnalysisForm({
             <div><span>Source</span><strong>{sourceMode === "upload" ? file?.name || (reusableUpload ? initialDraft?.sourceLabel : "Not selected") : youtubeUrl.trim() ? "YouTube" : "Not added"}</strong></div>
             <div><span>Match</span><strong>{contextReady ? `${homeTeam.trim()} vs ${awayTeam.trim()}` : "Add both teams"}</strong></div>
             <div><span>Analysis window</span><strong>{scopeReady ? `${formatMinutes(start)}–${formatMinutes(end)} min` : "Check start/end"}</strong></div>
+            <div><span>P1 profile</span><strong>v1.1 · Jersey ON · Smart Ball OFF</strong></div>
             <div><span>Estimated usage</span><strong className={styles.orange}>{formatMinutes(estimatedMinutes)} min</strong></div>
             <div><span>Remaining after</span><strong>{remainingAfter === null ? "—" : `${formatMinutes(Math.max(0, remainingAfter))} min`}</strong></div>
           </div>

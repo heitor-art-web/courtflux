@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 from typing import Any
 
 from services.vision.ball_candidate_filter import filter_smart_candidates
@@ -7,27 +8,45 @@ from services.vision.ball_candidate_pipeline import (
     SmartBallCandidatePipeline,
     SmartBallPipelineConfig,
 )
-from services.vision.p0_association_detector import PerformanceDetector as P0PerformanceDetector
+from services.vision.single_forward_p0_detector import PerformanceDetector as P0PerformanceDetector
 
 
 class PerformanceDetector(P0PerformanceDetector):
     """P0 detector with conservative smart candidate generation before association.
 
-    Full-frame candidates are always preserved. Verification and selective zoom reuse
-    whichever ball-candidate backend is active (YOLO or Hugging Face). Smart-only
-    proposals are filtered conservatively before association. Temporal state never
-    creates a ball by itself.
-
-    Set ``BASKETBALL_SMART_BALL_PIPELINE=0`` to restore the plain P0 candidate path.
-    ``BASKETBALL_BALL_REACQUIRE`` remains independent and defaults OFF.
+    Smart Ball can be ablated with ``BASKETBALL_SMART_BALL_MODE``:
+    ``off`` | ``verify`` | ``zoom`` | ``full``. The legacy
+    ``BASKETBALL_SMART_BALL_PIPELINE`` toggle remains a fallback when the explicit mode
+    is absent. Crop inference has its own image size so a 640px crop is not needlessly
+    upscaled to the 960px full-frame operating point.
     """
+
+    SMART_MODES = {"off", "verify", "zoom", "full"}
 
     def __init__(self, *args: Any, **kwargs: Any) -> None:
         super().__init__(*args, **kwargs)
         self.smart_ball_pipeline: SmartBallCandidatePipeline | None = None
-        self.smart_ball_pipeline_enabled = self._env_bool(
-            "BASKETBALL_SMART_BALL_PIPELINE",
-            True,
+
+        requested_mode = os.getenv("BASKETBALL_SMART_BALL_MODE", "").strip().lower()
+        if requested_mode and requested_mode not in self.SMART_MODES:
+            print(
+                f"⚠️ Invalid BASKETBALL_SMART_BALL_MODE={requested_mode!r}; using full.",
+                flush=True,
+            )
+            requested_mode = "full"
+        if not requested_mode:
+            requested_mode = (
+                "full"
+                if self._env_bool("BASKETBALL_SMART_BALL_PIPELINE", True)
+                else "off"
+            )
+        self.smart_ball_mode = requested_mode
+        self.smart_ball_pipeline_enabled = self.smart_ball_mode != "off"
+        self.smart_crop_imgsz = self._env_int(
+            "BASKETBALL_BALL_CROP_IMGSZ",
+            640,
+            128,
+            1280,
         )
         self.smart_emit_refinements = self._env_bool(
             "BASKETBALL_BALL_EMIT_REFINEMENTS",
@@ -54,8 +73,8 @@ class PerformanceDetector(P0PerformanceDetector):
         ):
             config = SmartBallPipelineConfig(
                 enabled=True,
-                verify_enabled=self._env_bool("BASKETBALL_BALL_VERIFY", True),
-                zoom_enabled=self._env_bool("BASKETBALL_BALL_SELECTIVE_ZOOM", True),
+                verify_enabled=self.smart_ball_mode in {"verify", "full"},
+                zoom_enabled=self.smart_ball_mode in {"zoom", "full"},
                 crop_size=self._env_int("BASKETBALL_BALL_CROP_SIZE", 640, 128, 1280),
                 verify_trigger_conf=self._env_float(
                     "BASKETBALL_BALL_VERIFY_TRIGGER_CONF", 0.60, 0.0, 1.0
@@ -93,7 +112,7 @@ class PerformanceDetector(P0PerformanceDetector):
                 ball_class_ids=self.ball_candidate_class_ids,
                 conf=self.ball_conf_thresh,
                 iou=self.iou,
-                imgsz=self.imgsz,
+                imgsz=self.smart_crop_imgsz,
                 max_det=self.ball_candidate_max_det,
                 device=self.device,
                 config=config,
@@ -101,13 +120,14 @@ class PerformanceDetector(P0PerformanceDetector):
             )
             print(
                 "🏀 Smart ball pipeline: on "
+                f"mode={self.smart_ball_mode} "
                 f"backend={getattr(backend, 'name', 'unknown')} "
                 f"verify={'on' if config.verify_enabled else 'off'} "
                 f"selective_zoom={'on' if config.zoom_enabled else 'off'} "
                 f"emit_refinements={'on' if self.smart_emit_refinements else 'off'} "
                 f"zoom_min_geometry={self.smart_zoom_min_geometry:.2f} "
                 f"temporal_rescue={self.smart_temporal_rescue_min_score:.2f} "
-                f"crop={config.crop_size}px "
+                f"crop={config.crop_size}px@imgsz{self.smart_crop_imgsz} "
                 f"rank=({config.detector_weight:.2f},"
                 f"{config.verifier_weight:.2f},"
                 f"{config.temporal_weight:.2f},"
@@ -115,24 +135,31 @@ class PerformanceDetector(P0PerformanceDetector):
                 flush=True,
             )
         else:
-            print("🏀 Smart ball pipeline: off", flush=True)
+            print(f"🏀 Smart ball pipeline: off mode={self.smart_ball_mode}", flush=True)
 
     def _tracker_config(self) -> dict[str, Any]:
         config = super()._tracker_config()
         pipeline = getattr(self, "smart_ball_pipeline", None)
         if pipeline is None:
-            config["smart_candidate_pipeline"] = {"enabled": False}
+            config["smart_candidate_pipeline"] = {
+                "enabled": False,
+                "mode": self.smart_ball_mode,
+                "crop_imgsz": int(self.smart_crop_imgsz),
+            }
             return config
 
         smart = pipeline.config
         config["smart_candidate_pipeline"] = {
             "enabled": True,
+            "mode": self.smart_ball_mode,
             "backend": str(
                 getattr(getattr(self, "ball_candidate_backend", None), "name", "unknown")
             ),
             "verify_enabled": bool(smart.verify_enabled),
             "zoom_enabled": bool(smart.zoom_enabled),
             "crop_size": int(smart.crop_size),
+            "crop_imgsz": int(self.smart_crop_imgsz),
+            "full_frame_imgsz": int(self.imgsz),
             "verify_trigger_conf": round(float(smart.verify_trigger_conf), 6),
             "verify_max_candidates": int(smart.verify_max_candidates),
             "verify_match_px": round(float(smart.verify_match_px), 6),
@@ -149,7 +176,8 @@ class PerformanceDetector(P0PerformanceDetector):
                 "temporal": round(float(pipeline.weights[2]), 6),
                 "geometry": round(float(pipeline.weights[3]), 6),
             },
-            "rollback_env": "BASKETBALL_SMART_BALL_PIPELINE=0",
+            "ablation_env": "BASKETBALL_SMART_BALL_MODE=off|verify|zoom|full",
+            "rollback_env": "BASKETBALL_SMART_BALL_MODE=off",
         }
         return config
 
@@ -288,6 +316,8 @@ class PerformanceDetector(P0PerformanceDetector):
             temporal_rescue_min_score=self.smart_temporal_rescue_min_score,
         )
         smart_diag.update(filter_diag)
+        smart_diag["mode"] = self.smart_ball_mode
+        smart_diag["crop_imgsz"] = int(self.smart_crop_imgsz)
         smart_diag["post_filter_candidate_count"] = len(enhanced)
 
         enhanced, restored = self._preserve_full_frame_candidates(
@@ -331,6 +361,9 @@ class PerformanceDetector(P0PerformanceDetector):
         association = detector.get("ball_association", {}) or {}
         smart = association.get("smart_pipeline", {}) or {}
         if not bool(smart.get("enabled", False)):
+            detector["smart_ball_mode"] = self.smart_ball_mode
+            detector["smart_ball_crop_imgsz"] = int(self.smart_crop_imgsz)
+            frame_state.diagnostics["detector"] = detector
             return frame_state
 
         smart_ms = max(0.0, float(smart.get("timing_ms", 0.0) or 0.0))
@@ -340,5 +373,7 @@ class PerformanceDetector(P0PerformanceDetector):
         timings["smart_ball"] = round(smart_ms, 4)
         detector["timing_ms"] = timings
         detector["smart_ball_timing_ms"] = round(smart_ms, 4)
+        detector["smart_ball_mode"] = self.smart_ball_mode
+        detector["smart_ball_crop_imgsz"] = int(self.smart_crop_imgsz)
         frame_state.diagnostics["detector"] = detector
         return frame_state

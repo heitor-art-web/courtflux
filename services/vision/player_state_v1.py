@@ -21,7 +21,9 @@ class PlayerStateEstimatorV1:
 
     Tracking identity/association remains owned by the existing player tracking baseline.
     This adapter requires an upstream track id, preserves player/referee separation, and
-    adds per-track motion/provenance without introducing P2 event semantics.
+    adds per-track motion/provenance without introducing P2 event semantics. Explicit
+    ``active_on_court=False`` detections remain available as detector QA evidence but do
+    not become canonical PlayerState objects.
     """
 
     def __init__(self, *, config: Settings | None = None, memory_frames: int = 90) -> None:
@@ -62,7 +64,12 @@ class PlayerStateEstimatorV1:
 
     @staticmethod
     def _court_position(row: dict[str, Any]) -> tuple[float, float] | None:
+        # Runtime CourtState/camera projection uses ``court_xy`` while offline
+        # PlayerState fixtures historically used ``court_position_m``. Accept both,
+        # but never promote explicitly invalid projected coordinates.
         raw = row.get("court_position_m")
+        if raw is None and row.get("court_xy_valid") is not False:
+            raw = row.get("court_xy")
         if not isinstance(raw, (list, tuple)) or len(raw) < 2:
             return None
         return float(raw[0]), float(raw[1])
@@ -138,6 +145,9 @@ class PlayerStateEstimatorV1:
             if class_name != "player":
                 diagnostics["non_player_excluded"] += 1
                 continue
+            if row.get("active_on_court") is False:
+                diagnostics["explicit_off_court_excluded"] += 1
+                continue
 
             track_id = self._track_id(row)
             bbox = self._bbox(row)
@@ -181,6 +191,9 @@ class PlayerStateEstimatorV1:
                     "player_referee_separation": True,
                     "tracking_association_owned_upstream": True,
                     "identity_resolution": "deferred",
+                    "active_on_court": row.get("active_on_court"),
+                    "court_eligibility_source": row.get("court_eligibility_source"),
+                    "court_projection_source": row.get("court_projection_source"),
                     "uncertainty_policy": "1_minus_upstream_confidence",
                 },
             )
@@ -206,6 +219,7 @@ class PlayerStateEstimatorV1:
             "memory_frames": self.memory_frames,
             "requires_upstream_track_id": True,
             "negative_track_ids_are_untracked": True,
+            "explicit_off_court_is_player_state": False,
             "tracking_association_owned_upstream": True,
             "referees_are_player_states": False,
             "identity_resolution": "deferred_to_identity_consolidation",

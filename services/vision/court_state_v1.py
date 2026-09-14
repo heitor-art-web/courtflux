@@ -17,13 +17,13 @@ class CourtStateEstimatorV1:
     Two evidence modes are intentionally explicit:
 
     - ``calibrated``: a valid non-identity homography projects player/referee feet into
-      FIBA court metres.
-    - ``image_space_fallback``: no metric geometry is claimed; a court-colour surface
-      mask plus wide-view/player-count evidence is used only for conservative QA and
-      metric scoping.
+      FIBA court metres and may support explicit ONCOURT/OFFCOURT claims.
+    - ``image_space_fallback``: no metric geometry is claimed. Court-colour evidence may
+      support ONCOURT, but weak/absent colour evidence remains UNKNOWN because painted
+      court areas, shadows, shoes and lines are not reliably represented by one HSV mask.
 
-    UNKNOWN remains valid. In particular, image-space fallback does not invent court
-    coordinates and ambiguous entity eligibility remains ``None`` rather than False.
+    Rim/backboard detections are retained as basket geometry evidence only. They never
+    imply a shot, make/miss, possession or other P2 event semantics.
     """
 
     def __init__(
@@ -33,8 +33,12 @@ class CourtStateEstimatorV1:
         on_court_margin_m: float = 0.75,
         local_court_accept_ratio: float = 0.18,
         local_court_reject_ratio: float = 0.05,
+        off_court_min_distance_px: float = 18.0,
+        off_court_distance_box_height_ratio: float = 0.10,
         min_analysis_players: int = 4,
         max_wide_view_player_height_ratio: float = 0.45,
+        rim_evidence_confidence: float = 0.40,
+        backboard_evidence_confidence: float = 0.15,
     ) -> None:
         self.config = config or settings
         self.on_court_margin_m = max(0.0, float(on_court_margin_m))
@@ -43,10 +47,22 @@ class CourtStateEstimatorV1:
             0.0,
             min(float(local_court_reject_ratio), self.local_court_accept_ratio),
         )
+        # Retained for backward-compatible config/metadata visibility only. Image-space
+        # fallback no longer uses distance-from-HSV-court to assert OFFCOURT.
+        self.off_court_min_distance_px = max(1.0, float(off_court_min_distance_px))
+        self.off_court_distance_box_height_ratio = max(
+            0.0,
+            float(off_court_distance_box_height_ratio),
+        )
         self.min_analysis_players = max(1, int(min_analysis_players))
         self.max_wide_view_player_height_ratio = max(
             0.05,
             min(float(max_wide_view_player_height_ratio), 1.0),
+        )
+        self.rim_evidence_confidence = max(0.0, min(float(rim_evidence_confidence), 1.0))
+        self.backboard_evidence_confidence = max(
+            0.0,
+            min(float(backboard_evidence_confidence), 1.0),
         )
         self.last_state: CourtState | None = None
         self.last_diagnostics: dict[str, Any] = {}
@@ -139,6 +155,7 @@ class CourtStateEstimatorV1:
             if court_xy is None:
                 return None, "calibrated_projection_failed", None
             entity["court_xy"] = [round(float(court_xy[0]), 4), round(float(court_xy[1]), 4)]
+            entity["court_xy_valid"] = True
             entity["court_projection_source"] = "homography_ground_plane"
             return self._inside_fiba(court_xy), "calibrated_fiba_bounds", None
 
@@ -147,8 +164,14 @@ class CourtStateEstimatorV1:
             return None, "image_space_patch_unavailable", None
         if local_ratio >= self.local_court_accept_ratio:
             return True, "image_space_court_surface", local_ratio
+
+        # IMPORTANT: image-space colour evidence cannot safely assert OFFCOURT. Painted
+        # areas (for example a blue key), shoes, lines, shadows and lighting changes can
+        # all produce near-zero ratios for real players. Distance from the HSV mask used
+        # to be computed here, but after adopting abstention it had no semantic effect and
+        # incurred a full-frame distance transform for every ambiguous entity.
         if local_ratio <= self.local_court_reject_ratio:
-            return False, "image_space_off_court_surface", local_ratio
+            return None, "image_space_low_surface_unknown", local_ratio
         return None, "image_space_ambiguous_surface", local_ratio
 
     def enrich_entities(self, frame_state: Any) -> Any:
@@ -212,6 +235,46 @@ class CourtStateEstimatorV1:
     def _count_not_false(entities: list[dict[str, Any]]) -> int:
         return sum(1 for entity in entities if entity.get("active_on_court") is not False)
 
+    def _basket_evidence(self, frame_state: Any) -> list[dict[str, Any]]:
+        detector = dict((getattr(frame_state, "diagnostics", {}) or {}).get("detector", {}) or {})
+        rows = list(detector.get("p1_detections", []) or [])
+        evidence: list[dict[str, Any]] = []
+        for row in rows:
+            if not isinstance(row, dict):
+                continue
+            label = str(row.get("class_name") or row.get("label") or "").lower()
+            kind = None
+            min_confidence = None
+            if "backboard" in label:
+                kind = "backboard"
+                min_confidence = self.backboard_evidence_confidence
+            elif "rim" in label:
+                kind = "rim"
+                min_confidence = self.rim_evidence_confidence
+            if kind is None or min_confidence is None:
+                continue
+            confidence = float(row.get("confidence", 0.0))
+            if confidence < min_confidence:
+                continue
+            box = row.get("box")
+            if not isinstance(box, (list, tuple)) or len(box) != 4:
+                continue
+            x1, y1, x2, y2 = [float(value) for value in box]
+            if x2 <= x1 or y2 <= y1:
+                continue
+            evidence.append(
+                {
+                    "kind": kind,
+                    "bbox_px": [round(x1, 3), round(y1, 3), round(x2, 3), round(y2, 3)],
+                    "center_px": [round((x1 + x2) / 2.0, 3), round((y1 + y2) / 2.0, 3)],
+                    "confidence": round(confidence, 6),
+                    "threshold": round(float(min_confidence), 6),
+                    "source": "detector_p1_geometry_evidence",
+                    "event_truth": False,
+                }
+            )
+        return evidence
+
     def update(
         self,
         frame_state: Any,
@@ -266,8 +329,8 @@ class CourtStateEstimatorV1:
         if geometry_valid:
             enough_players = on_court_players >= self.min_analysis_players
         else:
-            # In fallback mode UNKNOWN remains usable evidence. Only explicit off-court
-            # rejections are removed from the plausible on-court population.
+            # UNKNOWN remains usable evidence in fallback. Explicit OFFCOURT is only
+            # possible in calibrated mode, so colour gaps cannot remove real players.
             enough_players = plausible_players >= self.min_analysis_players
 
         analysis_eligible = bool(court_visible and wide_view and enough_players)
@@ -281,6 +344,7 @@ class CourtStateEstimatorV1:
             reason = "court_and_entities_consistent"
 
         camera = self._camera_diagnostics(frame_state)
+        basket_evidence = self._basket_evidence(frame_state)
         state = CourtState(
             frame_id=int(getattr(frame_state, "frame_id", 0)),
             timestamp_sec=(
@@ -302,7 +366,7 @@ class CourtStateEstimatorV1:
             on_court_player_count=on_court_players,
             referee_count=len(referees),
             on_court_referee_count=on_court_referees,
-            basket_evidence=[],
+            basket_evidence=basket_evidence,
             provenance={
                 "version": "court_state_v1",
                 "detector_model": self.config.model,
@@ -317,7 +381,16 @@ class CourtStateEstimatorV1:
                 "max_wide_view_player_height_ratio": self.max_wide_view_player_height_ratio,
                 "local_court_accept_ratio": self.local_court_accept_ratio,
                 "local_court_reject_ratio": self.local_court_reject_ratio,
-                "basket_evidence_status": "not_evaluated_in_current_detection_only_path",
+                "off_court_min_distance_px": self.off_court_min_distance_px,
+                "off_court_distance_box_height_ratio": self.off_court_distance_box_height_ratio,
+                "fallback_off_court_policy": "abstain_without_calibrated_geometry",
+                "fallback_distance_transform": False,
+                "rim_evidence_confidence": self.rim_evidence_confidence,
+                "backboard_evidence_confidence": self.backboard_evidence_confidence,
+                "basket_evidence_status": (
+                    "detector_geometry_evidence" if basket_evidence else "no_detector_geometry_evidence"
+                ),
+                "basket_evidence_is_event_truth": False,
                 "p2_event_semantics": False,
             },
         )
@@ -333,5 +406,13 @@ class CourtStateEstimatorV1:
             "court_width_m": float(self.config.court_width),
             "min_analysis_players": self.min_analysis_players,
             "max_wide_view_player_height_ratio": self.max_wide_view_player_height_ratio,
+            "off_court_min_distance_px": self.off_court_min_distance_px,
+            "off_court_distance_box_height_ratio": self.off_court_distance_box_height_ratio,
+            "fallback_off_court_policy": "abstain_without_calibrated_geometry",
+            "fallback_distance_transform": False,
+            "rim_evidence_confidence": self.rim_evidence_confidence,
+            "backboard_evidence_confidence": self.backboard_evidence_confidence,
+            "basket_evidence": ["rim", "backboard"],
+            "basket_evidence_is_event_truth": False,
             "p2_event_semantics": False,
         }
