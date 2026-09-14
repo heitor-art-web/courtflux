@@ -307,7 +307,6 @@ export function NewAnalysisForm({
           model: "weights/Model_v0.1.pt",
           detector_conf: 0.1,
           imgsz: 960,
-          device: "cuda",
           tracker: "botsort.yaml",
           detection_only: true,
           enable_jersey: enableJersey,
