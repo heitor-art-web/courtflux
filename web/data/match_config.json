@@ -1,7 +1,11 @@
 {
   "metadata": {
     "home_team": "FC Porto",
-    "away_team": "Ovarense"
+    "away_team": "Ovarense",
+    "active_kits": {
+      "FC Porto": "home",
+      "Ovarense": "away"
+    }
   },
   "teams": {
     "FC Porto": {
