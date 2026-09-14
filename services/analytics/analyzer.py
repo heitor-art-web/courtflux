@@ -1,4 +1,5 @@
 from pathlib import Path
+import json
 import sqlite3
 import sys
 import torch
@@ -235,6 +236,11 @@ def main(
         )
 
         frame_id = 0
+        total_window_sec = (
+            max(0.0, float(end_time_val) - float(start_time))
+            if end_time_val != float("inf")
+            else None
+        )
         while True:
             frame_state = loader.next()
             if frame_state is None or frame_state.timestamp > end_time_val:
@@ -245,6 +251,39 @@ def main(
             frame_state = pipeline.process(frame_state)
             diagnostics.log_frame(frame_state)
             frame_id += 1
+
+            if total_window_sec and (frame_id == 1 or frame_id % 15 == 0):
+                current_timestamp = float(getattr(frame_state, "timestamp", start_time) or start_time)
+                processed_sec = max(0.0, min(current_timestamp, float(end_time_val)) - float(start_time))
+                percent = min(100.0, max(0.0, (processed_sec / total_window_sec) * 100.0))
+                print(
+                    "[PROGRESS] " + json.dumps(
+                        {
+                            "timestamp_sec": round(current_timestamp, 3),
+                            "processed_seconds": round(processed_sec, 3),
+                            "total_seconds": round(total_window_sec, 3),
+                            "percent": round(percent, 2),
+                            "frames_processed": frame_id,
+                        },
+                        separators=(",", ":"),
+                    ),
+                    flush=True,
+                )
+
+        if total_window_sec:
+            print(
+                "[PROGRESS] " + json.dumps(
+                    {
+                        "timestamp_sec": round(float(end_time_val), 3),
+                        "processed_seconds": round(total_window_sec, 3),
+                        "total_seconds": round(total_window_sec, 3),
+                        "percent": 100.0,
+                        "frames_processed": frame_id,
+                    },
+                    separators=(",", ":"),
+                ),
+                flush=True,
+            )
 
         pipeline.flush()
         video_fps = float(session.fps or 30.0)
