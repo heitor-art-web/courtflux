@@ -21,6 +21,15 @@ class PerformanceDetector(LegacyPerformanceDetector):
         self.team_reversal_min_observations = self._env_int("BASKETBALL_IDENTITY_TEAM_REVERSAL_MIN_OBS", 3, 2, 20)
         self.jersey_evidence_window_frames = self._env_int("BASKETBALL_IDENTITY_JERSEY_WINDOW_FRAMES", 180, 36, 900)
         self.jersey_evidence_half_life_frames = self._env_float("BASKETBALL_IDENTITY_JERSEY_HALF_LIFE_FRAMES", 72.0, 12.0, 450.0)
+        # Jersey v3 uses joint digit-pair posterior probabilities. Two minimum-strength
+        # accepted observations (posterior=0.18, team confidence~=0.58) separated by
+        # the normal 24-frame cadence contribute about 0.142 after temporal decay.
+        # Keeping the old 0.18 lock floor therefore made the second-stage gate stricter
+        # than its own accepted inputs. Retain the two-observation/share/margin gates,
+        # but calibrate absolute evidence to the v3 probability scale.
+        self.identity_lock_min_evidence = self._env_float(
+            "BASKETBALL_IDENTITY_LOCK_MIN_EVIDENCE", 0.14, 0.05, 1.0
+        )
         self.identity_locked_jersey_cadence_multiplier = self._env_int(
             "BASKETBALL_IDENTITY_LOCKED_JERSEY_CADENCE_MULTIPLIER", 3, 1, 12
         )
@@ -29,6 +38,7 @@ class PerformanceDetector(LegacyPerformanceDetector):
             "🪪 Identity v2: on "
             f"team_window={self.team_evidence_window_frames}f "
             f"jersey_window={self.jersey_evidence_window_frames}f "
+            f"lock_evidence={self.identity_lock_min_evidence:.2f} "
             "lock=reversible roster=validator-only",
             flush=True,
         )
@@ -370,6 +380,7 @@ class PerformanceDetector(LegacyPerformanceDetector):
                 prediction["identity_v2_jersey_evidence"] = {
                     "winner": number, "share": round(share, 6), "margin": round(vote_margin, 6),
                     "count": count, "evidence": round(evidence, 6),
+                    "lock_min_evidence": round(self.identity_lock_min_evidence, 6),
                 }
                 changed = bool(
                     profile.get("shirt_num") is not None
@@ -377,7 +388,8 @@ class PerformanceDetector(LegacyPerformanceDetector):
                 )
                 enough = bool(
                     number and count >= 2 and share >= (0.66 if changed else 0.60)
-                    and vote_margin >= (0.24 if changed else 0.18) and evidence >= 0.18
+                    and vote_margin >= (0.24 if changed else 0.18)
+                    and evidence >= self.identity_lock_min_evidence
                 )
                 if enough:
                     was_locked = bool(profile.get("identity_locked"))
@@ -423,6 +435,7 @@ class PerformanceDetector(LegacyPerformanceDetector):
         diag["identity_v2"] = {
             "enabled": True, "unknown_preferred": True, "roster_policy": "validator_only",
             "identity_lock_reversible": True,
+            "identity_lock_min_evidence": self.identity_lock_min_evidence,
             "locked_jersey_cadence_multiplier": self.identity_locked_jersey_cadence_multiplier,
         }
         return attempts, locks, predictions
