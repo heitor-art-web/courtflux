@@ -1,7 +1,6 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
-import defaultMatchConfig from "@/data/match_config.json";
 
 type LabDefaults = {
   video_source: string;
@@ -18,6 +17,8 @@ type LabDefaults = {
   persist_results: boolean;
   live_preview: boolean;
   preview_interval_frames: number;
+  match_config?: Record<string, unknown>;
+  match_config_source?: string;
 };
 
 type WorkerHealth = {
@@ -99,6 +100,7 @@ function metric(value: number | undefined, digits = 2) { return Number(value ?? 
 export default function LabPage() {
   const [health, setHealth] = useState<WorkerHealth>({});
   const defaultsApplied = useRef(false);
+  const matchConfigApplied = useRef(false);
   const [videoSource, setVideoSource] = useState(FALLBACK.video_source);
   const [startTime, setStartTime] = useState(0);
   const [endTime, setEndTime] = useState(60);
@@ -116,7 +118,7 @@ export default function LabPage() {
   const [livePreview, setLivePreview] = useState(FALLBACK.live_preview);
   const [previewInterval, setPreviewInterval] = useState(FALLBACK.preview_interval_frames);
   const [previewNonce, setPreviewNonce] = useState(0);
-  const [matchConfigText] = useState(JSON.stringify(defaultMatchConfig, null, 2));
+  const [matchConfigText, setMatchConfigText] = useState("{}");
   const [job, setJob] = useState<JobState | null>(null);
   const [logs, setLogs] = useState<string[]>([]);
   const [submitting, setSubmitting] = useState(false);
@@ -131,13 +133,23 @@ export default function LabPage() {
     setPreviewInterval(d.preview_interval_frames);
   }
 
+  function applyCanonicalMatchConfig(d: LabDefaults | undefined) {
+    if (!d?.match_config) return;
+    setMatchConfigText(JSON.stringify(d.match_config, null, 2));
+  }
+
   async function refreshHealth() {
     try {
       const response = await fetch("/api/lab/health", { cache: "no-store" });
       const data: WorkerHealth = await response.json();
       setHealth(data);
-      if (data.status === "ok" && data.lab_defaults && !defaultsApplied.current) {
-        applyDefaults(data.lab_defaults); defaultsApplied.current = true;
+      if (data.status === "ok" && data.lab_defaults) {
+        if (!defaultsApplied.current) {
+          applyDefaults(data.lab_defaults); defaultsApplied.current = true;
+        }
+        if (data.lab_defaults.match_config && !matchConfigApplied.current) {
+          applyCanonicalMatchConfig(data.lab_defaults); matchConfigApplied.current = true;
+        }
       }
     } catch (error) {
       setHealth({ status: "error", error: error instanceof Error ? error.message : String(error) });
@@ -255,9 +267,10 @@ export default function LabPage() {
         </section>
 
         <section className="panel span-4" aria-labelledby="match-config-title">
-          <h2 id="match-config-title">match_config.json</h2><p className="muted">Read-only P1 roster loaded from the updated code and sent with every Lab job.</p>
-          <textarea value={matchConfigText} readOnly spellCheck={false} aria-label="Match configuration JSON" aria-invalid={Boolean(parsedMatchConfig.error)} />
-          {parsedMatchConfig.error ? <div className="error-box" role="alert">{parsedMatchConfig.error}</div> : <div className="muted" role="status">Canonical JSON loaded · data/match_config.json synced</div>}
+          <div className="status-line"><h2 id="match-config-title" style={{ margin: 0 }}>match_config.json</h2><button type="button" onClick={() => applyCanonicalMatchConfig(health.lab_defaults)} disabled={!health.lab_defaults?.match_config || analysisActive}>Reload from code</button></div>
+          <p className="muted">Loaded from the worker canonical {health.lab_defaults?.match_config_source ?? "data/match_config.json"}. Edit it here for this run; the submitted JSON is snapshotted into the job.</p>
+          <textarea value={matchConfigText} onChange={(e) => setMatchConfigText(e.target.value)} spellCheck={false} aria-label="Match configuration JSON" aria-invalid={Boolean(parsedMatchConfig.error)} />
+          {parsedMatchConfig.error ? <div className="error-box" role="alert">{parsedMatchConfig.error}</div> : <div className="muted" role="status">JSON valid · canonical source loaded from worker</div>}
         </section>
 
         {job?.job_id && livePreview ? <section className="panel span-12" aria-labelledby="preview-title">
