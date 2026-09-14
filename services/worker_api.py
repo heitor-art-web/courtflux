@@ -5,9 +5,10 @@ import os
 import subprocess
 import sys
 import threading
+import time
 import uuid
 from concurrent.futures import ThreadPoolExecutor
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any, Literal
 
@@ -31,7 +32,7 @@ _supabase_store = SupabaseRunStore()
 
 app = FastAPI(
     title="CourtFlux Worker",
-    version="0.5.0",
+    version="0.6.0",
     description="CourtFlux analysis worker using the canonical Beta Lab analysis contract.",
 )
 
@@ -109,7 +110,13 @@ def read_state(job_id: str) -> dict[str, Any]:
     if not path.exists():
         raise HTTPException(status_code=404, detail="Job not found")
     try:
-        return json.loads(path.read_text(encoding="utf-8"))
+        state = json.loads(path.read_text(encoding="utf-8"))
+        artifacts = dict(state.get("artifacts") or {})
+        directory = job_dir(job_id)
+        artifacts["preview"] = (directory / "latest_preview.jpg").exists()
+        artifacts["analysis_video"] = (directory / "analysis_preview.mp4").exists()
+        state["artifacts"] = artifacts
+        return state
     except Exception as exc:
         raise HTTPException(status_code=500, detail=f"Could not read job state: {exc}") from exc
 
@@ -148,8 +155,29 @@ def run_job(job_id: str, request_data: dict[str, Any]) -> None:
     platform_run_id = request_data.get("platform_run_id")
     preview_path = directory / "latest_preview.jpg"
     preview_video_path = directory / "analysis_preview.mp4"
+    total_window_sec = max(0.0, float(request_data["end_time_sec"]) - float(request_data["start_time_sec"]))
+    job_started_wall = time.monotonic()
+    progress_anchor_wall: float | None = None
+    progress_anchor_processed: float | None = None
 
-    write_state(job_id, {"status": "running", "started_at": utc_now()})
+    write_state(
+        job_id,
+        {
+            "status": "running",
+            "started_at": utc_now(),
+            "progress": {
+                "phase": "preparing",
+                "percent": 0.0,
+                "processed_seconds": 0.0,
+                "total_seconds": total_window_sec,
+                "frames_processed": 0,
+                "elapsed_sec": 0.0,
+                "eta_sec": None,
+                "estimated_completion_at": None,
+                "last_progress_at": None,
+            },
+        },
+    )
     _supabase_store.mark_running(job_id, platform_run_id)
     summary_path: Path | None = None
     recent_lines: list[str] = []
@@ -175,9 +203,12 @@ def run_job(job_id: str, request_data: dict[str, Any]) -> None:
             "--diagnostics-batch-size", str(request_data["diagnostics_batch_size"]),
             "--reset-db",
         ]
-        if request_data.get("detection_only", True): command.append("--detection-only")
-        if not request_data.get("enable_jersey", False): command.append("--no-jersey")
-        if not request_data.get("persist_results", True): command.append("--no-persist")
+        if request_data.get("detection_only", True):
+            command.append("--detection-only")
+        if not request_data.get("enable_jersey", False):
+            command.append("--no-jersey")
+        if not request_data.get("persist_results", True):
+            command.append("--no-persist")
 
         child_env = os.environ.copy()
         child_env["BASKETBALL_INFERENCE_CONF"] = str(request_data["inference_conf"])
@@ -189,14 +220,77 @@ def run_job(job_id: str, request_data: dict[str, Any]) -> None:
             child_env["BASKETBALL_PREVIEW_INTERVAL"] = str(request_data["preview_interval_frames"])
 
         with log_path.open("w", encoding="utf-8") as log_file:
-            process = subprocess.Popen(command, cwd=str(PROJECT_ROOT), env=child_env, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, encoding="utf-8", errors="replace", bufsize=1)
+            process = subprocess.Popen(
+                command,
+                cwd=str(PROJECT_ROOT),
+                env=child_env,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.STDOUT,
+                text=True,
+                encoding="utf-8",
+                errors="replace",
+                bufsize=1,
+            )
             assert process.stdout is not None
             for line in process.stdout:
-                log_file.write(line); log_file.flush()
-                text = line.rstrip(); recent_lines.append(text); recent_lines = recent_lines[-40:]
+                log_file.write(line)
+                log_file.flush()
+                text = line.rstrip()
+                recent_lines.append(text)
+                recent_lines = recent_lines[-40:]
+
+                if text.startswith("[PROGRESS]"):
+                    try:
+                        payload = json.loads(text.replace("[PROGRESS]", "", 1).strip())
+                        processed = max(0.0, float(payload.get("processed_seconds", 0.0) or 0.0))
+                        total = max(0.0, float(payload.get("total_seconds", total_window_sec) or total_window_sec))
+                        raw_percent = max(0.0, min(100.0, float(payload.get("percent", 0.0) or 0.0)))
+                        frames_processed = max(0, int(payload.get("frames_processed", 0) or 0))
+                        now_wall = time.monotonic()
+                        elapsed_sec = max(0.0, now_wall - job_started_wall)
+
+                        if progress_anchor_wall is None:
+                            progress_anchor_wall = now_wall
+                            progress_anchor_processed = processed
+
+                        eta_sec: float | None = None
+                        if progress_anchor_wall is not None and progress_anchor_processed is not None:
+                            tracking_wall = max(0.0, now_wall - progress_anchor_wall)
+                            tracking_video = max(0.0, processed - progress_anchor_processed)
+                            if tracking_wall >= 3.0 and tracking_video >= 0.25 and processed < total:
+                                seconds_per_video_second = tracking_wall / tracking_video
+                                eta_sec = max(0.0, (total - processed) * seconds_per_video_second)
+
+                        phase = "finalizing" if raw_percent >= 99.5 else "tracking"
+                        display_percent = 99.0 if phase == "finalizing" else raw_percent
+                        estimated_completion_at = (
+                            (datetime.now(timezone.utc) + timedelta(seconds=eta_sec)).isoformat()
+                            if eta_sec is not None
+                            else None
+                        )
+                        write_state(
+                            job_id,
+                            {
+                                "progress": {
+                                    "phase": phase,
+                                    "percent": round(display_percent, 2),
+                                    "processed_seconds": round(processed, 3),
+                                    "total_seconds": round(total, 3),
+                                    "frames_processed": frames_processed,
+                                    "elapsed_sec": round(elapsed_sec, 2),
+                                    "eta_sec": round(eta_sec, 2) if eta_sec is not None else None,
+                                    "estimated_completion_at": estimated_completion_at,
+                                    "last_progress_at": utc_now(),
+                                }
+                            },
+                        )
+                    except (TypeError, ValueError, json.JSONDecodeError):
+                        pass
+
                 if text.startswith("[SUMMARY]"):
                     candidate = Path(text.replace("[SUMMARY]", "", 1).strip())
-                    if candidate.exists(): summary_path = candidate
+                    if candidate.exists():
+                        summary_path = candidate
             return_code = process.wait()
 
         summary = json.loads(summary_path.read_text(encoding="utf-8")) if summary_path and summary_path.exists() else None
@@ -205,25 +299,69 @@ def run_job(job_id: str, request_data: dict[str, Any]) -> None:
             "analysis_video": preview_video_path.exists(),
         }
         if return_code == 0:
-            write_state(job_id, {"status": "completed", "completed_at": utc_now(), "return_code": return_code, "summary": summary, "artifacts": artifacts})
+            write_state(
+                job_id,
+                {
+                    "status": "completed",
+                    "completed_at": utc_now(),
+                    "return_code": return_code,
+                    "summary": summary,
+                    "artifacts": artifacts,
+                    "progress": {
+                        "phase": "completed",
+                        "percent": 100.0,
+                        "processed_seconds": total_window_sec,
+                        "total_seconds": total_window_sec,
+                        "frames_processed": (read_state(job_id).get("progress") or {}).get("frames_processed", 0),
+                        "elapsed_sec": round(max(0.0, time.monotonic() - job_started_wall), 2),
+                        "eta_sec": 0.0,
+                        "estimated_completion_at": utc_now(),
+                        "last_progress_at": utc_now(),
+                    },
+                },
+            )
             _supabase_store.mark_completed(job_id, platform_run_id, summary, request_data)
         else:
             error_tail = "\n".join(recent_lines[-12:])
-            write_state(job_id, {"status": "failed", "completed_at": utc_now(), "return_code": return_code, "summary": summary, "error": error_tail, "artifacts": artifacts})
+            previous_progress = dict((read_state(job_id).get("progress") or {}))
+            previous_progress.update({"phase": "failed", "eta_sec": None, "estimated_completion_at": None})
+            write_state(
+                job_id,
+                {
+                    "status": "failed",
+                    "completed_at": utc_now(),
+                    "return_code": return_code,
+                    "summary": summary,
+                    "error": error_tail,
+                    "artifacts": artifacts,
+                    "progress": previous_progress,
+                },
+            )
             _supabase_store.mark_failed(job_id, platform_run_id, error_tail, error_tail)
     except Exception as exc:
         error_text = f"{type(exc).__name__}: {exc}"
-        write_state(job_id, {"status": "failed", "completed_at": utc_now(), "error": error_text})
+        try:
+            previous_progress = dict((read_state(job_id).get("progress") or {}))
+        except Exception:
+            previous_progress = {}
+        previous_progress.update({"phase": "failed", "eta_sec": None, "estimated_completion_at": None})
+        write_state(job_id, {"status": "failed", "completed_at": utc_now(), "error": error_text, "progress": previous_progress})
         _supabase_store.mark_failed(job_id, platform_run_id, error_text, "\n".join(recent_lines[-12:]) if recent_lines else None)
 
 
 @app.get("/health", dependencies=[Depends(require_worker_token)])
 def health() -> dict[str, Any]:
     return {
-        "status": "ok", "worker": "courtflux", "max_parallel_jobs": MAX_WORKERS,
+        "status": "ok",
+        "worker": "courtflux",
+        "max_parallel_jobs": MAX_WORKERS,
         "supabase_persistence": _supabase_store.enabled,
         "lab_defaults": lab_defaults(),
-        "devices": {"mps": bool(torch.backends.mps.is_available()), "cuda": bool(torch.cuda.is_available()), "cpu": True},
+        "devices": {
+            "mps": bool(torch.backends.mps.is_available()),
+            "cuda": bool(torch.cuda.is_available()),
+            "cpu": True,
+        },
     }
 
 
@@ -235,42 +373,70 @@ def create_job(payload: JobRequest) -> JobCreated:
         raise HTTPException(status_code=422, detail="inference_conf must be <= both detector_conf and ball_conf")
     validate_match_config(payload.match_config)
     platform_job_id = normalize_uuid(payload.platform_job_id, "platform_job_id")
-    normalize_uuid(payload.platform_run_id, "platform_run_id"); normalize_uuid(payload.workspace_id, "workspace_id"); normalize_uuid(payload.user_id, "user_id")
+    normalize_uuid(payload.platform_run_id, "platform_run_id")
+    normalize_uuid(payload.workspace_id, "workspace_id")
+    normalize_uuid(payload.user_id, "user_id")
     job_id = platform_job_id or str(uuid.uuid4())
     directory = job_dir(job_id)
-    try: directory.mkdir(parents=True, exist_ok=False)
-    except FileExistsError as exc: raise HTTPException(status_code=409, detail="Job already exists") from exc
+    try:
+        directory.mkdir(parents=True, exist_ok=False)
+    except FileExistsError as exc:
+        raise HTTPException(status_code=409, detail="Job already exists") from exc
     request_data = payload.model_dump()
     (directory / "request.json").write_text(json.dumps(request_data, indent=2, ensure_ascii=False), encoding="utf-8")
     (directory / "match_config.json").write_text(json.dumps(payload.match_config, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
-    write_state(job_id, {"job_id": job_id, "platform_run_id": payload.platform_run_id, "workspace_id": payload.workspace_id, "status": "queued", "created_at": utc_now(), "request": {k: v for k, v in request_data.items() if k != "match_config"}})
-    _supabase_store.update_job(job_id, {"status": "queued", "worker_id": os.getenv("COURTFLUX_WORKER_ID", os.getenv("HOSTNAME", "local-worker"))})
+    write_state(
+        job_id,
+        {
+            "job_id": job_id,
+            "platform_run_id": payload.platform_run_id,
+            "workspace_id": payload.workspace_id,
+            "status": "queued",
+            "created_at": utc_now(),
+            "request": {k: v for k, v in request_data.items() if k != "match_config"},
+        },
+    )
+    _supabase_store.update_job(
+        job_id,
+        {
+            "status": "queued",
+            "worker_id": os.getenv("COURTFLUX_WORKER_ID", os.getenv("HOSTNAME", "local-worker")),
+        },
+    )
     _executor.submit(run_job, job_id, request_data)
     return JobCreated(job_id=job_id, status="queued")
 
 
 @app.get("/jobs/{job_id}", dependencies=[Depends(require_worker_token)])
-def get_job(job_id: str) -> dict[str, Any]: return read_state(job_id)
+def get_job(job_id: str) -> dict[str, Any]:
+    return read_state(job_id)
 
 
 @app.get("/jobs/{job_id}/log", dependencies=[Depends(require_worker_token)])
 def get_job_log(job_id: str, tail: int = 120) -> dict[str, Any]:
-    tail = max(1, min(tail, 500)); path = job_dir(job_id) / "console.log"
-    if not path.exists(): return {"job_id": job_id, "lines": []}
-    return {"job_id": job_id, "lines": path.read_text(encoding="utf-8", errors="replace").splitlines()[-tail:]}
+    tail = max(1, min(tail, 500))
+    path = job_dir(job_id) / "console.log"
+    if not path.exists():
+        return {"job_id": job_id, "lines": []}
+    return {
+        "job_id": job_id,
+        "lines": path.read_text(encoding="utf-8", errors="replace").splitlines()[-tail:],
+    }
 
 
 @app.get("/jobs/{job_id}/preview", dependencies=[Depends(require_worker_token)])
 def get_job_preview(job_id: str):
     path = job_dir(job_id) / "latest_preview.jpg"
-    if not path.exists(): raise HTTPException(status_code=404, detail="Preview not available yet")
+    if not path.exists():
+        raise HTTPException(status_code=404, detail="Preview not available yet")
     return FileResponse(path, media_type="image/jpeg", headers={"Cache-Control": "no-store"})
 
 
 @app.get("/jobs/{job_id}/preview-video", dependencies=[Depends(require_worker_token)])
 def get_job_preview_video(job_id: str):
     path = job_dir(job_id) / "analysis_preview.mp4"
-    if not path.exists(): raise HTTPException(status_code=404, detail="Analysis preview video not available")
+    if not path.exists():
+        raise HTTPException(status_code=404, detail="Analysis preview video not available")
     return FileResponse(
         path,
         media_type="video/mp4",
@@ -283,4 +449,10 @@ def get_job_preview_video(job_id: str):
 
 if __name__ == "__main__":
     import uvicorn
-    uvicorn.run("services.worker_api:app", host=os.getenv("WORKER_HOST", "127.0.0.1"), port=int(os.getenv("WORKER_PORT", "8787")), reload=False)
+
+    uvicorn.run(
+        "services.worker_api:app",
+        host=os.getenv("WORKER_HOST", "127.0.0.1"),
+        port=int(os.getenv("WORKER_PORT", "8787")),
+        reload=False,
+    )
