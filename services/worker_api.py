@@ -2,12 +2,13 @@ from __future__ import annotations
 
 import json
 import os
+import signal
 import subprocess
 import sys
 import threading
 import time
 import uuid
-from concurrent.futures import ThreadPoolExecutor
+from concurrent.futures import Future, ThreadPoolExecutor
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any, Literal
@@ -28,11 +29,15 @@ MAX_WORKERS = max(1, int(os.getenv("WORKER_MAX_JOBS", "1")))
 
 _executor = ThreadPoolExecutor(max_workers=MAX_WORKERS, thread_name_prefix="basketball-worker")
 _state_lock = threading.Lock()
+_control_lock = threading.Lock()
+_job_futures: dict[str, Future[Any]] = {}
+_job_processes: dict[str, subprocess.Popen[str]] = {}
+_cancel_requested: set[str] = set()
 _supabase_store = SupabaseRunStore()
 
 app = FastAPI(
     title="CourtFlux Worker",
-    version="0.6.0",
+    version="0.7.0",
     description="CourtFlux analysis worker using the canonical Beta Lab analysis contract.",
 )
 
@@ -147,6 +152,127 @@ def validate_match_config(config: dict[str, Any]) -> None:
         raise HTTPException(status_code=422, detail="home_team and away_team must exist in match_config.teams")
 
 
+def cancellation_requested(job_id: str) -> bool:
+    with _control_lock:
+        return job_id in _cancel_requested
+
+
+def mark_cancel_requested(job_id: str) -> dict[str, Any]:
+    state = read_state(job_id)
+    if str(state.get("status") or "") in {"completed", "failed", "canceled"}:
+        return state
+    with _control_lock:
+        _cancel_requested.add(job_id)
+    progress = dict(state.get("progress") or {})
+    progress.update({"phase": "canceling", "eta_sec": None, "estimated_completion_at": None})
+    return write_state(
+        job_id,
+        {
+            "cancel_requested": True,
+            "cancel_requested_at": utc_now(),
+            "progress": progress,
+        },
+    )
+
+
+def finalize_canceled(job_id: str, platform_run_id: str | None, reason: str = "Canceled by user") -> dict[str, Any]:
+    state = read_state(job_id)
+    status = str(state.get("status") or "")
+    if status in {"completed", "failed", "canceled"}:
+        return state
+
+    completed_at = utc_now()
+    progress = dict(state.get("progress") or {})
+    progress.update(
+        {
+            "phase": "canceled",
+            "eta_sec": None,
+            "estimated_completion_at": None,
+            "last_progress_at": progress.get("last_progress_at") or completed_at,
+        }
+    )
+    updated = write_state(
+        job_id,
+        {
+            "status": "canceled",
+            "completed_at": completed_at,
+            "cancel_requested": True,
+            "cancel_reason": reason,
+            "error": None,
+            "progress": progress,
+        },
+    )
+    _supabase_store.update_job(
+        job_id,
+        {"status": "canceled", "completed_at": completed_at, "error": None},
+    )
+    _supabase_store.update_run(
+        platform_run_id,
+        {"status": "canceled", "completed_at": completed_at},
+    )
+    return updated
+
+
+def _signal_process_group(process: subprocess.Popen[str], sig: int) -> None:
+    if process.poll() is not None:
+        return
+    if os.name != "nt":
+        try:
+            os.killpg(process.pid, sig)
+            return
+        except ProcessLookupError:
+            return
+        except Exception:
+            pass
+    process.send_signal(sig)
+
+
+def stop_process(process: subprocess.Popen[str]) -> None:
+    if process.poll() is not None:
+        return
+    try:
+        _signal_process_group(process, signal.SIGINT)
+        process.wait(timeout=5)
+        return
+    except subprocess.TimeoutExpired:
+        pass
+    except Exception:
+        pass
+
+    try:
+        if os.name != "nt":
+            _signal_process_group(process, signal.SIGTERM)
+        else:
+            process.terminate()
+        process.wait(timeout=3)
+        return
+    except subprocess.TimeoutExpired:
+        pass
+    except Exception:
+        pass
+
+    try:
+        if os.name != "nt":
+            _signal_process_group(process, signal.SIGKILL)
+        else:
+            process.kill()
+        process.wait(timeout=2)
+    except Exception:
+        pass
+
+
+def _register_future(job_id: str, future: Future[Any]) -> None:
+    with _control_lock:
+        _job_futures[job_id] = future
+
+    def cleanup(done_future: Future[Any]) -> None:
+        with _control_lock:
+            if _job_futures.get(job_id) is done_future:
+                _job_futures.pop(job_id, None)
+
+    future.add_done_callback(cleanup)
+
+
 def run_job(job_id: str, request_data: dict[str, Any]) -> None:
     directory = job_dir(job_id)
     log_path = directory / "console.log"
@@ -159,6 +285,11 @@ def run_job(job_id: str, request_data: dict[str, Any]) -> None:
     job_started_wall = time.monotonic()
     progress_anchor_wall: float | None = None
     progress_anchor_processed: float | None = None
+    process: subprocess.Popen[str] | None = None
+
+    if cancellation_requested(job_id):
+        finalize_canceled(job_id, platform_run_id)
+        return
 
     write_state(
         job_id,
@@ -181,26 +312,51 @@ def run_job(job_id: str, request_data: dict[str, Any]) -> None:
     _supabase_store.mark_running(job_id, platform_run_id)
     summary_path: Path | None = None
     recent_lines: list[str] = []
+
     try:
+        if cancellation_requested(job_id):
+            finalize_canceled(job_id, platform_run_id)
+            return
+
         video_source = str(request_data["video_source"])
         if video_source.startswith("supabase://"):
             video_store = SupabaseVideoStore(output_dir=str(PROJECT_ROOT / "data" / "uploads"))
-            video_source = video_store.get_local_video(video_source, expected_workspace_id=request_data.get("workspace_id"))
+            video_source = video_store.get_local_video(
+                video_source,
+                expected_workspace_id=request_data.get("workspace_id"),
+            )
+
+        if cancellation_requested(job_id):
+            finalize_canceled(job_id, platform_run_id)
+            return
 
         command = [
-            sys.executable, str(analyzer),
-            "--video", video_source,
-            "--start", str(request_data["start_time_sec"]),
-            "--end", str(request_data["end_time_sec"]),
-            "--model", request_data["model"],
-            "--conf", str(request_data["detector_conf"]),
-            "--imgsz", str(request_data["imgsz"]),
-            "--device", request_data["device"],
-            "--tracker", request_data["tracker"],
-            "--match-config", str(match_config_path),
-            "--jersey-interval", str(request_data["jersey_interval_frames"]),
-            "--db-batch-size", str(request_data["db_batch_size"]),
-            "--diagnostics-batch-size", str(request_data["diagnostics_batch_size"]),
+            sys.executable,
+            str(analyzer),
+            "--video",
+            video_source,
+            "--start",
+            str(request_data["start_time_sec"]),
+            "--end",
+            str(request_data["end_time_sec"]),
+            "--model",
+            request_data["model"],
+            "--conf",
+            str(request_data["detector_conf"]),
+            "--imgsz",
+            str(request_data["imgsz"]),
+            "--device",
+            request_data["device"],
+            "--tracker",
+            request_data["tracker"],
+            "--match-config",
+            str(match_config_path),
+            "--jersey-interval",
+            str(request_data["jersey_interval_frames"]),
+            "--db-batch-size",
+            str(request_data["db_batch_size"]),
+            "--diagnostics-batch-size",
+            str(request_data["diagnostics_batch_size"]),
             "--reset-db",
         ]
         if request_data.get("detection_only", True):
@@ -230,7 +386,17 @@ def run_job(job_id: str, request_data: dict[str, Any]) -> None:
                 encoding="utf-8",
                 errors="replace",
                 bufsize=1,
+                start_new_session=os.name != "nt",
             )
+            with _control_lock:
+                _job_processes[job_id] = process
+
+            if cancellation_requested(job_id):
+                try:
+                    _signal_process_group(process, signal.SIGINT)
+                except Exception:
+                    pass
+
             assert process.stdout is not None
             for line in process.stdout:
                 log_file.write(line)
@@ -268,18 +434,19 @@ def run_job(job_id: str, request_data: dict[str, Any]) -> None:
                             if eta_sec is not None
                             else None
                         )
+                        is_canceling = cancellation_requested(job_id)
                         write_state(
                             job_id,
                             {
                                 "progress": {
-                                    "phase": phase,
+                                    "phase": "canceling" if is_canceling else phase,
                                     "percent": round(display_percent, 2),
                                     "processed_seconds": round(processed, 3),
                                     "total_seconds": round(total, 3),
                                     "frames_processed": frames_processed,
                                     "elapsed_sec": round(elapsed_sec, 2),
-                                    "eta_sec": round(eta_sec, 2) if eta_sec is not None else None,
-                                    "estimated_completion_at": estimated_completion_at,
+                                    "eta_sec": None if is_canceling else round(eta_sec, 2) if eta_sec is not None else None,
+                                    "estimated_completion_at": None if is_canceling else estimated_completion_at,
                                     "last_progress_at": utc_now(),
                                 }
                             },
@@ -291,7 +458,12 @@ def run_job(job_id: str, request_data: dict[str, Any]) -> None:
                     candidate = Path(text.replace("[SUMMARY]", "", 1).strip())
                     if candidate.exists():
                         summary_path = candidate
+
             return_code = process.wait()
+
+        if cancellation_requested(job_id):
+            finalize_canceled(job_id, platform_run_id)
+            return
 
         summary = json.loads(summary_path.read_text(encoding="utf-8")) if summary_path and summary_path.exists() else None
         artifacts = {
@@ -338,15 +510,31 @@ def run_job(job_id: str, request_data: dict[str, Any]) -> None:
                 },
             )
             _supabase_store.mark_failed(job_id, platform_run_id, error_tail, error_tail)
-    except Exception as exc:
+    except BaseException as exc:
+        if cancellation_requested(job_id):
+            finalize_canceled(job_id, platform_run_id)
+            return
         error_text = f"{type(exc).__name__}: {exc}"
         try:
             previous_progress = dict((read_state(job_id).get("progress") or {}))
         except Exception:
             previous_progress = {}
         previous_progress.update({"phase": "failed", "eta_sec": None, "estimated_completion_at": None})
-        write_state(job_id, {"status": "failed", "completed_at": utc_now(), "error": error_text, "progress": previous_progress})
-        _supabase_store.mark_failed(job_id, platform_run_id, error_text, "\n".join(recent_lines[-12:]) if recent_lines else None)
+        write_state(
+            job_id,
+            {"status": "failed", "completed_at": utc_now(), "error": error_text, "progress": previous_progress},
+        )
+        _supabase_store.mark_failed(
+            job_id,
+            platform_run_id,
+            error_text,
+            "\n".join(recent_lines[-12:]) if recent_lines else None,
+        )
+    finally:
+        with _control_lock:
+            if process is not None and _job_processes.get(job_id) is process:
+                _job_processes.pop(job_id, None)
+            _cancel_requested.discard(job_id)
 
 
 @app.get("/health", dependencies=[Depends(require_worker_token)])
@@ -382,9 +570,13 @@ def create_job(payload: JobRequest) -> JobCreated:
         directory.mkdir(parents=True, exist_ok=False)
     except FileExistsError as exc:
         raise HTTPException(status_code=409, detail="Job already exists") from exc
+
     request_data = payload.model_dump()
     (directory / "request.json").write_text(json.dumps(request_data, indent=2, ensure_ascii=False), encoding="utf-8")
-    (directory / "match_config.json").write_text(json.dumps(payload.match_config, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
+    (directory / "match_config.json").write_text(
+        json.dumps(payload.match_config, indent=2, ensure_ascii=False) + "\n",
+        encoding="utf-8",
+    )
     write_state(
         job_id,
         {
@@ -403,8 +595,63 @@ def create_job(payload: JobRequest) -> JobCreated:
             "worker_id": os.getenv("COURTFLUX_WORKER_ID", os.getenv("HOSTNAME", "local-worker")),
         },
     )
-    _executor.submit(run_job, job_id, request_data)
+    future = _executor.submit(run_job, job_id, request_data)
+    _register_future(job_id, future)
     return JobCreated(job_id=job_id, status="queued")
+
+
+@app.post("/jobs/{job_id}/cancel", dependencies=[Depends(require_worker_token)])
+def cancel_job(job_id: str) -> dict[str, Any]:
+    state = read_state(job_id)
+    status = str(state.get("status") or "")
+    platform_run_id = state.get("platform_run_id")
+
+    if status == "canceled":
+        return {"job_id": job_id, "status": "canceled", "already_terminal": True}
+    if status in {"completed", "failed"}:
+        raise HTTPException(status_code=409, detail=f"Analysis is already {status}")
+    if status not in {"queued", "running"}:
+        raise HTTPException(status_code=409, detail=f"Analysis cannot be canceled from status {status or 'unknown'}")
+
+    requested_state = mark_cancel_requested(job_id)
+    requested_status = str(requested_state.get("status") or "")
+    if requested_status in {"completed", "failed", "canceled"}:
+        if requested_status == "canceled":
+            return {"job_id": job_id, "status": "canceled", "already_terminal": True}
+        raise HTTPException(status_code=409, detail=f"Analysis is already {requested_status}")
+
+    with _control_lock:
+        future = _job_futures.get(job_id)
+        process = _job_processes.get(job_id)
+
+    if future is not None and future.cancel():
+        canceled = finalize_canceled(job_id, platform_run_id)
+        with _control_lock:
+            _cancel_requested.discard(job_id)
+        return {"job_id": job_id, "status": canceled.get("status", "canceled")}
+
+    if process is not None:
+        stop_process(process)
+        canceled = finalize_canceled(job_id, platform_run_id)
+        return {"job_id": job_id, "status": canceled.get("status", "canceled")}
+
+    deadline = time.monotonic() + 1.0
+    while time.monotonic() < deadline:
+        time.sleep(0.05)
+        current = read_state(job_id)
+        current_status = str(current.get("status") or "")
+        if current_status in {"completed", "failed", "canceled"}:
+            with _control_lock:
+                _cancel_requested.discard(job_id)
+            return {"job_id": job_id, "status": current_status}
+        with _control_lock:
+            process = _job_processes.get(job_id)
+        if process is not None:
+            stop_process(process)
+            canceled = finalize_canceled(job_id, platform_run_id)
+            return {"job_id": job_id, "status": canceled.get("status", "canceled")}
+
+    return {"job_id": job_id, "status": "cancel_requested"}
 
 
 @app.get("/jobs/{job_id}", dependencies=[Depends(require_worker_token)])
