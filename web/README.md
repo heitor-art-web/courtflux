@@ -90,32 +90,20 @@ The Python worker can initially run on the development Mac and later move to a G
 
 ## Environment variables
 
-Copy the example file:
-
-```bash
-cd web
-cp .env.example .env.local
-```
-
-Configure:
+Configure the web application with the environment variables appropriate to the environment:
 
 - `NEXT_PUBLIC_SITE_URL` — canonical production URL used by metadata, sitemap and social links.
-- `WORKER_API_URL` — public HTTPS URL of the Python analysis worker.
-- `WORKER_API_TOKEN` — bearer token shared with the worker. Keep server-side only.
+- `WORKER_API_URL` — public HTTPS URL of the Python analysis worker. In local development it defaults to `http://127.0.0.1:8787`.
+- `WORKER_API_TOKEN` — bearer token shared with the worker. On Vercel this must be a server-side environment variable. On the worker Mac, local Next.js development falls back to `~/.config/courtflux/worker-api-token`, so the token does not need to be duplicated in `web/.env.local`.
 - `NEXT_PUBLIC_SUPABASE_URL` — Supabase project URL.
 - `NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY` — browser-safe Supabase publishable key.
 - `SUPABASE_SERVICE_ROLE_KEY` — server-only Supabase admin key. The Python worker also needs it to resolve private uploaded videos. Never expose it as `NEXT_PUBLIC_*`.
 
+Worker/backend configuration such as `SUPABASE_URL` and `SUPABASE_SERVICE_ROLE_KEY` may live in the repository-root `.env` on the Mac. The worker launcher loads that file without overriding values already supplied by the process environment.
+
 ## Run locally
 
-From the repository root:
-
-```bash
-npm install
-npm run dev
-```
-
-Or from this directory:
+From the `web` directory:
 
 ```bash
 npm install
@@ -126,7 +114,7 @@ Open `http://localhost:3000`.
 
 ## Quality checks
 
-From the repository root:
+From the `web` directory:
 
 ```bash
 npm run typecheck
@@ -138,20 +126,34 @@ The `Web quality` GitHub Actions workflow runs the same checks for frontend chan
 
 ## Start the Python worker
 
-From the repository root on the machine that has the model weights:
+Keep the local worker bearer token in a single private file outside the repository:
 
 ```bash
-source .venv/bin/activate
-
-export WORKER_API_TOKEN="replace-with-a-long-random-secret"
-export WORKER_HOST="127.0.0.1"
-export WORKER_PORT="8787"
-python3 -m services.worker_api
+mkdir -p ~/.config/courtflux
+chmod 700 ~/.config/courtflux
+umask 077
+openssl rand -hex 32 > ~/.config/courtflux/worker-api-token
+chmod 600 ~/.config/courtflux/worker-api-token
 ```
 
-Check it locally:
+From the repository root on the machine that has the model weights, start the worker through the launcher:
 
 ```bash
+./.venv/bin/python scripts/run_worker.py
+```
+
+The launcher:
+
+- loads worker/backend configuration from the repository-root `.env`,
+- preserves an explicitly supplied `WORKER_API_TOKEN` if one already exists,
+- otherwise reads `~/.config/courtflux/worker-api-token`,
+- defaults the worker to `127.0.0.1:8787` and `WORKER_MAX_JOBS=1`,
+- refuses to start if no worker bearer token is available.
+
+Check it locally without printing the secret:
+
+```bash
+export WORKER_API_TOKEN="$(tr -d '\r\n' < ~/.config/courtflux/worker-api-token)"
 curl http://127.0.0.1:8787/health \
   -H "Authorization: Bearer $WORKER_API_TOKEN"
 ```
@@ -160,9 +162,9 @@ The worker defaults to one analysis at a time (`WORKER_MAX_JOBS=1`) to avoid mul
 
 ## Give Vercel an HTTPS worker URL
 
-Vercel cannot call `localhost` on the development Mac. The worker must be reachable through a public HTTPS URL. For a private beta, expose port 8787 through a tunnel or reverse proxy that you control.
+Vercel cannot call `localhost` on the development Mac. The worker must be reachable through a public HTTPS URL. For the private beta, expose port 8787 through a tunnel or reverse proxy that you control.
 
-Keep `WORKER_API_TOKEN` enabled even when the tunnel itself has access controls.
+Keep `WORKER_API_TOKEN` enabled even when the tunnel itself has access controls. Vercel needs both `WORKER_API_URL` and the matching server-side `WORKER_API_TOKEN`.
 
 ## Deploy to Vercel
 
@@ -187,6 +189,7 @@ When the production domain is ready, set `NEXT_PUBLIC_SITE_URL` to the canonical
 
 - The worker API requires a bearer token.
 - Vercel keeps the worker token server-side; the browser only calls `/api/...` on the Vercel deployment.
+- On the Mac, use `~/.config/courtflux/worker-api-token` as the canonical local copy instead of duplicating the secret in repository `.env` files.
 - Uploaded source videos remain private; the browser receives only a short-lived signed upload token.
 - The worker validates that an uploaded storage path belongs to the workspace that requested the analysis.
 - Do not expose the worker without HTTPS and authentication.
