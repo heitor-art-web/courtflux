@@ -30,7 +30,10 @@ LAB_DEFAULTS = {
 
 
 def lab_defaults() -> dict[str, Any]:
-    return dict(LAB_DEFAULTS)
+    defaults: dict[str, Any] = dict(LAB_DEFAULTS)
+    defaults["match_config"] = lab_match_config()
+    defaults["match_config_source"] = lab_match_config_source()
+    return defaults
 
 
 def lab_match_config() -> dict[str, Any]:
