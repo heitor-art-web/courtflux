@@ -23,9 +23,16 @@ class PerformanceJerseyAnalyzer(BasePerformanceJerseyAnalyzer):
     choose or substitute a number.
     """
 
-    SINGLE_DIGIT_TENS_MIN_PROBABILITY = 0.80
+    # v3 probabilities are joint digit-pair probabilities, not the old vote shares.
+    # Calibrated against the no-GT 0-60 Porto/Ovarense runtime score distribution:
+    # keep the strongest tail usable while retaining explicit temporal evidence and
+    # a stricter anti-collapse rule for one-digit candidates.
+    SINGLE_DIGIT_TENS_MIN_PROBABILITY = 0.65
     SINGLE_DIGIT_TENS_MIN_MARGIN = 0.35
-    SINGLE_DIGIT_TENS_MIN_SUPPORT_RATIO = 0.75
+    SINGLE_DIGIT_TENS_MIN_SUPPORT_RATIO = 0.875
+    RAW_CONSENSUS_MIN_SUPPORT = 3
+    RAW_CONSENSUS_MIN_POSTERIOR = 0.18
+    RAW_CONSENSUS_MIN_MARGIN = 0.03
 
     def __init__(self, *args: Any, **kwargs: Any) -> None:
         super().__init__(*args, **kwargs)
@@ -41,6 +48,12 @@ class PerformanceJerseyAnalyzer(BasePerformanceJerseyAnalyzer):
             "tens_probability_min": self.SINGLE_DIGIT_TENS_MIN_PROBABILITY,
             "tens_margin_min": self.SINGLE_DIGIT_TENS_MIN_MARGIN,
             "crop_support_ratio_min": self.SINGLE_DIGIT_TENS_MIN_SUPPORT_RATIO,
+        }
+        self.checkpoint_diagnostics["acceptance_gate"] = {
+            "candidate_support_min": self.RAW_CONSENSUS_MIN_SUPPORT,
+            "candidate_posterior_min": self.RAW_CONSENSUS_MIN_POSTERIOR,
+            "candidate_margin_min": self.RAW_CONSENSUS_MIN_MARGIN,
+            "calibration": "no_gt_runtime_score_distribution_v3",
         }
 
     @staticmethod
@@ -408,6 +421,37 @@ class PerformanceJerseyAnalyzer(BasePerformanceJerseyAnalyzer):
             },
         }
 
+    @classmethod
+    def _acceptance_decision(
+        cls,
+        *,
+        candidate: str | None,
+        support: int,
+        single_digit_gate: dict[str, Any],
+        posterior: float,
+        margin: float,
+        team_name: str | None,
+        valid_roster_numbers: list[str],
+        roster_valid: bool,
+    ) -> tuple[bool, str]:
+        if candidate is None:
+            return False, "no_raw_consensus"
+        if support < cls.RAW_CONSENSUS_MIN_SUPPORT:
+            return False, "low_raw_consensus_support"
+        if single_digit_gate.get("required") and not single_digit_gate.get("passed"):
+            return False, "ambiguous_single_digit_tens"
+        if posterior < cls.RAW_CONSENSUS_MIN_POSTERIOR:
+            return False, "low_raw_consensus_posterior"
+        if margin < cls.RAW_CONSENSUS_MIN_MARGIN:
+            return False, "low_raw_consensus_margin"
+        if not team_name:
+            return False, "team_unknown_for_roster_validation"
+        if not valid_roster_numbers:
+            return False, "no_known_roster_numbers"
+        if not roster_valid:
+            return False, "raw_not_in_roster"
+        return True, "accepted"
+
     @staticmethod
     def _legacy_consistency_gate(prediction: dict[str, Any]) -> dict[str, Any]:
         prediction["p1_raw_roster_consistency_gate"] = True
@@ -482,33 +526,16 @@ class PerformanceJerseyAnalyzer(BasePerformanceJerseyAnalyzer):
 
         valid = self._valid_roster_numbers(team_name)
         roster_valid = bool(candidate is not None and str(candidate) in valid)
-        if candidate is None:
-            accepted = False
-            reason = "no_raw_consensus"
-        elif support < 2:
-            accepted = False
-            reason = "low_raw_consensus_support"
-        elif single_digit_gate.get("required") and not single_digit_gate.get("passed"):
-            accepted = False
-            reason = "ambiguous_single_digit_tens"
-        elif posterior < 0.50:
-            accepted = False
-            reason = "low_raw_consensus_posterior"
-        elif margin < 0.12:
-            accepted = False
-            reason = "low_raw_consensus_margin"
-        elif not team_name:
-            accepted = False
-            reason = "team_unknown_for_roster_validation"
-        elif not valid:
-            accepted = False
-            reason = "no_known_roster_numbers"
-        elif not roster_valid:
-            accepted = False
-            reason = "raw_not_in_roster"
-        else:
-            accepted = True
-            reason = "accepted"
+        accepted, reason = self._acceptance_decision(
+            candidate=str(candidate) if candidate is not None else None,
+            support=support,
+            single_digit_gate=single_digit_gate,
+            posterior=posterior,
+            margin=margin,
+            team_name=team_name,
+            valid_roster_numbers=valid,
+            roster_valid=roster_valid,
+        )
 
         cross_team_validation = {}
         for candidate_team in self.rosters:
