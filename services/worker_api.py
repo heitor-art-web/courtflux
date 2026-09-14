@@ -289,4 +289,4 @@ def get_job_preview_video(job_id: str):
 
 if __name__ == "__main__":
     import uvicorn
-    uvicorn.run("services.worker_api:app", host=os.getenv("WORKER_HOST", "127.0.0.1"), port=int(os.getenv("WORKER_PORT", "8787")), reload=False)
+    uvicorn.run("services.worker_api:app", host=os.getenv("WORKER_HOST", "127.0.0.1"), port=int(os.getenv("WORKER_PORT", "8788")), reload=False)
