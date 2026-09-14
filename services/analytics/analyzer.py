@@ -23,7 +23,7 @@ from services.vision.detector import Detector
 from services.vision.hypothesis_p0_detector import PerformanceDetector
 from services.vision.visual_analyzer import VisualAnalyzer
 from services.vision.team_only_analyzer import TeamOnlyAnalyzer
-from services.vision.performance_jersey_analyzer import PerformanceJerseyAnalyzer
+from services.vision.p1_jersey_analyzer import PerformanceJerseyAnalyzer
 from services.analytics.engine import Engine
 from services.frame_loader import FrameLoader
 from services.gameplay_filter import GameplayFilter
