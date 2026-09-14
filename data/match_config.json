@@ -42,8 +42,8 @@
         "21": { "name": "Xavier Bishop", "position": "Guard" },
         "11": { "name": "Nuno Delany", "position": "Forward" },
         "13": { "name": "Jose Cardoso", "position": "Guard" },
-        "26": { "name": "Ruben Sa", "position": "Center" },
-        "5": { "name": "Marcuslon Jackson", "position": "Guard" }
+        "23": { "name": "Ruben Sa", "position": "Center" },
+        "22": { "name": "Marcuslon Jackson", "position": "Guard" }
       }
     }
   }
