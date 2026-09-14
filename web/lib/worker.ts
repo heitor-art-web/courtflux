@@ -2,7 +2,7 @@ import { readFile } from "node:fs/promises";
 import { homedir } from "node:os";
 import { join } from "node:path";
 
-const LOCAL_WORKER_URL = "http://127.0.0.1:8787";
+const LOCAL_WORKER_URL = "http://127.0.0.1:8788";
 const LOCAL_WORKER_TOKEN_FILE = join(homedir(), ".config", "courtflux", "worker-api-token");
 
 function workerBaseUrl() {
