@@ -54,6 +54,9 @@ class JobRequest(BaseModel):
     persist_results: bool = LAB_DEFAULTS["persist_results"]
     live_preview: bool = LAB_DEFAULTS["live_preview"]
     preview_interval_frames: int = Field(default=LAB_DEFAULTS["preview_interval_frames"], ge=1, le=300)
+    single_forward: bool = LAB_DEFAULTS["single_forward"]
+    smart_ball_mode: Literal["off", "verify", "zoom", "full"] = LAB_DEFAULTS["smart_ball_mode"]
+    smart_ball_crop_imgsz: int = Field(default=LAB_DEFAULTS["smart_ball_crop_imgsz"], ge=320, le=1600)
     db_batch_size: int = Field(default=100, ge=1, le=5000)
     diagnostics_batch_size: int = Field(default=100, ge=1, le=5000)
     platform_run_id: str | None = Field(default=None, max_length=36)
@@ -182,6 +185,9 @@ def run_job(job_id: str, request_data: dict[str, Any]) -> None:
         child_env = os.environ.copy()
         child_env["BASKETBALL_INFERENCE_CONF"] = str(request_data["inference_conf"])
         child_env["BASKETBALL_BALL_CONF"] = str(request_data["ball_conf"])
+        child_env["BASKETBALL_SINGLE_FORWARD"] = "1" if request_data.get("single_forward", True) else "0"
+        child_env["BASKETBALL_SMART_BALL_MODE"] = str(request_data.get("smart_ball_mode", "off"))
+        child_env["BASKETBALL_BALL_CROP_IMGSZ"] = str(request_data.get("smart_ball_crop_imgsz", 640))
         if request_data.get("live_preview", True) and request_data.get("detection_only", True):
             child_env["BASKETBALL_PREVIEW_PATH"] = str(preview_path)
             child_env["BASKETBALL_PREVIEW_VIDEO_PATH"] = str(preview_video_path)
