@@ -21,7 +21,7 @@ from services.database_service import DatabaseService
 from services.persistence import db_setup
 from services.ingestion.youtube_downloader import YouTubeDownloader
 from services.vision.detector import Detector
-from services.vision.hypothesis_p0_detector import PerformanceDetector
+from services.vision.identity_v2_detector import PerformanceDetector
 from services.vision.visual_analyzer import VisualAnalyzer
 from services.vision.team_only_analyzer import TeamOnlyAnalyzer
 from services.vision.p1_jersey_analyzer import PerformanceJerseyAnalyzer
