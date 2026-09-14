@@ -21,6 +21,27 @@ def _detector() -> PerformanceDetector:
     return detector
 
 
+def _digit_row(
+    *,
+    tens: dict[int, float],
+    ones: dict[int, float],
+    quality: float = 0.8,
+) -> dict:
+    tens_probs = [0.0] * 10
+    ones_probs = [0.0] * 10
+    for digit, value in tens.items():
+        tens_probs[int(digit)] = float(value)
+    for digit, value in ones.items():
+        ones_probs[int(digit)] = float(value)
+    tens_total = sum(tens_probs) or 1.0
+    ones_total = sum(ones_probs) or 1.0
+    return {
+        "tens_probs": [value / tens_total for value in tens_probs],
+        "ones_probs": [value / ones_total for value in ones_probs],
+        "crop_quality": quality,
+    }
+
+
 def test_best_crop_buffer_keeps_quality_not_just_recency() -> None:
     analyzer = PerformanceJerseyAnalyzer.__new__(PerformanceJerseyAnalyzer)
     analyzer.sequence_length = 2
@@ -52,6 +73,52 @@ def test_raw_temporal_consensus_beats_single_outlier() -> None:
     assert result["candidate_number"] == "4"
     assert result["candidate_count"] == 2
     assert result["candidate_posterior"] > 0.50
+
+
+def test_digit_probability_consensus_recovers_two_digit_candidate() -> None:
+    rows = [
+        _digit_row(tens={2: 0.84, 0: 0.10, 1: 0.06}, ones={1: 0.82, 4: 0.12, 3: 0.06}),
+        _digit_row(tens={2: 0.78, 0: 0.15, 1: 0.07}, ones={1: 0.86, 4: 0.08, 3: 0.06}),
+        _digit_row(tens={2: 0.81, 0: 0.12, 1: 0.07}, ones={1: 0.79, 4: 0.14, 3: 0.07}),
+    ]
+    result = PerformanceJerseyAnalyzer._probabilistic_digit_consensus(rows)
+
+    assert result["candidate_number"] == "21"
+    assert result["candidate_count"] == 3
+    assert result["candidate_posterior"] > 0.60
+    assert result["single_digit_gate"]["required"] is False
+
+
+def test_ambiguous_tens_rejects_single_digit_collapse() -> None:
+    # The raw top pair is 04, but tens=2 remains plausible. Identity must abstain
+    # rather than converting an ambiguous two-digit jersey into #4.
+    rows = [
+        _digit_row(tens={0: 0.55, 2: 0.39, 1: 0.06}, ones={4: 0.75, 1: 0.15, 3: 0.10}),
+        _digit_row(tens={0: 0.58, 2: 0.35, 1: 0.07}, ones={4: 0.72, 1: 0.18, 3: 0.10}),
+        _digit_row(tens={0: 0.57, 2: 0.37, 1: 0.06}, ones={4: 0.78, 1: 0.12, 3: 0.10}),
+    ]
+    result = PerformanceJerseyAnalyzer._probabilistic_digit_consensus(rows)
+
+    assert result["candidate_number"] == "4"
+    assert result["single_digit_gate"]["required"] is True
+    assert result["single_digit_gate"]["passed"] is False
+    assert result["single_digit_gate"]["reason"] == "ambiguous_single_digit_tens"
+    assert result["single_digit_gate"]["strongest_non_single_digit"] == 2
+
+
+def test_strong_single_digit_evidence_still_allows_number() -> None:
+    rows = [
+        _digit_row(tens={0: 0.93, 2: 0.04, 1: 0.03}, ones={4: 0.88, 1: 0.07, 3: 0.05}),
+        _digit_row(tens={0: 0.90, 2: 0.06, 1: 0.04}, ones={4: 0.91, 1: 0.05, 3: 0.04}),
+        _digit_row(tens={0: 0.92, 2: 0.05, 1: 0.03}, ones={4: 0.89, 1: 0.06, 3: 0.05}),
+    ]
+    result = PerformanceJerseyAnalyzer._probabilistic_digit_consensus(rows)
+
+    assert result["candidate_number"] == "4"
+    assert result["candidate_count"] == 3
+    assert result["single_digit_gate"]["required"] is True
+    assert result["single_digit_gate"]["passed"] is True
+    assert result["candidate_posterior"] > 0.80
 
 
 def test_team_reversal_unlocks_old_identity() -> None:
@@ -102,6 +169,9 @@ def test_recent_jersey_evidence_can_reverse_old_number() -> None:
 def main() -> None:
     test_best_crop_buffer_keeps_quality_not_just_recency()
     test_raw_temporal_consensus_beats_single_outlier()
+    test_digit_probability_consensus_recovers_two_digit_candidate()
+    test_ambiguous_tens_rejects_single_digit_collapse()
+    test_strong_single_digit_evidence_still_allows_number()
     test_team_reversal_unlocks_old_identity()
     test_recent_jersey_evidence_can_reverse_old_number()
     print("p1_identity_v2_test: PASS")
