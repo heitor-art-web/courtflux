@@ -25,6 +25,7 @@ from services.vision.identity_v2_detector import PerformanceDetector
 from services.vision.visual_analyzer import VisualAnalyzer
 from services.vision.team_only_analyzer import TeamOnlyAnalyzer
 from services.vision.p1_jersey_analyzer import PerformanceJerseyAnalyzer
+from services.vision.p1_uncertainty_jersey_analyzer import PerformanceUncertaintyJerseyAnalyzer
 from services.analytics.engine import Engine
 from services.frame_loader import FrameLoader
 from services.gameplay_filter import GameplayFilter
@@ -40,6 +41,94 @@ def _env_bool(name: str, fallback: bool = False) -> bool:
     if raw is None or not raw.strip():
         return bool(fallback)
     return raw.strip().lower() not in {"0", "false", "no", "off"}
+
+
+def _project_path(value: str, fallback: Path) -> Path:
+    raw = str(value or "").strip()
+    path = Path(raw).expanduser() if raw else fallback
+    if not path.is_absolute():
+        path = PROJECT_ROOT / path
+    return path.resolve()
+
+
+def _build_detection_only_visual(profiling_path: str, device: str):
+    """Select the P1 Jersey backend without silently changing its contract.
+
+    `auto` promotes the uncertainty-aware ViT-B path selected by PR #37 when its
+    local checkpoint is present. The legacy EfficientNet digit-head model remains a
+    compatibility fallback only. An explicit uncertainty_vit_b request fails loudly
+    when the checkpoint is missing instead of hiding the configuration error.
+    """
+    requested = str(os.getenv("BASKETBALL_JERSEY_BACKEND", "auto") or "auto").strip().lower()
+    aliases = {
+        "vit": "uncertainty_vit_b",
+        "vit_b": "uncertainty_vit_b",
+        "uncertainty": "uncertainty_vit_b",
+        "legacy": "legacy_digit_heads",
+        "efficientnet": "legacy_digit_heads",
+    }
+    requested = aliases.get(requested, requested)
+    if requested not in {"auto", "uncertainty_vit_b", "legacy_digit_heads"}:
+        raise ValueError(
+            "BASKETBALL_JERSEY_BACKEND must be one of: "
+            "auto, uncertainty_vit_b, legacy_digit_heads"
+        )
+
+    uncertainty_path = _project_path(
+        os.getenv("BASKETBALL_JERSEY_VIT_CHECKPOINT", ""),
+        PROJECT_ROOT / "weights" / "jersey_uncertainty_vit_b.pt",
+    )
+    legacy_path = _project_path(
+        os.getenv("BASKETBALL_JERSEY_LEGACY_CHECKPOINT", ""),
+        PROJECT_ROOT / "weights" / "jersey_number_recon.pt",
+    )
+
+    use_uncertainty = requested == "uncertainty_vit_b" or (
+        requested == "auto" and uncertainty_path.exists()
+    )
+    if use_uncertainty:
+        if not uncertainty_path.exists():
+            raise FileNotFoundError(
+                "Requested uncertainty_vit_b Jersey backend, but checkpoint is missing: "
+                f"{uncertainty_path}"
+            )
+        print(
+            "⚡ Jersey recognition: uncertainty-aware ViT-B / torso_direct / "
+            "best_uncertainty (PR #37 selected direction).",
+            flush=True,
+        )
+        return PerformanceUncertaintyJerseyAnalyzer(
+            profiling_path=profiling_path,
+            device=device,
+            model_path=str(uncertainty_path),
+            sequence_length=8,
+        )
+
+    if requested == "auto":
+        print(
+            "⚠️ Jersey uncertainty ViT-B checkpoint is unavailable; falling back to "
+            "legacy EfficientNet digit heads. This fallback showed severe digit collapse "
+            "on run 20260914_165736_812383. Expected checkpoint: "
+            f"{uncertainty_path}",
+            flush=True,
+        )
+    if not legacy_path.exists():
+        raise FileNotFoundError(f"Legacy Jersey checkpoint not found: {legacy_path}")
+    visual = PerformanceJerseyAnalyzer(
+        profiling_path=profiling_path,
+        device=device,
+        model_path=str(legacy_path),
+        sequence_length=8,
+    )
+    visual.checkpoint_diagnostics = dict(visual.checkpoint_diagnostics)
+    visual.checkpoint_diagnostics.setdefault("backend", "legacy_digit_heads")
+    visual.checkpoint_diagnostics["fallback_reason"] = (
+        "uncertainty_vit_b_checkpoint_missing" if requested == "auto" else "explicit_legacy_backend"
+    )
+    visual.checkpoint_diagnostics["known_runtime_limitation"] = (
+        "digit_distribution_collapse_observed_on_20260914_165736_812383"
+    )
+    return visual
 
 
 def _generate_identity_debug(summary_path: Path, run_dir: Path) -> dict | None:
@@ -140,6 +229,7 @@ def main(
     conn = None
     session = None
     pipeline = None
+    visual = None
 
     try:
         if not chosen_match_config.exists():
@@ -191,12 +281,9 @@ def main(
 
         if detection_only:
             if enable_jersey:
-                print("⚡ Jersey recognition enabled with lean local-only benchmark model.", flush=True)
-                visual = PerformanceJerseyAnalyzer(
+                visual = _build_detection_only_visual(
                     profiling_path=str(chosen_match_config),
                     device=resolved_device,
-                    model_path=str(PROJECT_ROOT / "weights" / "jersey_number_recon.pt"),
-                    sequence_length=8,
                 )
             else:
                 print("⚡ Jersey model disabled; using lightweight team-only classifier.", flush=True)
@@ -333,6 +420,18 @@ def main(
             "court_calibration_enabled": bool(camera_tracker is not None),
             "court_calibration_diagnostic_only": bool(detection_only and camera_tracker is not None),
         }
+        if detection_only and enable_jersey and visual is not None:
+            checkpoint = dict(getattr(visual, "checkpoint_diagnostics", {}) or {})
+            extra["jersey_backend"] = {
+                "backend": checkpoint.get("backend", "unknown"),
+                "architecture": checkpoint.get("architecture"),
+                "model_name": checkpoint.get("model_name"),
+                "checkpoint": str(getattr(visual, "model_path", "")) or None,
+                "preprocessing": checkpoint.get("preprocessing"),
+                "temporal_aggregation": checkpoint.get("temporal_aggregation"),
+                "roster_policy": checkpoint.get("roster_policy"),
+                "fallback_reason": checkpoint.get("fallback_reason"),
+            }
         if camera_tracker is not None:
             extra["court_calibration"] = {
                 "model_id": getattr(camera_tracker, "model_id", None),
