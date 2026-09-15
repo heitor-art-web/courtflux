@@ -27,6 +27,11 @@ from services.vision.team_only_analyzer import TeamOnlyAnalyzer
 from services.vision.p1_jersey_analyzer import PerformanceJerseyAnalyzer
 from services.vision.p1_temporal_jersey_analyzer import PerformanceTemporalJerseyAnalyzer
 from services.vision.p1_uncertainty_jersey_analyzer import PerformanceUncertaintyJerseyAnalyzer
+from services.vision.p1_jersey_challengers import (
+    EBQwenJerseyAnalyzer,
+    RoboflowClassificationJerseyAnalyzer,
+    SmolVLM2JerseyAnalyzer,
+)
 from services.analytics.engine import Engine
 from services.frame_loader import FrameLoader
 from services.gameplay_filter import GameplayFilter
@@ -56,8 +61,9 @@ def _build_detection_only_visual(profiling_path: str, device: str):
     """Select the P1 Jersey backend without silently changing its contract.
 
     P1 visual revalidation defaults to the real temporal checkpoint benchmarked in
-    PR #37: ``weights/best_temporal.pt``. A missing default checkpoint is an error,
-    not permission to silently run the known-collapsed legacy digit heads.
+    PR #37: ``weights/best_temporal.pt``. External challengers are explicit opt-ins
+    so their integrated metrics can be compared against that baseline without changing
+    the accepted detector/ball/team configuration.
 
     ``auto`` remains available for deliberate local experimentation. Its preference
     order is best_temporal -> uncertainty_vit_b -> legacy_digit_heads.
@@ -75,6 +81,12 @@ def _build_detection_only_visual(profiling_path: str, device: str):
         "uncertainty": "uncertainty_vit_b",
         "legacy": "legacy_digit_heads",
         "efficientnet": "legacy_digit_heads",
+        "roboflow": "roboflow_classification",
+        "rf": "roboflow_classification",
+        "ebqwen": "ebqwen_vl",
+        "qwen": "ebqwen_vl",
+        "smolvlm2": "smolvlm2_jersey",
+        "smol": "smolvlm2_jersey",
     }
     requested = aliases.get(requested, requested)
     if requested not in {
@@ -82,10 +94,47 @@ def _build_detection_only_visual(profiling_path: str, device: str):
         "best_temporal",
         "uncertainty_vit_b",
         "legacy_digit_heads",
+        "roboflow_classification",
+        "ebqwen_vl",
+        "smolvlm2_jersey",
     }:
         raise ValueError(
-            "BASKETBALL_JERSEY_BACKEND must be one of: "
-            "best_temporal, auto, uncertainty_vit_b, legacy_digit_heads"
+            "BASKETBALL_JERSEY_BACKEND must be one of: best_temporal, "
+            "roboflow_classification, ebqwen_vl, smolvlm2_jersey, auto, "
+            "uncertainty_vit_b, legacy_digit_heads"
+        )
+
+    if requested == "roboflow_classification":
+        print(
+            "⚡ Jersey challenger: Roboflow hosted ResNet50 classification / "
+            "raw visual class + roster validation.",
+            flush=True,
+        )
+        return RoboflowClassificationJerseyAnalyzer(
+            profiling_path=profiling_path,
+            device=device,
+        )
+
+    if requested == "ebqwen_vl":
+        print(
+            "⚡ Jersey challenger: E-BARD EBQwen2.5-VL / multi-image raw OCR / "
+            "roster validation.",
+            flush=True,
+        )
+        return EBQwenJerseyAnalyzer(
+            profiling_path=profiling_path,
+            device=device,
+        )
+
+    if requested == "smolvlm2_jersey":
+        print(
+            "⚡ Jersey challenger: jersey-finetuned SmolVLM2 / raw OCR / "
+            "roster validation.",
+            flush=True,
+        )
+        return SmolVLM2JerseyAnalyzer(
+            profiling_path=profiling_path,
+            device=device,
         )
 
     temporal_path = _project_path(
@@ -470,6 +519,8 @@ def main(
                 "temporal_aggregation": checkpoint.get("temporal_aggregation"),
                 "roster_policy": checkpoint.get("roster_policy"),
                 "fallback_reason": checkpoint.get("fallback_reason"),
+                "provider": checkpoint.get("provider"),
+                "experimental_challenger": checkpoint.get("experimental_challenger", False),
             }
         if camera_tracker is not None:
             extra["court_calibration"] = {
