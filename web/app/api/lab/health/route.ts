@@ -39,6 +39,14 @@ export async function GET() {
       ...((data.lab_defaults as Record<string, unknown> | undefined) ?? {}),
     };
 
+    // When the web Lab is deliberately started with a jersey backend override,
+    // expose that same value to the UI. The jobs proxy enforces it as well, so
+    // health display and submitted job can no longer disagree.
+    const webBackend = process.env.BASKETBALL_JERSEY_BACKEND?.trim();
+    if (webBackend) {
+      labDefaults.jersey_backend = webBackend;
+    }
+
     try {
       labDefaults.match_config = await canonicalMatchConfig();
       labDefaults.match_config_source = "data/match_config.json";
