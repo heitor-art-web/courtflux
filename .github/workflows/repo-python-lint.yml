@@ -30,3 +30,24 @@ jobs:
 
       - name: Compile Python sources
         run: python -m compileall -q core services scripts tools evaluation
+
+      - name: Enforce retired P2 surfaces
+        run: |
+          test ! -e services/analytics/engine.py
+          test ! -e services/analytics/metrics.py
+          test ! -e services/p0_context_pipeline.py
+          test ! -e services/renderer.py
+          test ! -e services/session_config.py
+          test ! -e services/vision/ball_context_features.py
+          test ! -e core/game_context.py
+          test ! -e evaluation/smart_ball_benchmark.py
+          test ! -e app.py
+          test ! -e ui
+          test ! -e tools/jersey_ground_truth_app.py
+
+      - name: Reject legacy Streamlit dependencies or imports
+        run: |
+          if git grep -n -i -E '(^|[^a-z])streamlit([^a-z]|$)' -- '*.py' requirements.txt; then
+            echo "Legacy Streamlit surface was reintroduced. The supported frontend is web/."
+            exit 1
+          fi
