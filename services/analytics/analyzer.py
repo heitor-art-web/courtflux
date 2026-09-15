@@ -33,6 +33,7 @@ from services.vision.p1_jersey_challengers import (
     SmolVLM2JerseyAnalyzer,
 )
 from services.vision.p1_trocr_jersey_analyzer import TrOCRSmallPrintedJerseyAnalyzer
+from services.vision.p1_parseq_jersey_analyzer import SoccerNetPARSeqJerseyAnalyzer
 from services.analytics.engine import Engine
 from services.frame_loader import FrameLoader
 from services.gameplay_filter import GameplayFilter
@@ -91,6 +92,9 @@ def _build_detection_only_visual(profiling_path: str, device: str):
         "trocr": "trocr_small_printed",
         "trocr_small": "trocr_small_printed",
         "trocr-small-printed": "trocr_small_printed",
+        "parseq": "parseq_soccernet",
+        "soccernet_parseq": "parseq_soccernet",
+        "parseq-soccernet": "parseq_soccernet",
     }
     requested = aliases.get(requested, requested)
     if requested not in {
@@ -102,11 +106,13 @@ def _build_detection_only_visual(profiling_path: str, device: str):
         "ebqwen_vl",
         "smolvlm2_jersey",
         "trocr_small_printed",
+        "parseq_soccernet",
     }:
         raise ValueError(
             "BASKETBALL_JERSEY_BACKEND must be one of: best_temporal, "
             "roboflow_classification, ebqwen_vl, smolvlm2_jersey, "
-            "trocr_small_printed, auto, uncertainty_vit_b, legacy_digit_heads"
+            "trocr_small_printed, parseq_soccernet, auto, uncertainty_vit_b, "
+            "legacy_digit_heads"
         )
 
     if requested == "roboflow_classification":
@@ -149,6 +155,17 @@ def _build_detection_only_visual(profiling_path: str, device: str):
             flush=True,
         )
         return TrOCRSmallPrintedJerseyAnalyzer(
+            profiling_path=profiling_path,
+            device=device,
+        )
+
+    if requested == "parseq_soccernet":
+        print(
+            "⚡ Jersey challenger: SoccerNet-finetuned PARSeq / strict raw OCR / "
+            "existing CourtFlux torso crop / roster validation.",
+            flush=True,
+        )
+        return SoccerNetPARSeqJerseyAnalyzer(
             profiling_path=profiling_path,
             device=device,
         )
