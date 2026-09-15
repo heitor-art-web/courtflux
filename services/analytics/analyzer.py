@@ -100,13 +100,15 @@ def main(
     db_batch_size: int = 100,
     diagnostics_batch_size: int = 100,
     persist_results: bool = True,
+    detection_only: bool | None = None,
 ):
     """Run the single canonical CourtFlux P1 -> optional P2 analysis path.
 
-    The former `detection_only`/legacy analytics split is intentionally retired. P1
-    canonical state is always produced; P2 is controlled only by
-    `BASKETBALL_P2_ENABLED`. Jersey remains optional evidence on top of stable track IDs.
+    `detection_only` is accepted temporarily only so older local worker/probe callers do
+    not break while their request schemas are migrated. It is ignored: there is no
+    alternate analytics runtime anymore.
     """
+    del detection_only
     resolved_device = resolve_device(device)
     chosen_model = model_path or settings.model
     chosen_match_config = Path(match_config_path) if match_config_path else DEFAULT_MATCH_CONFIG_PATH
@@ -114,8 +116,6 @@ def main(
         chosen_match_config = PROJECT_ROOT / chosen_match_config
     chosen_match_config = chosen_match_config.resolve()
 
-    # RunDiagnostics still stores the historical field for backward-compatible summaries;
-    # the runtime itself no longer branches on it.
     diagnostics = RunDiagnostics(
         root=PROJECT_ROOT,
         video_source=video_source,
@@ -371,6 +371,7 @@ if __name__ == "__main__":
     parser.add_argument("--tracker", type=str, default="botsort.yaml", choices=["botsort.yaml", "bytetrack.yaml"])
     parser.add_argument("--match-config", type=str, default=str(DEFAULT_MATCH_CONFIG_PATH))
     parser.add_argument("--reset-db", action="store_true")
+    parser.add_argument("--detection-only", action="store_true", help=argparse.SUPPRESS)
     parser.add_argument("--no-jersey", action="store_true")
     parser.add_argument("--jersey-interval", type=int, default=24)
     parser.add_argument("--db-batch-size", type=int, default=100)
@@ -394,4 +395,5 @@ if __name__ == "__main__":
         db_batch_size=args.db_batch_size,
         diagnostics_batch_size=args.diagnostics_batch_size,
         persist_results=not args.no_persist,
+        detection_only=args.detection_only,
     )
