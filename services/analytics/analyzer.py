@@ -34,6 +34,7 @@ from services.vision.p1_jersey_challengers import (
 )
 from services.vision.p1_trocr_jersey_analyzer import TrOCRSmallPrintedJerseyAnalyzer
 from services.vision.p1_parseq_jersey_analyzer import SoccerNetPARSeqJerseyAnalyzer
+from services.vision.p1_parseq_literature_analyzer import LiteraturePARSeqJerseyAnalyzer
 from services.analytics.engine import Engine
 from services.frame_loader import FrameLoader
 from services.gameplay_filter import GameplayFilter
@@ -95,6 +96,9 @@ def _build_detection_only_visual(profiling_path: str, device: str):
         "parseq": "parseq_soccernet",
         "soccernet_parseq": "parseq_soccernet",
         "parseq-soccernet": "parseq_soccernet",
+        "parseq_lit": "parseq_soccernet_lit",
+        "parseq-lit": "parseq_soccernet_lit",
+        "parseq_literature": "parseq_soccernet_lit",
     }
     requested = aliases.get(requested, requested)
     if requested not in {
@@ -107,12 +111,13 @@ def _build_detection_only_visual(profiling_path: str, device: str):
         "smolvlm2_jersey",
         "trocr_small_printed",
         "parseq_soccernet",
+        "parseq_soccernet_lit",
     }:
         raise ValueError(
             "BASKETBALL_JERSEY_BACKEND must be one of: best_temporal, "
             "roboflow_classification, ebqwen_vl, smolvlm2_jersey, "
-            "trocr_small_printed, parseq_soccernet, auto, uncertainty_vit_b, "
-            "legacy_digit_heads"
+            "trocr_small_printed, parseq_soccernet, parseq_soccernet_lit, auto, "
+            "uncertainty_vit_b, legacy_digit_heads"
         )
 
     if requested == "roboflow_classification":
@@ -166,6 +171,17 @@ def _build_detection_only_visual(profiling_path: str, device: str):
             flush=True,
         )
         return SoccerNetPARSeqJerseyAnalyzer(
+            profiling_path=profiling_path,
+            device=device,
+        )
+
+    if requested == "parseq_soccernet_lit":
+        print(
+            "⚡ Jersey challenger: same SoccerNet PARSeq reader / Hockey legibility / "
+            "localized ROI proposals / multi-frame visual consensus / roster validation.",
+            flush=True,
+        )
+        return LiteraturePARSeqJerseyAnalyzer(
             profiling_path=profiling_path,
             device=device,
         )
