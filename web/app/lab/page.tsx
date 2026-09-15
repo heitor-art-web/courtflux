@@ -1,7 +1,6 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
-import defaultMatchConfig from "@/data/match_config.json";
 
 type LabDefaults = {
   video_source: string;
@@ -14,15 +13,18 @@ type LabDefaults = {
   tracker: "botsort.yaml" | "bytetrack.yaml";
   detection_only: boolean;
   enable_jersey: boolean;
+  jersey_backend?: "best_temporal" | "auto" | "uncertainty_vit_b" | "legacy_digit_heads";
   jersey_interval_frames: number;
-  persist_results: boolean;
   live_preview: boolean;
   preview_interval_frames: number;
+  match_config?: Record<string, unknown>;
+  match_config_source?: string;
 };
 
 type WorkerHealth = {
   status?: string;
   error?: string;
+  supabase_persistence?: boolean;
   devices?: { mps?: boolean; cuda?: boolean; cpu?: boolean };
   lab_defaults?: LabDefaults;
 };
@@ -64,7 +66,7 @@ type Summary = {
     selected_conf_median?: number | null;
     continuity?: Record<string, unknown>;
   };
-  extra?: { status?: string; error?: string; mode?: string };
+  extra?: { status?: string; error?: string; mode?: string; identity_debug?: Record<string, unknown> };
   [key: string]: unknown;
 };
 
@@ -78,17 +80,17 @@ type JobState = {
 
 const FALLBACK: LabDefaults = {
   video_source: "https://www.youtube.com/watch?v=OwiQgAMqyUs",
-  model: "weights/model_v1.0.0.pt",
-  detector_conf: 0.10,
+  model: "weights/model_v1.1.0.pt",
+  detector_conf: 0.40,
   inference_conf: 0.03,
-  ball_conf: 0.03,
+  ball_conf: 0.075,
   imgsz: 960,
   device: "mps",
   tracker: "botsort.yaml",
   detection_only: true,
-  enable_jersey: false,
+  enable_jersey: true,
+  jersey_backend: "best_temporal",
   jersey_interval_frames: 24,
-  persist_results: true,
   live_preview: true,
   preview_interval_frames: 15,
 };
@@ -99,6 +101,7 @@ function metric(value: number | undefined, digits = 2) { return Number(value ?? 
 export default function LabPage() {
   const [health, setHealth] = useState<WorkerHealth>({});
   const defaultsApplied = useRef(false);
+  const matchConfigApplied = useRef(false);
   const [videoSource, setVideoSource] = useState(FALLBACK.video_source);
   const [startTime, setStartTime] = useState(0);
   const [endTime, setEndTime] = useState(60);
@@ -112,11 +115,10 @@ export default function LabPage() {
   const [detectionOnly, setDetectionOnly] = useState(FALLBACK.detection_only);
   const [enableJersey, setEnableJersey] = useState(FALLBACK.enable_jersey);
   const [jerseyInterval, setJerseyInterval] = useState(FALLBACK.jersey_interval_frames);
-  const [persistResults, setPersistResults] = useState(FALLBACK.persist_results);
   const [livePreview, setLivePreview] = useState(FALLBACK.live_preview);
   const [previewInterval, setPreviewInterval] = useState(FALLBACK.preview_interval_frames);
   const [previewNonce, setPreviewNonce] = useState(0);
-  const [matchConfigText, setMatchConfigText] = useState(JSON.stringify(defaultMatchConfig, null, 2));
+  const [matchConfigText, setMatchConfigText] = useState("{}");
   const [job, setJob] = useState<JobState | null>(null);
   const [logs, setLogs] = useState<string[]>([]);
   const [submitting, setSubmitting] = useState(false);
@@ -127,8 +129,12 @@ export default function LabPage() {
     setInferenceConf(d.inference_conf); setBallConf(d.ball_conf); setImgsz(d.imgsz);
     setDevice(d.device); setTracker(d.tracker); setDetectionOnly(d.detection_only);
     setEnableJersey(d.enable_jersey); setJerseyInterval(d.jersey_interval_frames);
-    setPersistResults(d.persist_results); setLivePreview(d.live_preview);
-    setPreviewInterval(d.preview_interval_frames);
+    setLivePreview(d.live_preview); setPreviewInterval(d.preview_interval_frames);
+  }
+
+  function applyCanonicalMatchConfig(d: LabDefaults | undefined) {
+    if (!d?.match_config) return;
+    setMatchConfigText(JSON.stringify(d.match_config, null, 2));
   }
 
   async function refreshHealth() {
@@ -136,8 +142,13 @@ export default function LabPage() {
       const response = await fetch("/api/lab/health", { cache: "no-store" });
       const data: WorkerHealth = await response.json();
       setHealth(data);
-      if (data.status === "ok" && data.lab_defaults && !defaultsApplied.current) {
-        applyDefaults(data.lab_defaults); defaultsApplied.current = true;
+      if (data.status === "ok" && data.lab_defaults) {
+        if (!defaultsApplied.current) {
+          applyDefaults(data.lab_defaults); defaultsApplied.current = true;
+        }
+        if (data.lab_defaults.match_config && !matchConfigApplied.current) {
+          applyCanonicalMatchConfig(data.lab_defaults); matchConfigApplied.current = true;
+        }
       }
     } catch (error) {
       setHealth({ status: "error", error: error instanceof Error ? error.message : String(error) });
@@ -191,9 +202,11 @@ export default function LabPage() {
           video_source: videoSource, start_time_sec: startTime, end_time_sec: endTime,
           model, detector_conf: confidence, inference_conf: inferenceConf, ball_conf: ballConf,
           imgsz, device, tracker, detection_only: detectionOnly, enable_jersey: enableJersey,
-          jersey_interval_frames: jerseyInterval, persist_results: persistResults,
+          jersey_backend: health.lab_defaults?.jersey_backend ?? "best_temporal",
+          jersey_interval_frames: jerseyInterval,
           live_preview: livePreview, preview_interval_frames: previewInterval,
-          db_batch_size: 100, diagnostics_batch_size: 100, match_config: parsedMatchConfig.value,
+          single_forward: true, smart_ball_mode: "off",
+          diagnostics_batch_size: 100, match_config: parsedMatchConfig.value,
         }),
       });
       const data = await response.json();
@@ -216,10 +229,10 @@ export default function LabPage() {
       <header>
         <div>
           <h1>CourtFlux Beta Lab</h1>
-          <p>Same analysis contract as localhost · canonical model v1 · live visual QA · worker-backed execution.</p>
+          <p>P1 Identity QA · canonical model v1.1 · single-forward ON · Smart Ball OFF · Supabase persistence.</p>
         </div>
         <button className={`badge ${health.status === "ok" ? "ok" : health.status ? "error" : ""}`} onClick={() => void refreshHealth()} type="button" aria-label={`Refresh worker status. Worker is ${workerLabel}.`}>
-          <span aria-live="polite">Worker: {workerLabel}{health.devices?.mps ? " · MPS" : health.devices?.cuda ? " · CUDA" : health.status === "ok" ? " · CPU" : ""}</span>
+          <span aria-live="polite">Worker: {workerLabel}{health.devices?.mps ? " · MPS" : health.devices?.cuda ? " · CUDA" : health.status === "ok" ? " · CPU" : ""}{health.supabase_persistence ? " · Supabase" : ""}</span>
         </button>
       </header>
 
@@ -230,7 +243,7 @@ export default function LabPage() {
             <div className="field full"><label htmlFor="video-source">YouTube URL / worker-local video path</label><input id="video-source" value={videoSource} onChange={(e) => setVideoSource(e.target.value)} /></div>
             <div className="field"><label htmlFor="start-time">Start (seconds)</label><input id="start-time" type="number" min="0" step="1" value={startTime} onChange={(e) => setStartTime(Number(e.target.value))} /></div>
             <div className="field"><label htmlFor="end-time">End (seconds)</label><input id="end-time" type="number" min="1" step="1" value={endTime} onChange={(e) => setEndTime(Number(e.target.value))} /></div>
-            <div className="field full"><label htmlFor="model-path">Model path on worker</label><input id="model-path" value={model} onChange={(e) => setModel(e.target.value)} /><span className="muted">Canonical: weights/model_v1.0.0.pt</span></div>
+            <div className="field full"><label htmlFor="model-path">Model path on worker</label><input id="model-path" value={model} onChange={(e) => setModel(e.target.value)} /><span className="muted">Canonical: weights/model_v1.1.0.pt</span></div>
             <div className="field"><label htmlFor="player-confidence">Player confidence</label><input id="player-confidence" type="number" min="0.01" max="0.95" step="0.01" value={confidence} onChange={(e) => setConfidence(Number(e.target.value))} /></div>
             <div className="field"><label htmlFor="inference-confidence">YOLO inference confidence</label><input id="inference-confidence" type="number" min="0.001" max="0.95" step="0.01" value={inferenceConf} onChange={(e) => setInferenceConf(Number(e.target.value))} /></div>
             <div className="field"><label htmlFor="ball-confidence">Ball acceptance confidence</label><input id="ball-confidence" type="number" min="0.001" max="0.95" step="0.01" value={ballConf} onChange={(e) => setBallConf(Number(e.target.value))} /></div>
@@ -238,9 +251,9 @@ export default function LabPage() {
             <div className="field"><label htmlFor="device">Device</label><select id="device" value={device} onChange={(e) => setDevice(e.target.value as "mps" | "cpu" | "cuda")}><option value="mps">MPS</option><option value="cpu">CPU</option><option value="cuda">CUDA</option></select></div>
             <div className="field"><label htmlFor="tracker">Tracker</label><select id="tracker" value={tracker} onChange={(e) => setTracker(e.target.value as "botsort.yaml" | "bytetrack.yaml")}><option value="botsort.yaml">BoT-SORT</option><option value="bytetrack.yaml">ByteTrack</option></select></div>
             <div className="field"><label htmlFor="detection-only"><input id="detection-only" type="checkbox" checked={detectionOnly} onChange={(e) => setDetectionOnly(e.target.checked)} /> Detection-only mode</label><span className="muted">Matches the local performance/diagnostic Lab path.</span></div>
-            <div className="field"><label htmlFor="enable-jersey"><input id="enable-jersey" type="checkbox" checked={enableJersey} onChange={(e) => setEnableJersey(e.target.checked)} /> Jersey recognition</label><span className="muted">Off is the clean benchmark.</span></div>
-            <div className="field"><label htmlFor="jersey-interval">Jersey interval (frames)</label><input id="jersey-interval" type="number" min="1" max="300" value={jerseyInterval} disabled={!enableJersey} onChange={(e) => setJerseyInterval(Number(e.target.value))} /></div>
-            <div className="field"><label htmlFor="persist-results"><input id="persist-results" type="checkbox" checked={persistResults} onChange={(e) => setPersistResults(e.target.checked)} /> Persist SQLite results</label><span className="muted">Writes are batched.</span></div>
+            <div className="field"><label htmlFor="enable-jersey"><input id="enable-jersey" type="checkbox" checked={enableJersey} onChange={(e) => setEnableJersey(e.target.checked)} /> Jersey recognition</label><span className="muted">Keep ON for the P1 Identity exit gate.</span></div>
+            <div className="field"><label htmlFor="jersey-interval">Jersey interval (frames)</label><input id="jersey-interval" type="number" min="1" max="300" value={jerseyInterval} disabled={!enableJersey} onChange={(e) => setJerseyInterval(Number(e.target.value))} /><span className="muted">Diagnostic default: 24; best crops are still collected every eligible frame.</span></div>
+            <div className="field"><span>Persistence</span><strong>Supabase only</strong><span className="muted">Worker-backed runs never write local tracking.db.</span></div>
             <div className="field"><label htmlFor="live-preview"><input id="live-preview" type="checkbox" checked={livePreview} disabled={!detectionOnly} onChange={(e) => setLivePreview(e.target.checked)} /> Live diagnostic preview + video</label><span className="muted">Same annotated renderer as localhost.</span></div>
             <div className="field"><label htmlFor="preview-interval">Preview interval (frames)</label><input id="preview-interval" type="number" min="1" max="300" value={previewInterval} disabled={!livePreview || !detectionOnly} onChange={(e) => setPreviewInterval(Number(e.target.value))} /></div>
           </div>
@@ -248,15 +261,16 @@ export default function LabPage() {
           <div className="actions">
             <button className="primary" type="button" onClick={() => void submitJob()} disabled={submitting || health.status !== "ok" || analysisActive} aria-busy={submitting || analysisActive}>{submitting ? "Submitting…" : analysisActive ? "Analysis running…" : "Run analysis"}</button>
             <button type="button" onClick={() => applyDefaults(health.lab_defaults ?? FALLBACK)} disabled={analysisActive}>Reset to worker defaults</button>
-            <span className="muted">Change one setting at a time for benchmark comparisons.</span>
+            <span className="muted">P1 defaults: v1.1.0 · BoT-SORT · best_temporal · Jersey ON · interval 24 · single-forward ON · Smart Ball OFF · Supabase only.</span>
           </div>
           {formError ? <div className="error-box" role="alert" style={{ marginTop: 14 }}>{formError}</div> : null}
         </section>
 
         <section className="panel span-4" aria-labelledby="match-config-title">
-          <h2 id="match-config-title">match_config.json</h2><p className="muted">Sent with every job for team and player distinction.</p>
+          <div className="status-line"><h2 id="match-config-title" style={{ margin: 0 }}>match_config.json</h2><button type="button" onClick={() => applyCanonicalMatchConfig(health.lab_defaults)} disabled={!health.lab_defaults?.match_config || analysisActive}>Reload from code</button></div>
+          <p className="muted">Loaded from the worker canonical {health.lab_defaults?.match_config_source ?? "data/match_config.json"}. Edit it here for this run; the submitted JSON is snapshotted into the job.</p>
           <textarea value={matchConfigText} onChange={(e) => setMatchConfigText(e.target.value)} spellCheck={false} aria-label="Match configuration JSON" aria-invalid={Boolean(parsedMatchConfig.error)} />
-          {parsedMatchConfig.error ? <div className="error-box" role="alert">{parsedMatchConfig.error}</div> : <div className="muted" role="status">JSON valid</div>}
+          {parsedMatchConfig.error ? <div className="error-box" role="alert">{parsedMatchConfig.error}</div> : <div className="muted" role="status">JSON valid · canonical source loaded from worker</div>}
         </section>
 
         {job?.job_id && livePreview ? <section className="panel span-12" aria-labelledby="preview-title">
@@ -284,6 +298,7 @@ export default function LabPage() {
               <div className="metric"><div className="label">Jersey attempts</div><div className="value">{players?.jersey_attempts ?? 0}</div></div>
               <div className="metric"><div className="label">Elapsed</div><div className="value">{metric(summary.elapsed_sec, 1)}s</div></div>
             </div>
+            {summary.extra?.identity_debug ? <details open style={{ marginTop: 18 }}><summary className="muted">Identity debug probe</summary><div style={{ marginTop: 10 }}><pre>{JSON.stringify(summary.extra.identity_debug, null, 2)}</pre></div></details> : null}
             {ball?.continuity ? <details open style={{ marginTop: 18 }}><summary className="muted">Ball continuity</summary><div style={{ marginTop: 10 }}><pre>{JSON.stringify(ball.continuity, null, 2)}</pre></div></details> : null}
             {summary.detector_timing ? <details style={{ marginTop: 18 }}><summary className="muted">Detector timing</summary><div style={{ marginTop: 10 }}><pre>{JSON.stringify(summary.detector_timing, null, 2)}</pre></div></details> : null}
             {performance?.stages ? <details style={{ marginTop: 18 }}><summary className="muted">Pipeline timing</summary><div style={{ marginTop: 10 }}><pre>{JSON.stringify(performance.stages, null, 2)}</pre></div></details> : null}

@@ -68,6 +68,23 @@ class DiagnosticPreview:
             return color
         return (180, 180, 180)
 
+    @staticmethod
+    def _text_color_for_background(color: tuple[int, int, int]) -> tuple[int, int, int]:
+        """Choose readable black/white text for a BGR label background."""
+        blue, green, red = color
+        luminance = 0.114 * blue + 0.587 * green + 0.299 * red
+        return (20, 20, 20) if luminance >= 155 else (255, 255, 255)
+
+    @staticmethod
+    def _player_identity_label(player: dict[str, Any]) -> str:
+        """Keep visual QA labels focused on accepted identity only."""
+        jersey = player.get("shirt_num") or player.get("shirt_number")
+        player_name = str(player.get("player_name") or "").strip()
+        if jersey is None or not str(jersey).strip():
+            return "#? UNKNOWN"
+        number = f"#{str(jersey).strip()}"
+        return f"{number} {player_name}" if player_name else number
+
     def should_render(self, frame_id: int) -> bool:
         return frame_id == 0 or frame_id % self.interval_frames == 0
 
@@ -229,34 +246,38 @@ class DiagnosticPreview:
             if box is None:
                 continue
             x1, y1, x2, y2 = box
-            active_on_court = player.get("active_on_court")
-            off_court = active_on_court is False
+            off_court = player.get("active_on_court") is False
             team = str(player.get("team") or "Unknown")
-            jersey = player.get("shirt_num") or player.get("shirt_number")
-            track_id = player.get("track_id", -1)
-            detection_conf = player.get("confidence")
-            team_conf = player.get("team_confidence")
-            player_name = str(player.get("player_name") or "").strip()
             color = self._OFF_COURT_COLOR if off_court else self._color_for_team(team)
-            cv2.rectangle(canvas, (x1, y1), (x2, y2), color, 2)
-            parts = [f"P T{track_id}"]
-            if off_court:
-                parts.append("OFFCOURT")
-            else:
-                parts.append(team)
-                if team_conf is not None: parts.append(f"team:{float(team_conf):.2f}")
-                if jersey is not None and str(jersey).strip(): parts.append(f"#{jersey}")
-                if player_name: parts.append(player_name)
-            if active_on_court is True:
-                parts.append("COURT")
-            elif active_on_court is None:
-                parts.append("COURT?")
-            if detection_conf is not None: parts.append(f"det:{float(detection_conf):.2f}")
-            label = " ".join(parts)
-            (tw, th), baseline = cv2.getTextSize(label, cv2.FONT_HERSHEY_SIMPLEX, 0.44, 1)
-            top = max(0, y1 - th - baseline - 8)
-            cv2.rectangle(canvas, (x1, top), (min(width - 1, x1 + tw + 8), y1), color, -1)
-            cv2.putText(canvas, label, (x1 + 4, max(th + 2, y1 - 5)), cv2.FONT_HERSHEY_SIMPLEX, 0.44, (255, 255, 255), 1, cv2.LINE_AA)
+            cv2.rectangle(canvas, (x1, y1), (x2, y2), color, 3)
+
+            label = "" if off_court else self._player_identity_label(player)
+            if not label:
+                continue
+            font_scale = 0.68
+            thickness = 2
+            padding_x = 7
+            padding_y = 6
+            (tw, th), baseline = cv2.getTextSize(
+                label,
+                cv2.FONT_HERSHEY_SIMPLEX,
+                font_scale,
+                thickness,
+            )
+            label_height = th + baseline + (padding_y * 2)
+            top = max(0, y1 - label_height)
+            right = min(width - 1, x1 + tw + (padding_x * 2))
+            cv2.rectangle(canvas, (x1, top), (right, y1), color, -1)
+            cv2.putText(
+                canvas,
+                label,
+                (x1 + padding_x, max(th + padding_y, y1 - baseline - padding_y)),
+                cv2.FONT_HERSHEY_SIMPLEX,
+                font_scale,
+                self._text_color_for_background(color),
+                thickness,
+                cv2.LINE_AA,
+            )
 
         referees = list(getattr(frame_state, "referees", []) or [])
         for referee in referees:
