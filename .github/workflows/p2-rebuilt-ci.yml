@@ -27,6 +27,7 @@ jobs:
           evaluation/p2_ground_truth_test.py
           evaluation/p2_frozen_fixture_test.py
           evaluation/p2_closure_test.py
+          evaluation/p2_loose_lifecycle_test.py
       - name: Verify direct probe project-root bootstrap
         working-directory: evaluation
         run: >-
@@ -43,3 +44,4 @@ jobs:
           evaluation.p2_ground_truth_test
           evaluation.p2_frozen_fixture_test
           evaluation.p2_closure_test
+          evaluation.p2_loose_lifecycle_test
