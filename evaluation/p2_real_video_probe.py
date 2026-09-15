@@ -20,6 +20,7 @@ class P2MetricsCollector:
         self.frames_seen = 0
         self.p2_processed_frames = 0
         self.metric_eligible_frames = 0
+        self.engine_eligible_frames = 0
         self.possession_locked_frames = 0
         self.possession_confidence_total = 0.0
         self.possession_confidence_samples = 0
@@ -29,10 +30,15 @@ class P2MetricsCollector:
         self.shot_outcomes: Counter[str] = Counter()
         self.event_confidence_total: Counter[str] = Counter()
         self.event_confidence_samples: Counter[str] = Counter()
+        self.control_state_counts: Counter[str] = Counter()
+        self.reset_reasons: Counter[str] = Counter()
         self.events_with_actor = 0
         self.events_with_team = 0
         self.total_events = 0
+        self.fps = 30.0
+        self.max_reset_count = 0
         self.event_rows: list[dict[str, Any]] = []
+        self.state_rows: list[dict[str, Any]] = []
 
     @staticmethod
     def _rate(numerator: int, denominator: int) -> float:
@@ -40,6 +46,11 @@ class P2MetricsCollector:
 
     def observe(self, frame_state: Any) -> None:
         self.frames_seen += 1
+        try:
+            self.fps = max(1.0, float(getattr(frame_state, "fps", self.fps) or self.fps))
+        except (TypeError, ValueError):
+            pass
+
         metric_eligible = bool(getattr(frame_state, "valid_gameplay", False))
         if metric_eligible:
             self.metric_eligible_frames += 1
@@ -53,9 +64,17 @@ class P2MetricsCollector:
         if bool(p2.get("p1_state_is_not_mutated", False)):
             self.p1_not_mutated_frames += 1
 
+        engine_eligible = bool(p2.get("engine_eligible", metric_eligible))
+        if engine_eligible:
+            self.engine_eligible_frames += 1
+
         possession = dict(p2.get("possession", {}) or {})
         current_track_id = possession.get("current_track_id")
-        if metric_eligible and current_track_id is not None:
+        control_state = str(possession.get("control_state") or "unknown")
+        if engine_eligible:
+            self.control_state_counts[control_state] += 1
+
+        if metric_eligible and engine_eligible and current_track_id is not None:
             self.possession_locked_frames += 1
             try:
                 confidence = float(possession.get("current_confidence", 0.0) or 0.0)
@@ -63,6 +82,41 @@ class P2MetricsCollector:
                 confidence = 0.0
             self.possession_confidence_total += confidence
             self.possession_confidence_samples += 1
+
+        reset = dict(p2.get("temporal_reset", {}) or {})
+        try:
+            reset_count = max(0, int(reset.get("count", 0) or 0))
+        except (TypeError, ValueError):
+            reset_count = 0
+        if reset_count > self.max_reset_count:
+            delta = reset_count - self.max_reset_count
+            reason = str(reset.get("last_reason") or "unknown")
+            self.reset_reasons[reason] += delta
+            self.max_reset_count = reset_count
+
+        shot_diag = dict(p2.get("shot", {}) or {})
+        flight = dict(possession.get("flight", {}) or {})
+        self.state_rows.append(
+            {
+                "frame_id": int(getattr(frame_state, "frame_id", 0)),
+                "timestamp_sec": float(getattr(frame_state, "timestamp", 0.0) or 0.0),
+                "metric_eligible": metric_eligible,
+                "engine_eligible": engine_eligible,
+                "control_state": control_state,
+                "current_track_id": current_track_id,
+                "current_team_id": possession.get("current_team_id"),
+                "current_confidence": possession.get("current_confidence"),
+                "lost_frames": possession.get("lost_frames"),
+                "flight_active": bool(flight.get("active", False)),
+                "flight_supported": bool(flight.get("flight_supported", False)),
+                "flight_frames": flight.get("flight_frames"),
+                "shot_active": bool(shot_diag.get("active", False)),
+                "shot_awaiting_rearm": bool(shot_diag.get("awaiting_rearm", False)),
+                "shot_rearm_clear_observed_frames": shot_diag.get("rearm_clear_observed_frames"),
+                "reset_count": reset_count,
+                "reset_reason": reset.get("last_reason"),
+            }
+        )
 
         for event in list(p2.get("events", []) or []):
             if not isinstance(event, dict):
@@ -92,6 +146,31 @@ class P2MetricsCollector:
 
             self.event_rows.append(row)
 
+    def _shot_retrigger_metrics(self) -> dict[str, Any]:
+        shots = [
+            row
+            for row in self.event_rows
+            if str(row.get("event_type") or "") == "shot_attempt"
+        ]
+        shots.sort(key=lambda row: int(row.get("frame_start", 0)))
+        threshold_frames = max(1, int(round(self.fps * 0.30)))
+        rapid_unknown_retriggers = 0
+        min_gap_frames: int | None = None
+        for previous, current in zip(shots, shots[1:]):
+            previous_outcome = str(
+                dict(previous.get("attributes", {}) or {}).get("outcome") or "unknown"
+            )
+            gap = int(current.get("frame_start", 0)) - int(previous.get("frame_end", 0))
+            if min_gap_frames is None or gap < min_gap_frames:
+                min_gap_frames = gap
+            if previous_outcome == "unknown" and 0 <= gap <= threshold_frames:
+                rapid_unknown_retriggers += 1
+        return {
+            "rapid_unknown_retrigger_window_frames": threshold_frames,
+            "rapid_unknown_retrigger_count": rapid_unknown_retriggers,
+            "minimum_inter_shot_gap_frames": min_gap_frames,
+        }
+
     def summary(self) -> dict[str, Any]:
         avg_possession_confidence = (
             self.possession_confidence_total / self.possession_confidence_samples
@@ -109,11 +188,36 @@ class P2MetricsCollector:
         shot_attempts = int(self.event_counts.get("shot_attempt", 0))
         unknown_shots = int(self.shot_outcomes.get("unknown", 0))
 
+        passes_with_flight = 0
+        turnovers_with_flight = 0
+        direct_turnovers = 0
+        for row in self.event_rows:
+            event_type = str(row.get("event_type") or "")
+            attrs = dict(row.get("attributes", {}) or {})
+            flight_supported = bool(attrs.get("flight_supported", False))
+            if event_type == "pass_candidate" and flight_supported:
+                passes_with_flight += 1
+            if event_type == "turnover_candidate":
+                if flight_supported:
+                    turnovers_with_flight += 1
+                else:
+                    direct_turnovers += 1
+
+        control_rates = {
+            state: self._rate(count, self.engine_eligible_frames)
+            for state, count in sorted(self.control_state_counts.items())
+        }
+
         return {
-            "version": "p2_real_video_probe_v1",
+            "version": "p2_real_video_probe_v2",
             "frames_seen": self.frames_seen,
             "p2_processed_frames": self.p2_processed_frames,
             "metric_eligible_frames": self.metric_eligible_frames,
+            "engine_eligible_frames": self.engine_eligible_frames,
+            "control_state": {
+                "counts": dict(sorted(self.control_state_counts.items())),
+                "rates": control_rates,
+            },
             "possession": {
                 "locked_frames": self.possession_locked_frames,
                 "coverage_rate": self._rate(
@@ -150,10 +254,24 @@ class P2MetricsCollector:
                 "attempts": shot_attempts,
                 "outcomes": dict(sorted(self.shot_outcomes.items())),
                 "unknown_outcome_rate": self._rate(unknown_shots, shot_attempts),
+                **self._shot_retrigger_metrics(),
+            },
+            "transitions": {
+                "passes": int(self.event_counts.get("pass_candidate", 0)),
+                "passes_with_flight_evidence": passes_with_flight,
+                "turnovers": int(self.event_counts.get("turnover_candidate", 0)),
+                "turnovers_with_flight_evidence": turnovers_with_flight,
+                "direct_turnovers": direct_turnovers,
+                "loose_ball_started": int(self.event_counts.get("loose_ball_started", 0)),
+                "loose_ball_recovered": int(self.event_counts.get("loose_ball_recovered", 0)),
             },
             "passes": int(self.event_counts.get("pass_candidate", 0)),
             "turnovers": int(self.event_counts.get("turnover_candidate", 0)),
             "rebounds": int(self.event_counts.get("rebound_candidate", 0)),
+            "resets": {
+                "count": self.max_reset_count,
+                "reasons": dict(sorted(self.reset_reasons.items())),
+            },
             "p1_state_not_mutated_rate": self._rate(
                 self.p1_not_mutated_frames,
                 self.p2_processed_frames,
@@ -194,9 +312,18 @@ def _install_probe(analyzer_module: Any, p2_pipeline_cls: Any) -> None:
                 ),
                 encoding="utf-8",
             )
+            states_path = self.run_dir / "p2_states.jsonl"
+            states_path.write_text(
+                "".join(
+                    json.dumps(row, ensure_ascii=False) + "\n"
+                    for row in self.p2_metrics.state_rows
+                ),
+                encoding="utf-8",
+            )
             print(f"[P2_METRICS] {json.dumps(p2_summary, separators=(',', ':'))}", flush=True)
             print(f"[P2_METRICS_FILE] {metrics_path.resolve()}", flush=True)
             print(f"[P2_EVENTS_FILE] {events_path.resolve()}", flush=True)
+            print(f"[P2_STATES_FILE] {states_path.resolve()}", flush=True)
             return path
 
     analyzer_module.RunDiagnostics = P2ProbeDiagnostics
