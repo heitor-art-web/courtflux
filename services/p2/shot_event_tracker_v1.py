@@ -56,6 +56,10 @@ class ShotEventTrackerV1:
         self._active: _ShotCandidate | None = None
         self._last_start_frame = -10**9
         self._cooldown_until_frame = -1
+        # A resolved candidate must leave the start condition at least once before a
+        # new shot can begin. This prevents UNKNOWN timeout -> immediate retrigger on
+        # the same above-rim observation while still allowing a real later putback.
+        self._awaiting_rearm = False
 
     @staticmethod
     def _label(row: dict[str, Any]) -> str:
@@ -241,6 +245,7 @@ class ShotEventTrackerV1:
         if outcome is ShotOutcome.MADE:
             self._cooldown_until_frame = int(frame_id) + self.cooldown_after_made_frames
         self._active = None
+        self._awaiting_rearm = True
         return event
 
     def update(
@@ -260,9 +265,14 @@ class ShotEventTrackerV1:
         relative = self._relative_to_rim(ball_position, rim)
         semantic_start = bool(flags["jump_shot"] or flags["layup_dunk"])
         trajectory_start = bool(ball_position is not None and rim is not None and relative["above"] and relative["near_x"])
+        start_signal = bool(semantic_start or trajectory_start)
 
         if self._active is None:
-            if self._can_start(frame_id) and (semantic_start or trajectory_start):
+            if self._awaiting_rearm:
+                if not start_signal:
+                    self._awaiting_rearm = False
+                return []
+            if self._can_start(frame_id) and start_signal:
                 self._start(
                     frame_id=frame_id,
                     timestamp_sec=timestamp_sec,
@@ -384,6 +394,7 @@ class ShotEventTrackerV1:
             "direct_ball_observations": 0 if candidate is None else candidate.direct_ball_observations,
             "last_start_frame": self._last_start_frame,
             "cooldown_until_frame": self._cooldown_until_frame,
+            "awaiting_rearm": self._awaiting_rearm,
             "reset_frames": self.reset_frames,
             "minimum_between_starts_frames": self.minimum_between_starts_frames,
             "cooldown_after_made_frames": self.cooldown_after_made_frames,
