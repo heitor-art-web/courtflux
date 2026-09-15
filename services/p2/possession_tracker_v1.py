@@ -63,12 +63,11 @@ class _FlightEvidence:
 
 
 class PossessionTrackerV1:
-    """Conservative temporal control/possession inference over canonical P1 state.
+    """Conservative P2 ball-control inference over canonical P1 state.
 
-    P2 explicitly distinguishes possession from loose/pass-flight/shot-flight states.
-    Team evidence is optional. A same-team handler change is called a pass candidate only
-    when the ball has supporting flight evidence; a team change may still become a
-    turnover candidate without pass-flight evidence (for example, a direct takeaway).
+    P2 distinguishes POSSESSED, LOOSE, PASS_FLIGHT and SHOT_FLIGHT. Team evidence is
+    optional. Same-team transitions become pass candidates only when direct ball-flight
+    evidence exists; team changes can still be turnover candidates for direct takeaways.
     """
 
     def __init__(
@@ -98,7 +97,7 @@ class PossessionTrackerV1:
 
         self.current_track_id: int | None = None
         self.current_team_id: str | None = None
-        self.current_confidence: float = 0.0
+        self.current_confidence = 0.0
         self.control_state = BallControlState.UNKNOWN
 
         self._candidate_track_id: int | None = None
@@ -108,10 +107,10 @@ class PossessionTrackerV1:
 
         self._last_control_track_id: int | None = None
         self._last_control_team_id: str | None = None
-        self._last_control_confidence: float = 0.0
+        self._last_control_confidence = 0.0
         self._last_control_frame: int | None = None
         self._last_control_ball_position: tuple[float, float] | None = None
-        self._last_control_player_height: float = 1.0
+        self._last_control_player_height = 1.0
 
         self._flight: _FlightEvidence | None = None
         self._loose_start_frame: int | None = None
@@ -180,9 +179,8 @@ class PossessionTrackerV1:
         teams = dict(team_evidence or {})
         best: _Candidate | None = None
         for player in players:
-            box = player.bbox
-            height = max(1.0, float(box[3] - box[1]))
-            distance = self._point_to_box_distance(ball_position, box)
+            height = max(1.0, float(player.bbox[3] - player.bbox[1]))
+            distance = self._point_to_box_distance(ball_position, player.bbox)
             proximity = math.exp(-distance / max(0.55 * height, 1.0))
             evidence_quality = 0.55 * float(ball_state.confidence) + 0.45 * float(player.confidence)
             trajectory_quality = (
@@ -222,9 +220,7 @@ class PossessionTrackerV1:
     def _timestamp(player: PlayerState | None, ball_state: BallState | None) -> float | None:
         if ball_state is not None and ball_state.timestamp_sec is not None:
             return ball_state.timestamp_sec
-        if player is not None:
-            return player.timestamp_sec
-        return None
+        return None if player is None else player.timestamp_sec
 
     @staticmethod
     def _player_by_id(players: list[PlayerState], track_id: int | None) -> PlayerState | None:
@@ -296,10 +292,9 @@ class PossessionTrackerV1:
 
     def _flight_supported(self) -> bool:
         flight = self._flight
-        if flight is None:
-            return False
         return bool(
-            flight.direct_observations >= self.pass_min_direct_observations
+            flight is not None
+            and flight.direct_observations >= self.pass_min_direct_observations
             and flight.frame_count >= self.release_confirm_frames
             and flight.displacement_heights >= self.pass_min_displacement_heights
         )
@@ -308,7 +303,10 @@ class PossessionTrackerV1:
         flight = self._flight
         if flight is None:
             return 0.0
-        obs_score = min(1.0, flight.direct_observations / max(1, self.pass_min_direct_observations + 1))
+        obs_score = min(
+            1.0,
+            flight.direct_observations / max(1, self.pass_min_direct_observations + 1),
+        )
         displacement_score = min(
             1.0,
             flight.displacement_heights / max(self.pass_min_displacement_heights, 1e-6),
@@ -376,15 +374,16 @@ class PossessionTrackerV1:
     ) -> BasketballEvent | None:
         if self._loose_start_frame is None:
             return None
-        event = BasketballEvent(
+        confidence = max(0.0, min(confidence, 1.0))
+        return BasketballEvent(
             event_id=f"loose-ball-recovered:{self._loose_start_frame}:{frame_id}:{new_track_id}",
             event_type=BasketballEventType.LOOSE_BALL_RECOVERED,
             frame_start=self._loose_start_frame,
             frame_end=int(frame_id),
             timestamp_start_sec=self._loose_start_timestamp_sec,
             timestamp_end_sec=timestamp_sec,
-            confidence=max(0.0, min(confidence, 1.0)),
-            uncertainty=1.0 - max(0.0, min(confidence, 1.0)),
+            confidence=confidence,
+            uncertainty=1.0 - confidence,
             decision=EventDecision.CONFIRMED,
             actor_track_id=new_track_id,
             secondary_track_id=self._loose_origin_track_id,
@@ -398,7 +397,6 @@ class PossessionTrackerV1:
                 **self._flight_attributes(),
             },
         )
-        return event
 
     def _transition_candidate(
         self,
@@ -418,7 +416,7 @@ class PossessionTrackerV1:
 
         flight_supported = self._flight_supported()
         flight_confidence = self._flight_confidence()
-        attrs = {
+        attributes = {
             "from_team_id": previous_team,
             "to_team_id": new_team,
             "classification_requires_team_evidence": True,
@@ -436,9 +434,9 @@ class PossessionTrackerV1:
                 "ball_flight_between_handlers",
                 "temporal_possession_transition",
             )
-            confidence = max(
-                0.0,
-                min(0.72 * possession_confidence + 0.28 * flight_confidence, 1.0),
+            confidence = min(
+                1.0,
+                0.72 * possession_confidence + 0.28 * flight_confidence,
             )
         else:
             event_type = BasketballEventType.TURNOVER_CANDIDATE
@@ -448,18 +446,12 @@ class PossessionTrackerV1:
                 "ball_flight_between_handlers" if flight_supported else "direct_control_change",
                 "temporal_possession_transition",
             )
-            confidence = max(
-                0.0,
-                min(
-                    0.82 * possession_confidence
-                    + (0.18 * flight_confidence if flight_supported else 0.0),
-                    1.0,
-                ),
+            confidence = min(
+                1.0,
+                0.82 * possession_confidence
+                + (0.18 * flight_confidence if flight_supported else 0.0),
             )
 
-        # Actor semantics are origin-first: passer / player losing possession is actor,
-        # receiver / player gaining possession is secondary. POSSESSION_CHANGE keeps the
-        # opposite convention (new handler as actor) because it describes the new state.
         return BasketballEvent(
             event_id=f"{prefix}:{frame_id}:{previous_track}:{new_track}",
             event_type=event_type,
@@ -478,7 +470,7 @@ class PossessionTrackerV1:
             location_court_m=location_court_m,
             evidence=evidence,
             provenance={"version": "possession_tracker_v1"},
-            attributes=attrs,
+            attributes=attributes,
         )
 
     def _clear_transition_memory(self) -> None:
@@ -507,25 +499,16 @@ class PossessionTrackerV1:
         threshold = self.acquire_threshold if self.current_track_id is None else self.switch_threshold
         usable = best if best is not None and best.score >= threshold else None
 
-        if self.current_track_id is not None:
-            current_player = self._player_by_id(players, self.current_track_id)
-            self._remember_control(
-                frame_id=frame_id,
-                player=current_player,
-                ball_state=ball_state,
-            )
-
         if usable is None:
             self._advance_candidate(None)
             self._lost_frames += 1
+            current_player = self._player_by_id(players, self.current_track_id)
+            timestamp = self._timestamp(current_player, ball_state)
 
             if self.current_track_id is not None and ball_state is not None and ball_state.available:
                 self._begin_or_update_flight(
                     frame_id=frame_id,
-                    timestamp_sec=self._timestamp(
-                        self._player_by_id(players, self.current_track_id),
-                        ball_state,
-                    ),
+                    timestamp_sec=timestamp,
                     ball_state=ball_state,
                     origin_track_id=self.current_track_id,
                     origin_team_id=self.current_team_id,
@@ -536,10 +519,7 @@ class PossessionTrackerV1:
                     self.control_state = BallControlState.LOOSE
                     loose_event = self._emit_loose_started(
                         frame_id=frame_id,
-                        timestamp_sec=self._timestamp(
-                            self._player_by_id(players, self.current_track_id),
-                            ball_state,
-                        ),
+                        timestamp_sec=timestamp,
                     )
                     if loose_event is not None:
                         events.append(loose_event)
@@ -567,28 +547,28 @@ class PossessionTrackerV1:
             previous_team = None if self._flight is None else self._flight.origin_team_id
             new_team = usable.team_id if usable.team_confidence >= self.team_evidence_threshold else None
             confidence = usable.score
-
-            acquired = BasketballEvent(
-                event_id=f"possession-acquired:{frame_id}:{usable.track_id}",
-                event_type=BasketballEventType.POSSESSION_ACQUIRED,
-                frame_start=max(0, int(frame_id) - self._candidate_frames + 1),
-                frame_end=int(frame_id),
-                timestamp_start_sec=timestamp,
-                timestamp_end_sec=timestamp,
-                confidence=confidence,
-                uncertainty=1.0 - confidence,
-                decision=EventDecision.CONFIRMED,
-                actor_track_id=usable.track_id,
-                team_id=new_team,
-                location_court_m=(None if player is None else player.court_position_m),
-                evidence=("ball_player_proximity", "temporal_possession_lock"),
-                provenance={"version": "possession_tracker_v1"},
-                attributes={
-                    "from_control_state": self.control_state.value,
-                    **self._flight_attributes(),
-                },
+            events.append(
+                BasketballEvent(
+                    event_id=f"possession-acquired:{frame_id}:{usable.track_id}",
+                    event_type=BasketballEventType.POSSESSION_ACQUIRED,
+                    frame_start=max(0, int(frame_id) - self._candidate_frames + 1),
+                    frame_end=int(frame_id),
+                    timestamp_start_sec=timestamp,
+                    timestamp_end_sec=timestamp,
+                    confidence=confidence,
+                    uncertainty=1.0 - confidence,
+                    decision=EventDecision.CONFIRMED,
+                    actor_track_id=usable.track_id,
+                    team_id=new_team,
+                    location_court_m=None if player is None else player.court_position_m,
+                    evidence=("ball_player_proximity", "temporal_possession_lock"),
+                    provenance={"version": "possession_tracker_v1"},
+                    attributes={
+                        "from_control_state": self.control_state.value,
+                        **self._flight_attributes(),
+                    },
+                )
             )
-            events.append(acquired)
 
             recovered = self._emit_loose_recovered(
                 frame_id=frame_id,
@@ -600,7 +580,6 @@ class PossessionTrackerV1:
             if recovered is not None:
                 events.append(recovered)
 
-            transition = None
             if previous_track is not None and previous_track != usable.track_id:
                 transition = self._transition_candidate(
                     frame_id=frame_id,
@@ -610,11 +589,11 @@ class PossessionTrackerV1:
                     new_track=usable.track_id,
                     new_team=new_team,
                     possession_confidence=confidence,
-                    location_court_m=(None if player is None else player.court_position_m),
+                    location_court_m=None if player is None else player.court_position_m,
                     transition_kind="reacquisition_after_control_gap",
                 )
-            if transition is not None:
-                events.append(transition)
+                if transition is not None:
+                    events.append(transition)
 
             self.current_track_id = usable.track_id
             self.current_team_id = new_team
@@ -631,12 +610,12 @@ class PossessionTrackerV1:
                 self.current_team_id = usable.team_id
             self.control_state = BallControlState.POSSESSED
             self._clear_transition_memory()
+            # Only a frame still supported as the same handler may advance the flight
+            # origin. This freezes pass-flight origin at the last genuinely controlled
+            # ball position instead of overwriting it with the receiver-side position.
             self._remember_control(frame_id=frame_id, player=player, ball_state=ball_state)
             return events
 
-        # A different candidate is not immediately a possession switch. While the
-        # candidate streak develops, collect direct flight evidence from the previous
-        # handler's last controlled ball position.
         previous_track = self.current_track_id
         previous_team = self.current_team_id
         self._begin_or_update_flight(
@@ -673,7 +652,7 @@ class PossessionTrackerV1:
                 actor_track_id=usable.track_id,
                 secondary_track_id=previous_track,
                 team_id=new_team,
-                location_court_m=(None if player is None else player.court_position_m),
+                location_court_m=None if player is None else player.court_position_m,
                 evidence=("ball_player_proximity", "temporal_possession_switch"),
                 provenance={"version": "possession_tracker_v1"},
                 attributes={**self._flight_attributes()},
@@ -688,7 +667,7 @@ class PossessionTrackerV1:
             new_track=usable.track_id,
             new_team=new_team,
             possession_confidence=confidence,
-            location_court_m=(None if player is None else player.court_position_m),
+            location_court_m=None if player is None else player.court_position_m,
             transition_kind="direct_temporal_switch",
         )
         if transition is not None:
@@ -705,8 +684,6 @@ class PossessionTrackerV1:
         reason: str = "shot",
         frame_id: int | None = None,
     ) -> None:
-        """Release the handler without inventing a possession-loss transition."""
-
         if self.current_track_id is not None:
             self._last_control_track_id = self.current_track_id
             self._last_control_team_id = self.current_team_id
