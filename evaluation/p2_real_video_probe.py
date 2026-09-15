@@ -18,6 +18,7 @@ class P2MetricsCollector:
 
     def __init__(self) -> None:
         self.frames_seen = 0
+        self.p2_processed_frames = 0
         self.metric_eligible_frames = 0
         self.possession_locked_frames = 0
         self.possession_confidence_total = 0.0
@@ -47,6 +48,7 @@ class P2MetricsCollector:
         p2 = dict(diagnostics.get("p2", {}) or {})
         if not p2:
             return
+        self.p2_processed_frames += 1
 
         if bool(p2.get("p1_state_is_not_mutated", False)):
             self.p1_not_mutated_frames += 1
@@ -110,6 +112,7 @@ class P2MetricsCollector:
         return {
             "version": "p2_real_video_probe_v1",
             "frames_seen": self.frames_seen,
+            "p2_processed_frames": self.p2_processed_frames,
             "metric_eligible_frames": self.metric_eligible_frames,
             "possession": {
                 "locked_frames": self.possession_locked_frames,
@@ -153,7 +156,7 @@ class P2MetricsCollector:
             "rebounds": int(self.event_counts.get("rebound_candidate", 0)),
             "p1_state_not_mutated_rate": self._rate(
                 self.p1_not_mutated_frames,
-                self.frames_seen,
+                self.p2_processed_frames,
             ),
         }
 
@@ -201,12 +204,17 @@ def _install_probe(analyzer_module: Any, p2_pipeline_cls: Any) -> None:
 
 
 def run_probe(args: argparse.Namespace) -> None:
+    # Freeze the PR #43 / rebuilt-P2 baseline before runtime construction. Smart Ball is
+    # explicitly OFF so real-video comparisons do not silently inherit its legacy default.
+    os.environ["BASKETBALL_P2_ENABLED"] = "1"
+    os.environ["BASKETBALL_SMART_BALL_MODE"] = "off"
+    os.environ["BASKETBALL_SMART_BALL_PIPELINE"] = "0"
+
     # Heavy runtime imports are deliberately delayed so P2 metric aggregation remains
     # unit-testable in lightweight CI without OpenCV/Ultralytics/weights.
     from services.analytics import analyzer
     from services.p2.pipeline import P2Pipeline
 
-    os.environ["BASKETBALL_P2_ENABLED"] = "1"
     _install_probe(analyzer, P2Pipeline)
 
     analyzer.main(
