@@ -25,6 +25,7 @@ jobs:
           evaluation/p2_real_video_probe_test.py
           evaluation/p2_ground_truth.py
           evaluation/p2_ground_truth_test.py
+          evaluation/p2_frozen_fixture_test.py
       - name: Verify direct probe project-root bootstrap
         working-directory: evaluation
         run: >-
@@ -39,3 +40,4 @@ jobs:
           evaluation.p2_event_engine_test
           evaluation.p2_real_video_probe_test
           evaluation.p2_ground_truth_test
+          evaluation.p2_frozen_fixture_test
