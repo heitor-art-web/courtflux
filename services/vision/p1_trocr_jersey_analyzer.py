@@ -45,7 +45,7 @@ class TrOCRSmallPrintedJerseyAnalyzer(ExternalJerseyBase):
             self.device = torch.device("cpu")
 
         try:
-            from transformers import TrOCRProcessor, VisionEncoderDecoderModel
+            from transformers import AutoImageProcessor, AutoTokenizer, VisionEncoderDecoderModel
         except ImportError as exc:
             raise RuntimeError(
                 "TrOCR challenger requires transformers. Install the root requirements."
@@ -53,18 +53,17 @@ class TrOCRSmallPrintedJerseyAnalyzer(ExternalJerseyBase):
 
         started = time.perf_counter()
         print(
-            f"[TrOCR] loading processor model={self.model_id}...",
+            f"[TrOCR] loading image processor model={self.model_id}...",
             flush=True,
         )
-        try:
-            self.processor = TrOCRProcessor.from_pretrained(self.model_id)
-        except Exception:
-            # Current Transformers normally supports TrOCRProcessor for this model,
-            # but keep AutoProcessor as a compatibility fallback across releases.
-            from transformers import AutoProcessor
-
-            self.processor = AutoProcessor.from_pretrained(self.model_id)
-        print("[TrOCR] processor ready; loading model weights...", flush=True)
+        # In current Transformers versions AutoProcessor/TrOCRProcessor can resolve
+        # this checkpoint to a bare DeiTImageProcessor. Keep image preprocessing and
+        # text decoding explicit so the runtime contract does not depend on that
+        # processor-wrapper behaviour.
+        self.image_processor = AutoImageProcessor.from_pretrained(self.model_id)
+        print("[TrOCR] image processor ready; loading tokenizer...", flush=True)
+        self.tokenizer = AutoTokenizer.from_pretrained(self.model_id)
+        print("[TrOCR] tokenizer ready; loading model weights...", flush=True)
         self.model = VisionEncoderDecoderModel.from_pretrained(
             self.model_id,
             low_cpu_mem_usage=True,
@@ -81,7 +80,7 @@ class TrOCRSmallPrintedJerseyAnalyzer(ExternalJerseyBase):
                 "checkpoint": self.model_id,
                 "provider": "huggingface_local",
                 "device": self.device.type,
-                "preprocessing": f"courtflux_{self.crop_mode}_crop_trocr_processor",
+                "preprocessing": f"courtflux_{self.crop_mode}_crop_trocr_image_processor",
                 "temporal_aggregation": "identity_v2_downstream",
                 "roster_policy": "validator_only",
                 "max_images_per_attempt": 1,
@@ -134,7 +133,7 @@ class TrOCRSmallPrintedJerseyAnalyzer(ExternalJerseyBase):
 
     def _generate(self, image: np.ndarray) -> tuple[str, float]:
         pil_image = Image.fromarray(cv2.cvtColor(image, cv2.COLOR_BGR2RGB))
-        inputs = self.processor(images=pil_image, return_tensors="pt")
+        inputs = self.image_processor(images=pil_image, return_tensors="pt")
         pixel_values = inputs.pixel_values.to(self.device)
 
         with torch.inference_mode():
@@ -148,12 +147,11 @@ class TrOCRSmallPrintedJerseyAnalyzer(ExternalJerseyBase):
             )
 
         sequence = output.sequences[0]
-        raw_output = self.processor.batch_decode(
+        raw_output = self.tokenizer.batch_decode(
             output.sequences,
             skip_special_tokens=True,
         )[0].strip()
-        tokenizer = getattr(self.processor, "tokenizer", None)
-        special_token_ids = set(getattr(tokenizer, "all_special_ids", []) or [])
+        special_token_ids = set(getattr(self.tokenizer, "all_special_ids", []) or [])
         confidence = self._sequence_confidence(
             sequence,
             list(getattr(output, "scores", []) or []),
