@@ -45,10 +45,13 @@ class TrOCRSmallPrintedJerseyAnalyzer(ExternalJerseyBase):
             self.device = torch.device("cpu")
 
         try:
-            from transformers import AutoImageProcessor, AutoTokenizer, VisionEncoderDecoderModel
+            import sentencepiece as spm
+            from huggingface_hub import hf_hub_download
+            from transformers import AutoImageProcessor, VisionEncoderDecoderModel
         except ImportError as exc:
             raise RuntimeError(
-                "TrOCR challenger requires transformers. Install the root requirements."
+                "TrOCR challenger requires transformers, huggingface-hub and sentencepiece. "
+                "Install the root requirements."
             ) from exc
 
         started = time.perf_counter()
@@ -56,14 +59,26 @@ class TrOCRSmallPrintedJerseyAnalyzer(ExternalJerseyBase):
             f"[TrOCR] loading image processor model={self.model_id}...",
             flush=True,
         )
-        # In current Transformers versions AutoProcessor/TrOCRProcessor can resolve
-        # this checkpoint to a bare DeiTImageProcessor. Keep image preprocessing and
-        # text decoding explicit so the runtime contract does not depend on that
-        # processor-wrapper behaviour.
         self.image_processor = AutoImageProcessor.from_pretrained(self.model_id)
-        print("[TrOCR] image processor ready; loading tokenizer...", flush=True)
-        self.tokenizer = AutoTokenizer.from_pretrained(self.model_id)
-        print("[TrOCR] tokenizer ready; loading model weights...", flush=True)
+
+        # microsoft/trocr-small-printed uses an XLM-R SentencePiece decoder and does
+        # not ship tokenizer.json. Transformers v5 always prefers the tokenizers
+        # backend, which can fail while converting this older checkpoint. Decode the
+        # generated IDs directly with the checkpoint's SentencePiece model instead.
+        print("[TrOCR] image processor ready; loading sentencepiece decoder...", flush=True)
+        sp_model_path = hf_hub_download(
+            repo_id=self.model_id,
+            filename="sentencepiece.bpe.model",
+        )
+        self.sp_model = spm.SentencePieceProcessor()
+        self.sp_model.Load(str(sp_model_path))
+        if int(self.sp_model.get_piece_size()) <= 0:
+            raise RuntimeError("TrOCR SentencePiece vocabulary failed to load")
+        self.fairseq_offset = 1
+        self.mask_token_id = int(self.sp_model.get_piece_size()) + self.fairseq_offset
+        self.special_token_ids = {0, 1, 2, 3, self.mask_token_id}
+
+        print("[TrOCR] sentencepiece decoder ready; loading model weights...", flush=True)
         self.model = VisionEncoderDecoderModel.from_pretrained(
             self.model_id,
             low_cpu_mem_usage=True,
@@ -81,6 +96,7 @@ class TrOCRSmallPrintedJerseyAnalyzer(ExternalJerseyBase):
                 "provider": "huggingface_local",
                 "device": self.device.type,
                 "preprocessing": f"courtflux_{self.crop_mode}_crop_trocr_image_processor",
+                "decoder": "xlm_roberta_sentencepiece_direct",
                 "temporal_aggregation": "identity_v2_downstream",
                 "roster_policy": "validator_only",
                 "max_images_per_attempt": 1,
@@ -131,6 +147,27 @@ class TrOCRSmallPrintedJerseyAnalyzer(ExternalJerseyBase):
         confidence = math.exp(sum(log_probs) / len(log_probs))
         return max(0.0, min(1.0, float(confidence)))
 
+    def _decode_sequence(self, sequence: torch.Tensor) -> str:
+        """Decode TrOCR/XLM-R IDs using the original fairseq-to-SPM alignment."""
+        pieces: list[str] = []
+        piece_count = int(self.sp_model.get_piece_size())
+        for raw_id in sequence.detach().cpu().tolist():
+            token_id = int(raw_id)
+            if token_id in {0, 1, 2}:
+                continue
+            if token_id in {3, self.mask_token_id}:
+                return "UNKNOWN"
+            spm_id = token_id - self.fairseq_offset
+            if spm_id < 0 or spm_id >= piece_count:
+                return "UNKNOWN"
+            piece = str(self.sp_model.IdToPiece(spm_id))
+            if piece == "<unk>":
+                return "UNKNOWN"
+            if piece in {"<s>", "</s>"}:
+                continue
+            pieces.append(piece)
+        return "".join(pieces).replace("▁", " ").strip()
+
     def _generate(self, image: np.ndarray) -> tuple[str, float]:
         pil_image = Image.fromarray(cv2.cvtColor(image, cv2.COLOR_BGR2RGB))
         inputs = self.image_processor(images=pil_image, return_tensors="pt")
@@ -147,15 +184,11 @@ class TrOCRSmallPrintedJerseyAnalyzer(ExternalJerseyBase):
             )
 
         sequence = output.sequences[0]
-        raw_output = self.tokenizer.batch_decode(
-            output.sequences,
-            skip_special_tokens=True,
-        )[0].strip()
-        special_token_ids = set(getattr(self.tokenizer, "all_special_ids", []) or [])
+        raw_output = self._decode_sequence(sequence)
         confidence = self._sequence_confidence(
             sequence,
             list(getattr(output, "scores", []) or []),
-            special_token_ids,
+            self.special_token_ids,
         )
         return raw_output, confidence
 
