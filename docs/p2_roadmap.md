@@ -20,23 +20,26 @@ During P2, stable track/entity IDs are the operational identity source. `shirt_n
 
 Missing or contradictory evidence must remain unknown or a candidate rather than being forced into a basketball event.
 
-## Rebuilt status
+## Reconstruction status — CLOSED
 
-`p2-rebuilt` now reconstructs both the basketball motor and the intended P2 product/runtime architecture. The legacy branch was not replayed commit-for-commit; useful behavior was adapted to the current PR #43 / Identity-v2 baseline.
+The implementation/reconstruction phase of `p2-rebuilt` is closed. The branch now reconstructs both the basketball motor and the intended P2 product/runtime architecture on top of the current PR #43 / Identity-v2 baseline.
+
+From this point until human ground truth is evaluated, the basketball motor is frozen: do not tune thresholds or state-machine behavior by intuition from a single video. The immediate next gate is the frozen Jersey-OFF Porto–Ovarense 0–60 s run, followed directly by human GT if the closure invariants remain clean.
 
 Implemented basketball capabilities:
 
 ```text
 robust shot re-arm / de-dup
 explicit ball-control state
-loose-ball start + recovery
+loose-ball start + recovery, including same-handler recovery
 pass-flight evidence
 pass / turnover transition attribution
 shot-flight isolation from possession
 camera/segment-boundary temporal reset
 frame/timestamp discontinuity reset
 rebound candidate chaining
-real-video control/event metrics
+real-video control/event metrics v3
+per-event-type actor/team attribution
 human-GT evaluator + annotation template
 ```
 
@@ -46,6 +49,7 @@ Implemented reconstruction/retirement work:
 single canonical P1 -> P2 runtime
 legacy analytics Engine/metrics removed
 Lab/worker detection-only runtime split removed
+canonical analyzer/probe detection_only contract removed
 legacy Streamlit UI removed
 legacy renderer/session/P0-context surfaces removed
 GameContext/P0 experiment surface removed
@@ -77,15 +81,15 @@ P2EngineV1 (when enabled)
 frame_state.p2_events + diagnostics["p2"]
 ```
 
-`services.p2.P2Pipeline` is now a compatibility wrapper that enables this canonical P2 stage; it must not run a second P2 engine.
+`services.p2.P2Pipeline` is a compatibility wrapper that enables this canonical P2 stage; it must not run a second P2 engine.
 
-The Lab contract, worker request and current Lab UI no longer expose a `detection_only` mode. A temporary ignored Python compatibility keyword may remain only for internal callers while they migrate; it must never select a different runtime path.
+The Lab contract, worker request, current Lab UI, canonical analyzer and real-video probe no longer expose or pass a `detection_only` mode. Canonical run metadata must describe the runtime as `canonical_p1_p2` and must not emit a stale `detection_only` key.
 
 Smart Ball is OFF by default. Jersey remains optional evidence and does not become required operational identity before the deferred end-of-P2 Jersey gate.
 
 ## Retired legacy surfaces
 
-The following old-P2 cleanup is now part of `p2-rebuilt` and protected by CI invariants:
+The following old-P2 cleanup is part of `p2-rebuilt` and protected by CI invariants:
 
 - legacy analytics Engine/metrics;
 - legacy Streamlit app/UI and Streamlit-only dependencies;
@@ -103,7 +107,7 @@ These removals do not remove the current `web/` frontend, current Identity v2, c
 
 ### Frozen fixture
 
-`evaluation/fixtures/g4UROqJoYBM.mp4` is restored byte-for-byte from the legacy P2 branch. `evaluation/p2_frozen_fixture_test.py` locks its size and Git blob identity so it cannot silently drift.
+`evaluation/fixtures/g4UROqJoYBM.mp4` is restored byte-for-byte from the legacy P2 branch. `evaluation/p2_frozen_fixture_test.py` locks its size and Git blob identity so the fixture cannot silently drift.
 
 ### Python quality
 
@@ -115,7 +119,7 @@ These removals do not remove the current `web/` frontend, current Identity v2, c
 
 ### Web
 
-`.github/workflows/web-ci.yml` runs on `p2-rebuilt` web changes and executes Node 24 install, TypeScript typecheck, ESLint, Next build, Playwright public-flow tests and accessibility/auth/onboarding smoke suites.
+`.github/workflows/web-ci.yml` runs on `p2-rebuilt` web changes and executes Node 24 install, TypeScript typecheck, ESLint, Next build, Playwright public-flow tests and accessibility/auth/onboarding smoke suites. Browser/E2E failures remain a separate web-quality gate and do not change the basketball-motor freeze unless they are caused by a P2 runtime contract regression.
 
 ## P2 event contract
 
@@ -154,7 +158,7 @@ The tracker distinguishes controlled possession from loose/pass-flight/shot-flig
 
 Pass/turnover actor semantics are origin-first: the passer or player losing control is `actor_track_id`; the receiver/new handler is `secondary_track_id`. `POSSESSION_CHANGE` remains new-handler-first because it describes the resulting possession state.
 
-Loose-ball intervals emit `LOOSE_BALL_STARTED` and, after a supported new lock, `LOOSE_BALL_RECOVERED`.
+Loose-ball intervals emit `LOOSE_BALL_STARTED` and `LOOSE_BALL_RECOVERED`. A `LOOSE -> POSSESSED` transition now closes the interval even when the same handler recovers the ball; that recovery must not create a fake possession change, pass or turnover.
 
 ## Shot and rebound
 
@@ -174,7 +178,7 @@ When a supported shot becomes active, possession moves into `SHOT_FLIGHT` and is
 
 P2 intentionally consumes the canonical upstream eligibility boundary instead of adding a second pixel-level scene detector.
 
-## Real-video probe and ground truth
+## Real-video probe v3 and ground truth
 
 `evaluation/p2_real_video_probe.py` runs P2 through the canonical analyzer with Smart Ball explicitly OFF and Jersey optionally OFF. It emits:
 
@@ -183,6 +187,13 @@ p2_metrics.json
 p2_events.jsonl
 p2_states.jsonl
 ```
+
+Probe v3 deliberately separates two concepts that were previously conflated:
+
+- actual possession coverage is `control_state == POSSESSED`;
+- handler-memory coverage means `current_track_id` is retained while the control state may be `LOOSE`, `PASS_FLIGHT` or another non-possession state.
+
+It also reports actor/team attribution independently for every event type so global attribution cannot hide weak shot attribution or another event-specific failure.
 
 `evaluation/p2_ground_truth.py` evaluates predictions against manually authored `courtflux_p2_gt_v1` labels and reports per-event TP/FP/FN, precision, recall, F1 and temporal error, plus control-state frame accuracy/confusion.
 
@@ -210,15 +221,16 @@ Evaluate rebound candidates only after shot-event quality is acceptable. Offensi
 
 Ablate supporting signals independently: ball trajectory, rim geometry, semantic shot-action evidence, ball-in-basket evidence and team evidence. Promotion requires measurable quality gain versus runtime cost.
 
-## Closure sequence
+## Closure gate and next sequence
 
-1. Finish migration of any remaining internal compatibility-only `detection_only` keyword so the retired public contract cannot return.
-2. Keep P2, Python, Supabase and web CI green on the reconstructed architecture.
-3. Re-run Porto–Ovarense 0–60 s with Jersey OFF on the canonical runtime.
-4. Run the committed `g4UROqJoYBM.mp4` frozen fixture through the same Jersey-OFF probe.
-5. Human-label the frozen clips and run the GT evaluator.
-6. Repeat the battery on v1–v5 when their local paths are available.
-7. Calibrate only against the frozen multi-video set; do not hand-tune to one game.
-8. Freeze the Jersey-OFF P2 baseline once the GT gates are acceptable.
-9. Run the deferred Jersey experiment (`soft-ranking + localized ROI + Identity-v2-only temporal consensus`) without adding a second consensus layer.
-10. Promote P2 only after basketball GT gates and the end-of-P2 Jersey gate pass.
+Implementation is frozen. The next sequence is validation, not further motor development:
+
+1. Re-run exactly Porto–Ovarense 0–60 s with Jersey OFF on the canonical runtime.
+2. Verify the summary has `mode = canonical_p1_p2` and no top-level `detection_only` key.
+3. Verify `p2_probe.version = p2_real_video_probe_v3`, actual possession vs handler-memory metrics, per-event attribution, same-handler loose recoveries, zero rapid shot-retrigger regression and 100% P1 immutability.
+4. If those closure invariants are clean, human-label this exact 0–60 s clip immediately and run the GT evaluator. Do not tune the motor by intuition before GT.
+5. Run the committed `g4UROqJoYBM.mp4` frozen fixture and the remaining v1–v5 videos through the same Jersey-OFF battery when available.
+6. Calibrate only against the frozen multi-video GT set.
+7. Freeze the validated Jersey-OFF P2 baseline.
+8. Run the deferred Jersey experiment (`soft-ranking + localized ROI + Identity-v2-only temporal consensus`) without adding a second consensus layer.
+9. Promote P2 only after the basketball GT gates and end-of-P2 Jersey gate pass.
