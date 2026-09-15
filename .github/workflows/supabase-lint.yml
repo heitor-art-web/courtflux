@@ -1,0 +1,49 @@
+name: Supabase migration lint
+
+on:
+  push:
+    branches: [p2-rebuilt]
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  supabase-lint:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      SUPABASE_TELEMETRY_DISABLED: "1"
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Supabase CLI
+        uses: supabase/setup-cli@v1
+        with:
+          version: 2.117.0
+
+      - name: Verify CLI contract
+        run: |
+          supabase --version
+          supabase start --help >/dev/null
+          supabase db reset --help >/dev/null
+          supabase db lint --help >/dev/null
+          supabase migration list --help >/dev/null
+
+      - name: Start local Supabase
+        run: supabase start
+
+      - name: Replay migrations from scratch
+        run: supabase db reset
+
+      - name: Lint local database
+        run: supabase db lint --local --level error --fail-on error
+
+      - name: Verify local migration history
+        run: supabase migration list --local
+
+      - name: Stop local Supabase
+        if: always()
+        run: supabase stop --no-backup || true
