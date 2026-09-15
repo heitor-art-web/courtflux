@@ -1,5 +1,10 @@
-# Use the headless OpenCV build consistently: EasyOCR and Roboflow require it,
-# and CourtFlux does not rely on cv2.imshow/HighGUI in the current pipeline.
+# OpenCV dependency metadata is split across our stack:
+# - ultralytics requires the opencv-python distribution;
+# - EasyOCR/Roboflow require opencv-python-headless.
+# Both packages expose the same cv2 namespace, so keep them pinned to the exact
+# same build to avoid pip pulling OpenCV 5.x (which is incompatible with
+# inference-sdk 1.5.x) or silently changing the P1 image-processing baseline.
+opencv-python==4.10.0.84
 opencv-python-headless==4.10.0.84
 imageio-ffmpeg>=0.5.1,<1.0.0
 ultralytics>=8.3.0
