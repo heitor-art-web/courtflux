@@ -104,14 +104,15 @@ class P2RealVideoProbeTest(unittest.TestCase):
         )
 
         summary = collector.summary()
-        self.assertEqual(summary["version"], "p2_real_video_probe_v2")
+        self.assertEqual(summary["version"], "p2_real_video_probe_v3")
         self.assertEqual(summary["frames_seen"], 3)
         self.assertEqual(summary["p2_processed_frames"], 3)
         self.assertEqual(summary["metric_eligible_frames"], 3)
         self.assertEqual(summary["engine_eligible_frames"], 3)
-        self.assertEqual(summary["possession"]["locked_frames"], 2)
-        self.assertEqual(summary["possession"]["coverage_rate"], 66.67)
-        self.assertEqual(summary["possession"]["unknown_rate"], 33.33)
+        self.assertEqual(summary["possession"]["possessed_frames"], 2)
+        self.assertEqual(summary["possession"]["possessed_rate"], 66.67)
+        self.assertEqual(summary["possession"]["handler_memory_frames"], 2)
+        self.assertEqual(summary["possession"]["handler_memory_rate"], 66.67)
         self.assertEqual(summary["possession"]["changes"], 1)
         self.assertEqual(summary["passes"], 1)
         self.assertEqual(summary["shots"]["attempts"], 1)
@@ -119,12 +120,43 @@ class P2RealVideoProbeTest(unittest.TestCase):
         self.assertEqual(summary["shots"]["unknown_outcome_rate"], 100.0)
         self.assertEqual(summary["events"]["actor_attribution_rate"], 100.0)
         self.assertEqual(summary["events"]["team_attribution_rate"], 66.67)
+        self.assertEqual(summary["events"]["attribution_by_event_type"]["shot_attempt"]["actor_rate"], 100.0)
+        self.assertEqual(summary["events"]["attribution_by_event_type"]["shot_attempt"]["team_rate"], 0.0)
+        self.assertEqual(summary["events"]["attribution_by_event_type"]["pass_candidate"]["actor_rate"], 100.0)
+        self.assertEqual(summary["events"]["attribution_by_event_type"]["pass_candidate"]["team_rate"], 100.0)
         self.assertEqual(summary["control_state"]["counts"]["possessed"], 2)
         self.assertEqual(summary["control_state"]["counts"]["shot_flight"], 1)
         self.assertEqual(summary["p1_state_not_mutated_rate"], 100.0)
         self.assertEqual(len(collector.state_rows), 3)
 
-    def test_ineligible_frames_do_not_reduce_possession_coverage(self):
+    def test_handler_memory_is_not_counted_as_possession(self):
+        collector = P2MetricsCollector()
+        collector.observe(
+            self.frame(
+                track_id=4,
+                frame_id=1,
+                eligible=True,
+                control_state="loose",
+            )
+        )
+        collector.observe(
+            self.frame(
+                track_id=4,
+                frame_id=2,
+                eligible=True,
+                control_state="possessed",
+            )
+        )
+
+        summary = collector.summary()
+        self.assertEqual(summary["possession"]["handler_memory_frames"], 2)
+        self.assertEqual(summary["possession"]["handler_memory_rate"], 100.0)
+        self.assertEqual(summary["possession"]["possessed_frames"], 1)
+        self.assertEqual(summary["possession"]["possessed_rate"], 50.0)
+        self.assertEqual(summary["control_state"]["rates"]["loose"], 50.0)
+        self.assertEqual(summary["control_state"]["rates"]["possessed"], 50.0)
+
+    def test_ineligible_frames_do_not_reduce_possession_rate(self):
         collector = P2MetricsCollector()
         collector.observe(self.frame(track_id=None, frame_id=1, eligible=False))
         collector.observe(
@@ -139,8 +171,8 @@ class P2RealVideoProbeTest(unittest.TestCase):
 
         summary = collector.summary()
         self.assertEqual(summary["metric_eligible_frames"], 1)
-        self.assertEqual(summary["possession"]["coverage_rate"], 100.0)
-        self.assertEqual(summary["possession"]["unknown_rate"], 0.0)
+        self.assertEqual(summary["possession"]["possessed_rate"], 100.0)
+        self.assertEqual(summary["possession"]["handler_memory_rate"], 100.0)
 
     def test_skipped_frame_does_not_reduce_p1_immutability_rate(self):
         collector = P2MetricsCollector()
