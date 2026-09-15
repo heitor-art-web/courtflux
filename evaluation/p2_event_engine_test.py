@@ -174,16 +174,18 @@ class PossessionTrackerV1Test(unittest.TestCase):
             ball_state=ball(0, 20, 30),
             team_evidence=teams,
         )
+        # 25 px from the last controlled ball position: far enough from player 1 to
+        # fail possession, but below the 0.65-player-height pass-flight displacement gate.
         tracker.update(
             frame_id=1,
             players=[player(1, 1, (10, 10, 30, 50))],
-            ball_state=ball(1, 120, 120),
+            ball_state=ball(1, 45, 30),
             team_evidence=teams,
         )
         loose_events = tracker.update(
             frame_id=2,
             players=[player(2, 1, (10, 10, 30, 50))],
-            ball_state=ball(2, 140, 120),
+            ball_state=ball(2, 45, 30),
             team_evidence=teams,
         )
         self.assertIn(
@@ -194,8 +196,8 @@ class PossessionTrackerV1Test(unittest.TestCase):
 
         recovery_events = tracker.update(
             frame_id=3,
-            players=[player(3, 2, (130, 90, 150, 140))],
-            ball_state=ball(3, 140, 120),
+            players=[player(3, 2, (40, 10, 50, 50))],
+            ball_state=ball(3, 45, 30),
             team_evidence=teams,
         )
         recovery_types = {event.event_type for event in recovery_events}
