@@ -24,8 +24,9 @@ uvicorn[standard]>=0.35.0,<1.0.0
 supabase>=2.0.0,<3.0.0
 
 # P1 Jersey challenger stack. Roboflow uses its hosted ResNet50 classifier;
-# the E-BARD Qwen, jersey-finetuned SmolVLM2, and TrOCR challengers run locally
-# through Transformers. Model weights are downloaded only when a challenger is selected.
+# E-BARD Qwen, jersey-finetuned SmolVLM2, and TrOCR run through Transformers.
+# SoccerNet PARSeq uses the pinned Torch Hub architecture plus the official
+# CVPRW 2024 checkpoint downloaded into the project-local weights tree.
 inference-sdk>=1.5.0,<2.0.0
 roboflow>=1.2.0,<2.0.0
 transformers>=5.16.1,<6.0.0
@@ -33,6 +34,8 @@ huggingface-hub>=1.30.0,<2.0.0
 accelerate>=1.10.0,<2.0.0
 num2words>=0.5.14,<1.0.0
 sentencepiece>=0.2.0,<1.0.0
+pytorch-lightning>=2.2.0,<3.0.0
+gdown>=5.2.0,<6.0.0
 Pillow>=10.0.0,<13.0.0
 
 PySide6
