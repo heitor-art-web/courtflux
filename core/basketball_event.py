@@ -17,8 +17,24 @@ class BasketballEventType(str, Enum):
     POSSESSION_CHANGE = "possession_change"
     PASS_CANDIDATE = "pass_candidate"
     TURNOVER_CANDIDATE = "turnover_candidate"
+    LOOSE_BALL_STARTED = "loose_ball_started"
+    LOOSE_BALL_RECOVERED = "loose_ball_recovered"
     SHOT_ATTEMPT = "shot_attempt"
     REBOUND_CANDIDATE = "rebound_candidate"
+
+
+class BallControlState(str, Enum):
+    """P2 temporal interpretation of who, if anyone, controls the ball.
+
+    This is intentionally downstream of P1 BallState. It may be UNKNOWN even while a
+    ball is visible, and it never forces identity beyond stable track/team evidence.
+    """
+
+    UNKNOWN = "unknown"
+    POSSESSED = "possessed"
+    LOOSE = "loose"
+    PASS_FLIGHT = "pass_flight"
+    SHOT_FLIGHT = "shot_flight"
 
 
 class EventDecision(str, Enum):
