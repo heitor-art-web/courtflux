@@ -1,0 +1,2 @@
+-- CourtFlux local development seed.
+-- Intentionally empty: CI replays the full migration chain without production data.
