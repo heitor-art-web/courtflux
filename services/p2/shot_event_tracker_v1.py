@@ -28,11 +28,12 @@ class _ShotCandidate:
 
 
 class ShotEventTrackerV1:
-    """Temporal shot state machine inspired by the Roboflow basketball tracker pattern.
+    """Conservative temporal shot candidate/resolution state machine.
 
-    Semantic detections are supporting evidence only. A single ``player-jump-shot`` or
-    ``ball-in-basket`` observation never creates an event without an active shot candidate.
-    Missing evidence resolves to UNKNOWN rather than being silently counted as a miss.
+    Semantic detections are supporting evidence only. Missing trajectory evidence resolves
+    to UNKNOWN. After any resolution, a new candidate requires direct observed evidence
+    that the ball left the previous start/rim zone before the tracker is re-armed. This
+    prevents one physical flight from becoming UNKNOWN -> immediate duplicate shot.
     """
 
     def __init__(
@@ -42,6 +43,8 @@ class ShotEventTrackerV1:
         reset_time_sec: float = 1.7,
         minimum_between_starts_sec: float = 0.5,
         cooldown_after_made_sec: float = 0.5,
+        rearm_clear_observed_frames: int = 4,
+        rearm_min_separation_sec: float = 0.24,
     ) -> None:
         self.fps = max(1.0, float(fps))
         self.reset_frames = max(1, int(round(self.fps * float(reset_time_sec))))
@@ -53,13 +56,21 @@ class ShotEventTrackerV1:
             1,
             int(round(self.fps * float(cooldown_after_made_sec))),
         )
+        self.rearm_clear_observed_frames = max(1, int(rearm_clear_observed_frames))
+        self.rearm_min_separation_frames = max(
+            1,
+            int(round(self.fps * float(rearm_min_separation_sec))),
+        )
+
         self._active: _ShotCandidate | None = None
         self._last_start_frame = -10**9
+        self._last_resolved_frame = -10**9
         self._cooldown_until_frame = -1
-        # A resolved candidate must leave the start condition at least once before a
-        # new shot can begin. This prevents UNKNOWN timeout -> immediate retrigger on
-        # the same above-rim observation while still allowing a real later putback.
         self._awaiting_rearm = False
+        self._rearm_clear_frames = 0
+        self._rearm_count = 0
+        self._reset_count = 0
+        self._last_reset_reason: str | None = None
 
     @staticmethod
     def _label(row: dict[str, Any]) -> str:
@@ -82,7 +93,10 @@ class ShotEventTrackerV1:
         for row in rows:
             if not isinstance(row, dict):
                 continue
-            confidence = max(0.0, min(float(row.get("confidence", 0.0)), 1.0))
+            try:
+                confidence = max(0.0, min(float(row.get("confidence", 0.0)), 1.0))
+            except (TypeError, ValueError):
+                confidence = 0.0
             if confidence < 0.35:
                 continue
             label = cls._label(row)
@@ -127,7 +141,10 @@ class ShotEventTrackerV1:
         bx, by = ball_position
         return min(
             rims,
-            key=lambda rim: (((rim[0] + rim[2]) / 2.0 - bx) ** 2 + ((rim[1] + rim[3]) / 2.0 - by) ** 2),
+            key=lambda rim: (
+                ((rim[0] + rim[2]) / 2.0 - bx) ** 2
+                + ((rim[1] + rim[3]) / 2.0 - by) ** 2
+            ),
         )
 
     @staticmethod
@@ -135,7 +152,13 @@ class ShotEventTrackerV1:
         ball_position: tuple[float, float] | None,
         rim: tuple[float, float, float, float] | None,
     ) -> dict[str, bool]:
-        result = {"above": False, "near_x": False, "rim_band": False, "below": False, "inside_mouth": False}
+        result = {
+            "above": False,
+            "near_x": False,
+            "rim_band": False,
+            "below": False,
+            "inside_mouth": False,
+        }
         if ball_position is None or rim is None:
             return result
         bx, by = ball_position
@@ -146,9 +169,14 @@ class ShotEventTrackerV1:
         rim_x = (x1 + x2) / 2.0
         result["above"] = by < rim_y - 0.20 * height
         result["near_x"] = abs(bx - rim_x) <= 2.5 * width
-        result["rim_band"] = (y1 - 0.8 * height) <= by <= (y2 + 0.8 * height) and result["near_x"]
+        result["rim_band"] = (
+            (y1 - 0.8 * height) <= by <= (y2 + 0.8 * height)
+            and result["near_x"]
+        )
         result["below"] = by > rim_y + 0.65 * height
-        result["inside_mouth"] = (x1 - 0.20 * width) <= bx <= (x2 + 0.20 * width)
+        result["inside_mouth"] = (
+            (x1 - 0.20 * width) <= bx <= (x2 + 0.20 * width)
+        )
         return result
 
     def _can_start(self, frame_id: int) -> bool:
@@ -209,6 +237,7 @@ class ShotEventTrackerV1:
         candidate = self._active
         if candidate is None:
             raise RuntimeError("cannot resolve a shot without an active candidate")
+
         evidence = set(candidate.evidence)
         evidence.add(reason)
         quality = self._quality(ball_state)
@@ -225,28 +254,86 @@ class ShotEventTrackerV1:
             timestamp_end_sec=timestamp_sec,
             confidence=final_confidence,
             uncertainty=1.0 - final_confidence,
-            decision=(EventDecision.CONFIRMED if outcome is not ShotOutcome.UNKNOWN else EventDecision.CANDIDATE),
+            decision=(
+                EventDecision.CONFIRMED
+                if outcome is not ShotOutcome.UNKNOWN
+                else EventDecision.CANDIDATE
+            ),
             evidence=tuple(sorted(evidence)),
             provenance={
                 "version": "shot_event_tracker_v1",
                 "semantic_classes_are_supporting_evidence_only": True,
                 "missing_evidence_policy": "unknown_not_missed",
+                "rearm_policy": "direct_observed_clearance_plus_min_separation",
             },
             attributes={
                 "outcome": outcome.value,
                 "resolution_reason": reason,
-                "rim_bbox_px": (list(candidate.rim_bbox) if candidate.rim_bbox is not None else None),
+                "rim_bbox_px": (
+                    list(candidate.rim_bbox)
+                    if candidate.rim_bbox is not None
+                    else None
+                ),
                 "had_above_rim": candidate.had_above_rim,
                 "had_rim_band": candidate.had_rim_band,
                 "direct_ball_observations": candidate.direct_ball_observations,
                 "semantic_start": candidate.semantic_start,
             },
         )
+
         if outcome is ShotOutcome.MADE:
             self._cooldown_until_frame = int(frame_id) + self.cooldown_after_made_frames
         self._active = None
+        self._last_resolved_frame = int(frame_id)
         self._awaiting_rearm = True
+        self._rearm_clear_frames = 0
         return event
+
+    def _update_rearm(
+        self,
+        *,
+        frame_id: int,
+        ball_state: BallState | None,
+        relative: dict[str, bool],
+        semantic_start: bool,
+        trajectory_start: bool,
+    ) -> bool:
+        """Return True only on the frame that completes the re-arm gate."""
+
+        if not self._awaiting_rearm:
+            return False
+
+        direct_observed = bool(
+            ball_state is not None
+            and ball_state.status is BallStateStatus.OBSERVED
+            and ball_state.position() is not None
+        )
+        clear_of_previous_shot_zone = bool(
+            direct_observed
+            and not semantic_start
+            and not trajectory_start
+            and not relative.get("rim_band", False)
+        )
+
+        if clear_of_previous_shot_zone:
+            self._rearm_clear_frames += 1
+        elif semantic_start or trajectory_start or relative.get("rim_band", False):
+            # A renewed start/rim signal before enough direct clearance is exactly the
+            # pattern that caused duplicate UNKNOWN -> shot events in the real-video run.
+            self._rearm_clear_frames = 0
+        # Missing/predicted frames neither prove clearance nor erase already observed
+        # clearance. They are uncertainty, not evidence for either direction.
+
+        separated = (
+            int(frame_id) - self._last_resolved_frame
+            >= self.rearm_min_separation_frames
+        )
+        if separated and self._rearm_clear_frames >= self.rearm_clear_observed_frames:
+            self._awaiting_rearm = False
+            self._rearm_clear_frames = 0
+            self._rearm_count += 1
+            return True
+        return False
 
     def update(
         self,
@@ -264,14 +351,27 @@ class ShotEventTrackerV1:
         rim = self._nearest_rim(ball_position, rims)
         relative = self._relative_to_rim(ball_position, rim)
         semantic_start = bool(flags["jump_shot"] or flags["layup_dunk"])
-        trajectory_start = bool(ball_position is not None and rim is not None and relative["above"] and relative["near_x"])
+        trajectory_start = bool(
+            ball_position is not None
+            and rim is not None
+            and relative["above"]
+            and relative["near_x"]
+        )
         start_signal = bool(semantic_start or trajectory_start)
 
         if self._active is None:
             if self._awaiting_rearm:
-                if not start_signal:
-                    self._awaiting_rearm = False
+                self._update_rearm(
+                    frame_id=frame_id,
+                    ball_state=ball_state,
+                    relative=relative,
+                    semantic_start=semantic_start,
+                    trajectory_start=trajectory_start,
+                )
+                # Never re-arm and start on the same frame. One subsequent fresh start
+                # signal is required, which makes the new candidate temporally explicit.
                 return []
+
             if self._can_start(frame_id) and start_signal:
                 self._start(
                     frame_id=frame_id,
@@ -309,7 +409,11 @@ class ShotEventTrackerV1:
         if flags["shot_block"]:
             candidate.evidence.add("player_shot_block_semantic")
 
-        if flags["ball_in_basket"] and (candidate.had_above_rim or candidate.had_rim_band or candidate.semantic_start):
+        if flags["ball_in_basket"] and (
+            candidate.had_above_rim
+            or candidate.had_rim_band
+            or candidate.semantic_start
+        ):
             candidate.evidence.add("ball_in_basket_semantic")
             return [
                 self._resolve(
@@ -383,6 +487,18 @@ class ShotEventTrackerV1:
             ]
         return []
 
+    def reset(self, *, reason: str = "external_reset") -> None:
+        """Drop temporal shot state at a segment/camera boundary without inventing an event."""
+
+        self._active = None
+        self._last_start_frame = -10**9
+        self._last_resolved_frame = -10**9
+        self._cooldown_until_frame = -1
+        self._awaiting_rearm = False
+        self._rearm_clear_frames = 0
+        self._reset_count += 1
+        self._last_reset_reason = str(reason)
+
     def diagnostics(self) -> dict[str, Any]:
         candidate = self._active
         return {
@@ -391,11 +507,17 @@ class ShotEventTrackerV1:
             "active_start_frame": None if candidate is None else candidate.frame_start,
             "had_above_rim": False if candidate is None else candidate.had_above_rim,
             "had_rim_band": False if candidate is None else candidate.had_rim_band,
-            "direct_ball_observations": 0 if candidate is None else candidate.direct_ball_observations,
+            "direct_ball_observations": (
+                0 if candidate is None else candidate.direct_ball_observations
+            ),
             "last_start_frame": self._last_start_frame,
+            "last_resolved_frame": self._last_resolved_frame,
             "cooldown_until_frame": self._cooldown_until_frame,
             "awaiting_rearm": self._awaiting_rearm,
-            "reset_frames": self.reset_frames,
-            "minimum_between_starts_frames": self.minimum_between_starts_frames,
-            "cooldown_after_made_frames": self.cooldown_after_made_frames,
+            "rearm_clear_observed_frames": self._rearm_clear_frames,
+            "rearm_required_clear_observed_frames": self.rearm_clear_observed_frames,
+            "rearm_min_separation_frames": self.rearm_min_separation_frames,
+            "rearm_count": self._rearm_count,
+            "reset_count": self._reset_count,
+            "last_reset_reason": self._last_reset_reason,
         }
