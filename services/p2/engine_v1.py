@@ -110,7 +110,172 @@ class P2EngineV1:
             return gameplay
         return bool(gameplay and getattr(court_state, "analysis_eligible", False))
 
-    def _reset_temporal_state(self, *, reason: str, frame_id: int) -> None:
+    def _loose_snapshot(self) -> dict[str, Any] | None:
+        possession = self.possession_tracker.diagnostics()
+        raw_start = possession.get("loose_start_frame")
+        if raw_start is None:
+            return None
+        try:
+            start_frame = int(raw_start)
+        except (TypeError, ValueError):
+            return None
+        return {
+            "frame_start": start_frame,
+            "origin_track_id": possession.get("current_track_id"),
+            "origin_team_id": possession.get("current_team_id"),
+        }
+
+    def _loose_start_timestamp(
+        self,
+        *,
+        loose_snapshot: dict[str, Any],
+        frame_id: int,
+        timestamp: float | None,
+    ) -> float | None:
+        if timestamp is None:
+            return None
+        frames = max(0, int(frame_id) - int(loose_snapshot["frame_start"]))
+        return max(0.0, float(timestamp) - frames / self.fps)
+
+    def _loose_ended_event(
+        self,
+        *,
+        loose_snapshot: dict[str, Any] | None,
+        frame_id: int,
+        timestamp: float | None,
+        terminal_reason: str,
+    ) -> BasketballEvent | None:
+        if loose_snapshot is None:
+            return None
+        start_frame = int(loose_snapshot["frame_start"])
+        confidence = 1.0
+        return BasketballEvent(
+            event_id=f"loose-ball-ended:{start_frame}:{frame_id}:{terminal_reason}",
+            event_type=BasketballEventType.LOOSE_BALL_ENDED,
+            frame_start=start_frame,
+            frame_end=int(frame_id),
+            timestamp_start_sec=self._loose_start_timestamp(
+                loose_snapshot=loose_snapshot,
+                frame_id=frame_id,
+                timestamp=timestamp,
+            ),
+            timestamp_end_sec=timestamp,
+            confidence=confidence,
+            uncertainty=0.0,
+            decision=EventDecision.CONFIRMED,
+            actor_track_id=loose_snapshot.get("origin_track_id"),
+            team_id=loose_snapshot.get("origin_team_id"),
+            evidence=("loose_ball_interval", "terminal_state_transition"),
+            provenance={"version": "p2_engine_v1"},
+            attributes={
+                "terminal_reason": str(terminal_reason),
+                "recovered": False,
+                "loose_frames": max(1, int(frame_id) - start_frame + 1),
+            },
+        )
+
+    def _normalize_loose_recovery(
+        self,
+        *,
+        loose_snapshot: dict[str, Any] | None,
+        possession_events: list[BasketballEvent],
+        frame_id: int,
+        timestamp: float | None,
+    ) -> None:
+        if loose_snapshot is None:
+            return
+
+        existing_recovery = next(
+            (
+                event
+                for event in possession_events
+                if event.event_type is BasketballEventType.LOOSE_BALL_RECOVERED
+            ),
+            None,
+        )
+        if existing_recovery is not None:
+            same_handler = bool(
+                existing_recovery.actor_track_id is not None
+                and existing_recovery.actor_track_id == existing_recovery.secondary_track_id
+            )
+            existing_recovery.attributes.setdefault(
+                "terminal_reason",
+                "same_handler_recovered" if same_handler else "new_handler_recovered",
+            )
+            existing_recovery.attributes.setdefault("same_handler_recovery", same_handler)
+            existing_recovery.attributes.setdefault("recovered", True)
+            return
+
+        possession_terminal = next(
+            (
+                event
+                for event in possession_events
+                if event.event_type
+                in {
+                    BasketballEventType.POSSESSION_CHANGE,
+                    BasketballEventType.POSSESSION_ACQUIRED,
+                }
+                and event.actor_track_id is not None
+            ),
+            None,
+        )
+        if possession_terminal is None:
+            return
+
+        start_frame = int(loose_snapshot["frame_start"])
+        origin_track_id = loose_snapshot.get("origin_track_id")
+        if possession_terminal.event_type is BasketballEventType.POSSESSION_CHANGE:
+            origin_track_id = possession_terminal.secondary_track_id
+            terminal_reason = "new_handler_switch"
+        else:
+            terminal_reason = "possession_reacquired"
+
+        recovery = BasketballEvent(
+            event_id=(
+                f"loose-ball-recovered:{start_frame}:{frame_id}:"
+                f"{possession_terminal.actor_track_id}"
+            ),
+            event_type=BasketballEventType.LOOSE_BALL_RECOVERED,
+            frame_start=start_frame,
+            frame_end=int(frame_id),
+            timestamp_start_sec=self._loose_start_timestamp(
+                loose_snapshot=loose_snapshot,
+                frame_id=frame_id,
+                timestamp=timestamp,
+            ),
+            timestamp_end_sec=timestamp,
+            confidence=possession_terminal.confidence,
+            uncertainty=possession_terminal.uncertainty,
+            decision=EventDecision.CONFIRMED,
+            actor_track_id=possession_terminal.actor_track_id,
+            secondary_track_id=origin_track_id,
+            team_id=possession_terminal.team_id,
+            location_court_m=possession_terminal.location_court_m,
+            evidence=("loose_ball_interval", "subsequent_possession_lock"),
+            provenance={"version": "p2_engine_v1"},
+            attributes={
+                "terminal_reason": terminal_reason,
+                "same_handler_recovery": False,
+                "recovered": True,
+                "loose_frames": max(1, int(frame_id) - start_frame + 1),
+            },
+        )
+        insert_at = possession_events.index(possession_terminal) + 1
+        possession_events.insert(insert_at, recovery)
+
+    def _reset_temporal_state(
+        self,
+        *,
+        reason: str,
+        frame_id: int,
+        timestamp: float | None,
+    ) -> BasketballEvent | None:
+        loose_end = self._loose_ended_event(
+            loose_snapshot=self._loose_snapshot(),
+            frame_id=frame_id,
+            timestamp=timestamp,
+            terminal_reason=f"reset:{reason}",
+        )
         self.possession_tracker.reset(reason=reason)
         self.shot_tracker.reset(reason=reason)
         self._shot_actor_track_id = None
@@ -121,6 +286,7 @@ class P2EngineV1:
         self._reset_count += 1
         self._last_reset_reason = str(reason)
         self._last_reset_frame = int(frame_id)
+        return loose_end
 
     def _detect_discontinuity(
         self,
@@ -229,7 +395,7 @@ class P2EngineV1:
             diagnostics = frame_state.diagnostics
         diagnostics["p2"] = {
             "version": "p2_engine_v1",
-            "behavior_revision": "control_state_v2",
+            "behavior_revision": "control_state_v3_loose_lifecycle",
             "engine_eligible": bool(engine_eligible),
             "skipped_reason": skipped_reason,
             "event_count": len(emitted),
@@ -252,6 +418,14 @@ class P2EngineV1:
             "p1_state_is_not_mutated": True,
         }
 
+    @staticmethod
+    def _append_frame_events(frame_state: Any, emitted: list[BasketballEvent]) -> None:
+        if not emitted:
+            return
+        if not hasattr(frame_state, "p2_events") or frame_state.p2_events is None:
+            frame_state.p2_events = []
+        frame_state.p2_events.extend(emitted)
+
     def process(self, frame_state: Any) -> Any:
         frame_id = int(getattr(frame_state, "frame_id", 0))
         timestamp = self._timestamp(frame_state)
@@ -260,10 +434,17 @@ class P2EngineV1:
         court_state = getattr(frame_state, "court_state", None)
         team_evidence = self._team_evidence(frame_state)
         semantic_evidence = self._semantic_evidence(frame_state)
+        boundary_events: list[BasketballEvent] = []
 
         discontinuity = self._detect_discontinuity(frame_id=frame_id, timestamp=timestamp)
         if discontinuity is not None:
-            self._reset_temporal_state(reason=discontinuity, frame_id=frame_id)
+            loose_end = self._reset_temporal_state(
+                reason=discontinuity,
+                frame_id=frame_id,
+                timestamp=timestamp,
+            )
+            if loose_end is not None:
+                boundary_events.append(loose_end)
             self._ineligible_frames = 0
             self._reset_done_for_ineligible_gap = False
 
@@ -276,14 +457,18 @@ class P2EngineV1:
                 self._ineligible_frames >= self.reset_after_ineligible_frames
                 and not self._reset_done_for_ineligible_gap
             ):
-                self._reset_temporal_state(
+                loose_end = self._reset_temporal_state(
                     reason="analysis_ineligible_gap",
                     frame_id=frame_id,
+                    timestamp=timestamp,
                 )
+                if loose_end is not None:
+                    boundary_events.append(loose_end)
                 self._reset_done_for_ineligible_gap = True
+            self._append_frame_events(frame_state, boundary_events)
             self._write_diagnostics(
                 frame_state=frame_state,
-                emitted=[],
+                emitted=boundary_events,
                 semantic_evidence=semantic_evidence,
                 team_evidence=team_evidence,
                 engine_eligible=False,
@@ -293,6 +478,7 @@ class P2EngineV1:
 
         self._ineligible_frames = 0
         self._reset_done_for_ineligible_gap = False
+        loose_before_control = self._loose_snapshot()
 
         # Shot state is evaluated before possession for the current frame. If a shot is
         # active, airborne ball must not be reinterpreted as possession/pass/turnover.
@@ -324,6 +510,14 @@ class P2EngineV1:
             self._shot_team_id = pre_team_id
             self._shot_actor_source = pre_source
             self._shot_actor_location = self._player_location(frame_state, pre_track_id)
+            loose_end = self._loose_ended_event(
+                loose_snapshot=loose_before_control,
+                frame_id=frame_id,
+                timestamp=timestamp,
+                terminal_reason="shot_flight_started",
+            )
+            if loose_end is not None:
+                boundary_events.append(loose_end)
             self.possession_tracker.release_for_airborne_ball(
                 reason="shot",
                 frame_id=frame_id,
@@ -337,6 +531,12 @@ class P2EngineV1:
                 ball_state=ball_state,
                 team_evidence=team_evidence,
                 semantic_evidence=semantic_evidence,
+            )
+            self._normalize_loose_recovery(
+                loose_snapshot=loose_before_control,
+                possession_events=possession_events,
+                frame_id=frame_id,
+                timestamp=timestamp,
             )
         elif shot_was_active or shot_is_active:
             self.possession_tracker.control_state = BallControlState.SHOT_FLIGHT
@@ -361,14 +561,11 @@ class P2EngineV1:
             frame_state=frame_state,
         )
 
-        emitted = possession_events + attributed_shots
+        emitted = boundary_events + possession_events + attributed_shots
         if rebound is not None:
             emitted.append(rebound)
 
-        if not hasattr(frame_state, "p2_events") or frame_state.p2_events is None:
-            frame_state.p2_events = []
-        frame_state.p2_events.extend(emitted)
-
+        self._append_frame_events(frame_state, emitted)
         self._write_diagnostics(
             frame_state=frame_state,
             emitted=emitted,
