@@ -8,19 +8,20 @@ from evaluation.p2_real_video_probe import P2MetricsCollector
 
 class P2RealVideoProbeTest(unittest.TestCase):
     @staticmethod
-    def frame(*, track_id, confidence=0.8, events=None, eligible=True):
+    def frame(*, track_id, confidence=0.8, events=None, eligible=True, include_p2=True):
+        diagnostics = {}
+        if include_p2:
+            diagnostics["p2"] = {
+                "p1_state_is_not_mutated": True,
+                "possession": {
+                    "current_track_id": track_id,
+                    "current_confidence": confidence,
+                },
+                "events": list(events or []),
+            }
         return SimpleNamespace(
             valid_gameplay=eligible,
-            diagnostics={
-                "p2": {
-                    "p1_state_is_not_mutated": True,
-                    "possession": {
-                        "current_track_id": track_id,
-                        "current_confidence": confidence,
-                    },
-                    "events": list(events or []),
-                }
-            },
+            diagnostics=diagnostics,
         )
 
     def test_aggregates_possession_events_and_unknown_shots(self):
@@ -68,6 +69,7 @@ class P2RealVideoProbeTest(unittest.TestCase):
 
         summary = collector.summary()
         self.assertEqual(summary["frames_seen"], 3)
+        self.assertEqual(summary["p2_processed_frames"], 3)
         self.assertEqual(summary["metric_eligible_frames"], 3)
         self.assertEqual(summary["possession"]["locked_frames"], 2)
         self.assertEqual(summary["possession"]["coverage_rate"], 66.67)
@@ -90,6 +92,16 @@ class P2RealVideoProbeTest(unittest.TestCase):
         self.assertEqual(summary["metric_eligible_frames"], 1)
         self.assertEqual(summary["possession"]["coverage_rate"], 100.0)
         self.assertEqual(summary["possession"]["unknown_rate"], 0.0)
+
+    def test_skipped_frame_does_not_reduce_p1_immutability_rate(self):
+        collector = P2MetricsCollector()
+        collector.observe(self.frame(track_id=None, eligible=False, include_p2=False))
+        collector.observe(self.frame(track_id=4, confidence=0.75, eligible=True))
+
+        summary = collector.summary()
+        self.assertEqual(summary["frames_seen"], 2)
+        self.assertEqual(summary["p2_processed_frames"], 1)
+        self.assertEqual(summary["p1_state_not_mutated_rate"], 100.0)
 
 
 if __name__ == "__main__":
