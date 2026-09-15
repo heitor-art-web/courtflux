@@ -38,9 +38,35 @@ frame/timestamp discontinuity reset
 rebound candidate chaining
 real-video control/event metrics
 human-GT evaluator + annotation template
+frozen real-video regression fixture
+generic repo-wide Python correctness lint
 ```
 
 Camera-cut handling is intentionally expressed as a temporal reset at upstream analysis/segment boundaries and frame/timestamp discontinuities. P2 does not add a second pixel-level scene detector; it consumes the canonical P1 eligibility boundary and resets all temporal basketball state when that boundary persists.
+
+## Legacy `p2` integration closure
+
+The useful legacy P2 surface has been reconstructed or adapted onto the current P1/main contract rather than replaying the old branch wholesale.
+
+Integrated/adapted now:
+
+- `evaluation/fixtures/g4UROqJoYBM.mp4` is restored byte-for-byte as a frozen real-video regression fixture. `evaluation/p2_frozen_fixture_test.py` locks its Git blob identity so the fixture cannot silently drift.
+- `.github/workflows/repo-python-lint.yml` restores the generic repository-wide Python safety checks using Ruff plus `compileall`. It intentionally checks correctness-class Ruff rules (`E9`, `F63`, `F7`, `F82`) rather than forcing an unrelated repository-wide style rewrite during P2 reconstruction.
+
+Explicitly separate from P2 reconstruction:
+
+- Supabase migration lint/seed remains infrastructure work and is not part of the P2 correctness gate.
+
+Explicitly not carried from the legacy branch:
+
+- removal of the current analytics compatibility path;
+- removal of `detection_only`;
+- Streamlit/UI cleanup;
+- renderer/session/P0 experiment cleanup;
+- Smart Ball benchmark/removal work;
+- branding/assets cleanup.
+
+Those old-branch changes are not missing P2 functionality. They either collide with the current `main` contract or are independent cleanup/infra work and must not be used as a parity requirement for `p2-rebuilt`.
 
 ## P2 v1 event contract
 
@@ -174,9 +200,10 @@ Ablate supporting signals independently: ball trajectory, rim geometry, semantic
 
 1. Re-run the frozen Porto–Ovarense 0–60 s clip with Jersey OFF and the v2 probe.
 2. Verify control-state distribution, zero rapid shot retrigger regressions, reset behavior and pass-flight/loose-ball event plausibility.
-3. Human-label that frozen clip using `courtflux_p2_gt_v1` and run the evaluator.
-4. Repeat the same battery on the remaining frozen videos/fixtures (including v1–v5 once their local paths are available).
-5. Calibrate thresholds only against the frozen multi-video set; do not hand-tune to one game.
-6. Freeze the Jersey-OFF P2 baseline once the GT gates are acceptable.
-7. Run the deferred Jersey experiment/gate (`soft-ranking + localized ROI + Identity-v2-only temporal consensus`) without adding a second consensus layer.
-8. Promote P2 into the default runtime only after the basketball GT gates and end-of-P2 Jersey gate pass.
+3. Run the committed `g4UROqJoYBM.mp4` frozen regression fixture through the same Jersey-OFF P2 probe.
+4. Human-label the frozen clips using `courtflux_p2_gt_v1` and run the evaluator.
+5. Repeat the same battery on the remaining frozen videos/fixtures (including v1–v5 once their local paths are available).
+6. Calibrate thresholds only against the frozen multi-video set; do not hand-tune to one game.
+7. Freeze the Jersey-OFF P2 baseline once the GT gates are acceptable.
+8. Run the deferred Jersey experiment/gate (`soft-ranking + localized ROI + Identity-v2-only temporal consensus`) without adding a second consensus layer.
+9. Promote P2 into the default runtime only after the basketball GT gates and end-of-P2 Jersey gate pass.
