@@ -8,29 +8,61 @@ from evaluation.p2_real_video_probe import P2MetricsCollector
 
 class P2RealVideoProbeTest(unittest.TestCase):
     @staticmethod
-    def frame(*, track_id, confidence=0.8, events=None, eligible=True, include_p2=True):
+    def frame(
+        *,
+        track_id,
+        frame_id=0,
+        confidence=0.8,
+        events=None,
+        eligible=True,
+        engine_eligible=None,
+        include_p2=True,
+        control_state="unknown",
+        reset_count=0,
+        reset_reason=None,
+        fps=10.0,
+    ):
         diagnostics = {}
         if include_p2:
             diagnostics["p2"] = {
                 "p1_state_is_not_mutated": True,
+                "engine_eligible": eligible if engine_eligible is None else engine_eligible,
                 "possession": {
+                    "control_state": control_state,
                     "current_track_id": track_id,
+                    "current_team_id": None,
                     "current_confidence": confidence,
+                    "lost_frames": 0,
+                    "flight": {"active": False, "flight_supported": False},
+                },
+                "shot": {
+                    "active": False,
+                    "awaiting_rearm": False,
+                    "rearm_clear_observed_frames": 0,
+                },
+                "temporal_reset": {
+                    "count": reset_count,
+                    "last_reason": reset_reason,
                 },
                 "events": list(events or []),
             }
         return SimpleNamespace(
+            frame_id=frame_id,
+            timestamp=frame_id / fps,
+            fps=fps,
             valid_gameplay=eligible,
             diagnostics=diagnostics,
         )
 
     def test_aggregates_possession_events_and_unknown_shots(self):
         collector = P2MetricsCollector()
-        collector.observe(self.frame(track_id=7, confidence=0.9))
+        collector.observe(self.frame(track_id=7, frame_id=1, confidence=0.9, control_state="possessed"))
         collector.observe(
             self.frame(
                 track_id=12,
+                frame_id=2,
                 confidence=0.8,
+                control_state="possessed",
                 events=[
                     {
                         "event_type": "possession_change",
@@ -54,6 +86,8 @@ class P2RealVideoProbeTest(unittest.TestCase):
         collector.observe(
             self.frame(
                 track_id=None,
+                frame_id=3,
+                control_state="shot_flight",
                 events=[
                     {
                         "event_type": "shot_attempt",
@@ -61,6 +95,8 @@ class P2RealVideoProbeTest(unittest.TestCase):
                         "confidence": 0.77,
                         "actor_track_id": 12,
                         "team_id": None,
+                        "frame_start": 1,
+                        "frame_end": 3,
                         "attributes": {"outcome": "unknown"},
                     }
                 ],
@@ -68,9 +104,11 @@ class P2RealVideoProbeTest(unittest.TestCase):
         )
 
         summary = collector.summary()
+        self.assertEqual(summary["version"], "p2_real_video_probe_v2")
         self.assertEqual(summary["frames_seen"], 3)
         self.assertEqual(summary["p2_processed_frames"], 3)
         self.assertEqual(summary["metric_eligible_frames"], 3)
+        self.assertEqual(summary["engine_eligible_frames"], 3)
         self.assertEqual(summary["possession"]["locked_frames"], 2)
         self.assertEqual(summary["possession"]["coverage_rate"], 66.67)
         self.assertEqual(summary["possession"]["unknown_rate"], 33.33)
@@ -81,12 +119,23 @@ class P2RealVideoProbeTest(unittest.TestCase):
         self.assertEqual(summary["shots"]["unknown_outcome_rate"], 100.0)
         self.assertEqual(summary["events"]["actor_attribution_rate"], 100.0)
         self.assertEqual(summary["events"]["team_attribution_rate"], 66.67)
+        self.assertEqual(summary["control_state"]["counts"]["possessed"], 2)
+        self.assertEqual(summary["control_state"]["counts"]["shot_flight"], 1)
         self.assertEqual(summary["p1_state_not_mutated_rate"], 100.0)
+        self.assertEqual(len(collector.state_rows), 3)
 
     def test_ineligible_frames_do_not_reduce_possession_coverage(self):
         collector = P2MetricsCollector()
-        collector.observe(self.frame(track_id=None, eligible=False))
-        collector.observe(self.frame(track_id=4, confidence=0.75, eligible=True))
+        collector.observe(self.frame(track_id=None, frame_id=1, eligible=False))
+        collector.observe(
+            self.frame(
+                track_id=4,
+                frame_id=2,
+                confidence=0.75,
+                eligible=True,
+                control_state="possessed",
+            )
+        )
 
         summary = collector.summary()
         self.assertEqual(summary["metric_eligible_frames"], 1)
@@ -95,13 +144,78 @@ class P2RealVideoProbeTest(unittest.TestCase):
 
     def test_skipped_frame_does_not_reduce_p1_immutability_rate(self):
         collector = P2MetricsCollector()
-        collector.observe(self.frame(track_id=None, eligible=False, include_p2=False))
-        collector.observe(self.frame(track_id=4, confidence=0.75, eligible=True))
+        collector.observe(
+            self.frame(
+                track_id=None,
+                frame_id=1,
+                eligible=False,
+                include_p2=False,
+            )
+        )
+        collector.observe(
+            self.frame(
+                track_id=4,
+                frame_id=2,
+                confidence=0.75,
+                eligible=True,
+                control_state="possessed",
+            )
+        )
 
         summary = collector.summary()
         self.assertEqual(summary["frames_seen"], 2)
         self.assertEqual(summary["p2_processed_frames"], 1)
         self.assertEqual(summary["p1_state_not_mutated_rate"], 100.0)
+
+    def test_transition_reset_and_rapid_unknown_retrigger_metrics(self):
+        collector = P2MetricsCollector()
+        collector.observe(
+            self.frame(
+                track_id=None,
+                frame_id=20,
+                control_state="pass_flight",
+                reset_count=1,
+                reset_reason="analysis_ineligible_gap",
+                events=[
+                    {
+                        "event_type": "pass_candidate",
+                        "decision": "candidate",
+                        "confidence": 0.8,
+                        "actor_track_id": 1,
+                        "secondary_track_id": 2,
+                        "team_id": "Porto",
+                        "attributes": {"flight_supported": True},
+                    },
+                    {
+                        "event_type": "shot_attempt",
+                        "decision": "candidate",
+                        "confidence": 0.5,
+                        "actor_track_id": 1,
+                        "team_id": "Porto",
+                        "frame_start": 1,
+                        "frame_end": 10,
+                        "attributes": {"outcome": "unknown"},
+                    },
+                    {
+                        "event_type": "shot_attempt",
+                        "decision": "confirmed",
+                        "confidence": 0.8,
+                        "actor_track_id": 2,
+                        "team_id": "Porto",
+                        "frame_start": 12,
+                        "frame_end": 14,
+                        "attributes": {"outcome": "made"},
+                    },
+                ],
+            )
+        )
+
+        summary = collector.summary()
+        self.assertEqual(summary["transitions"]["passes_with_flight_evidence"], 1)
+        self.assertEqual(summary["resets"]["count"], 1)
+        self.assertEqual(summary["resets"]["reasons"]["analysis_ineligible_gap"], 1)
+        self.assertEqual(summary["shots"]["rapid_unknown_retrigger_count"], 1)
+        self.assertEqual(summary["shots"]["minimum_inter_shot_gap_frames"], 2)
 
 
 if __name__ == "__main__":
