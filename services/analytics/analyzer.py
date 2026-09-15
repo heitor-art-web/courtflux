@@ -32,6 +32,7 @@ from services.vision.p1_jersey_challengers import (
     RoboflowClassificationJerseyAnalyzer,
     SmolVLM2JerseyAnalyzer,
 )
+from services.vision.p1_trocr_jersey_analyzer import TrOCRSmallPrintedJerseyAnalyzer
 from services.analytics.engine import Engine
 from services.frame_loader import FrameLoader
 from services.gameplay_filter import GameplayFilter
@@ -87,6 +88,9 @@ def _build_detection_only_visual(profiling_path: str, device: str):
         "qwen": "ebqwen_vl",
         "smolvlm2": "smolvlm2_jersey",
         "smol": "smolvlm2_jersey",
+        "trocr": "trocr_small_printed",
+        "trocr_small": "trocr_small_printed",
+        "trocr-small-printed": "trocr_small_printed",
     }
     requested = aliases.get(requested, requested)
     if requested not in {
@@ -97,11 +101,12 @@ def _build_detection_only_visual(profiling_path: str, device: str):
         "roboflow_classification",
         "ebqwen_vl",
         "smolvlm2_jersey",
+        "trocr_small_printed",
     }:
         raise ValueError(
             "BASKETBALL_JERSEY_BACKEND must be one of: best_temporal, "
-            "roboflow_classification, ebqwen_vl, smolvlm2_jersey, auto, "
-            "uncertainty_vit_b, legacy_digit_heads"
+            "roboflow_classification, ebqwen_vl, smolvlm2_jersey, "
+            "trocr_small_printed, auto, uncertainty_vit_b, legacy_digit_heads"
         )
 
     if requested == "roboflow_classification":
@@ -133,6 +138,17 @@ def _build_detection_only_visual(profiling_path: str, device: str):
             flush=True,
         )
         return SmolVLM2JerseyAnalyzer(
+            profiling_path=profiling_path,
+            device=device,
+        )
+
+    if requested == "trocr_small_printed":
+        print(
+            "⚡ Jersey challenger: microsoft/trocr-small-printed / strict raw OCR / "
+            "roster validation.",
+            flush=True,
+        )
+        return TrOCRSmallPrintedJerseyAnalyzer(
             profiling_path=profiling_path,
             device=device,
         )
