@@ -18,6 +18,7 @@ LAB_DEFAULTS = {
     "tracker": "botsort.yaml",
     "detection_only": True,
     "enable_jersey": True,
+    "jersey_backend": "best_temporal",
     "jersey_interval_frames": 24,
     "persist_results": True,
     "live_preview": True,
