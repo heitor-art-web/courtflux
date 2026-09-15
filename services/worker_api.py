@@ -60,6 +60,7 @@ class JobRequest(BaseModel):
         "best_temporal",
         "roboflow_classification",
         "smolvlm2_jersey",
+        "trocr_small_printed",
         "ebqwen_vl",
         "uncertainty_vit_b",
         "legacy_digit_heads",
