@@ -24,14 +24,15 @@ uvicorn[standard]>=0.35.0,<1.0.0
 supabase>=2.0.0,<3.0.0
 
 # P1 Jersey challenger stack. Roboflow uses its hosted ResNet50 classifier;
-# the E-BARD Qwen and jersey-finetuned SmolVLM2 challengers run locally through
-# Transformers. Model weights are downloaded only when a challenger is selected.
+# the E-BARD Qwen, jersey-finetuned SmolVLM2, and TrOCR challengers run locally
+# through Transformers. Model weights are downloaded only when a challenger is selected.
 inference-sdk>=1.5.0,<2.0.0
 roboflow>=1.2.0,<2.0.0
 transformers>=5.16.1,<6.0.0
 huggingface-hub>=1.30.0,<2.0.0
 accelerate>=1.10.0,<2.0.0
 num2words>=0.5.14,<1.0.0
+sentencepiece>=0.2.0,<1.0.0
 Pillow>=10.0.0,<13.0.0
 
 PySide6
