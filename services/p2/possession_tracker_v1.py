@@ -608,6 +608,15 @@ class PossessionTrackerV1:
             self.current_confidence = max(self.current_confidence * 0.8, usable.score)
             if usable.team_confidence >= self.team_evidence_threshold:
                 self.current_team_id = usable.team_id
+            recovered = self._emit_loose_recovered(
+                frame_id=frame_id,
+                timestamp_sec=timestamp,
+                new_track_id=usable.track_id,
+                new_team_id=self.current_team_id,
+                confidence=self.current_confidence,
+            )
+            if recovered is not None:
+                events.append(recovered)
             self.control_state = BallControlState.POSSESSED
             self._clear_transition_memory()
             # Only a frame still supported as the same handler may advance the flight
