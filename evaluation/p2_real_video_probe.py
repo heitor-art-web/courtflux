@@ -21,7 +21,8 @@ class P2MetricsCollector:
         self.p2_processed_frames = 0
         self.metric_eligible_frames = 0
         self.engine_eligible_frames = 0
-        self.possession_locked_frames = 0
+        self.possessed_frames = 0
+        self.handler_memory_frames = 0
         self.possession_confidence_total = 0.0
         self.possession_confidence_samples = 0
         self.p1_not_mutated_frames = 0
@@ -34,6 +35,8 @@ class P2MetricsCollector:
         self.reset_reasons: Counter[str] = Counter()
         self.events_with_actor = 0
         self.events_with_team = 0
+        self.event_actor_counts: Counter[str] = Counter()
+        self.event_team_counts: Counter[str] = Counter()
         self.total_events = 0
         self.fps = 30.0
         self.max_reset_count = 0
@@ -75,7 +78,10 @@ class P2MetricsCollector:
             self.control_state_counts[control_state] += 1
 
         if metric_eligible and engine_eligible and current_track_id is not None:
-            self.possession_locked_frames += 1
+            self.handler_memory_frames += 1
+
+        if metric_eligible and engine_eligible and control_state == "possessed":
+            self.possessed_frames += 1
             try:
                 confidence = float(possession.get("current_confidence", 0.0) or 0.0)
             except (TypeError, ValueError):
@@ -137,8 +143,10 @@ class P2MetricsCollector:
 
             if row.get("actor_track_id") is not None:
                 self.events_with_actor += 1
+                self.event_actor_counts[event_type] += 1
             if row.get("team_id") not in {None, "", "unknown", "UNKNOWN"}:
                 self.events_with_team += 1
+                self.event_team_counts[event_type] += 1
 
             if event_type == "shot_attempt":
                 attributes = dict(row.get("attributes", {}) or {})
@@ -185,6 +193,22 @@ class P2MetricsCollector:
             )
             for event_type in sorted(self.event_confidence_samples)
         }
+        attribution_by_type = {
+            event_type: {
+                "total": int(count),
+                "actor_count": int(self.event_actor_counts.get(event_type, 0)),
+                "actor_rate": self._rate(
+                    int(self.event_actor_counts.get(event_type, 0)),
+                    int(count),
+                ),
+                "team_count": int(self.event_team_counts.get(event_type, 0)),
+                "team_rate": self._rate(
+                    int(self.event_team_counts.get(event_type, 0)),
+                    int(count),
+                ),
+            }
+            for event_type, count in sorted(self.event_counts.items())
+        }
         shot_attempts = int(self.event_counts.get("shot_attempt", 0))
         unknown_shots = int(self.shot_outcomes.get("unknown", 0))
 
@@ -209,7 +233,7 @@ class P2MetricsCollector:
         }
 
         return {
-            "version": "p2_real_video_probe_v2",
+            "version": "p2_real_video_probe_v3",
             "frames_seen": self.frames_seen,
             "p2_processed_frames": self.p2_processed_frames,
             "metric_eligible_frames": self.metric_eligible_frames,
@@ -219,16 +243,17 @@ class P2MetricsCollector:
                 "rates": control_rates,
             },
             "possession": {
-                "locked_frames": self.possession_locked_frames,
-                "coverage_rate": self._rate(
-                    self.possession_locked_frames,
-                    self.metric_eligible_frames,
+                "possessed_frames": self.possessed_frames,
+                "possessed_rate": self._rate(
+                    self.possessed_frames,
+                    self.engine_eligible_frames,
                 ),
-                "unknown_rate": self._rate(
-                    max(0, self.metric_eligible_frames - self.possession_locked_frames),
-                    self.metric_eligible_frames,
+                "handler_memory_frames": self.handler_memory_frames,
+                "handler_memory_rate": self._rate(
+                    self.handler_memory_frames,
+                    self.engine_eligible_frames,
                 ),
-                "avg_lock_confidence": (
+                "avg_possession_confidence": (
                     None
                     if avg_possession_confidence is None
                     else round(avg_possession_confidence, 4)
@@ -249,6 +274,7 @@ class P2MetricsCollector:
                     self.events_with_team,
                     self.total_events,
                 ),
+                "attribution_by_event_type": attribution_by_type,
             },
             "shots": {
                 "attempts": shot_attempts,
@@ -354,7 +380,6 @@ def run_probe(args: argparse.Namespace) -> None:
         device=args.device,
         tracker=args.tracker,
         match_config_path=args.match_config,
-        detection_only=True,
         enable_jersey=not args.no_jersey,
         jersey_interval_frames=args.jersey_interval,
         diagnostics_batch_size=args.diagnostics_batch_size,
