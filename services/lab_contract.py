@@ -20,7 +20,9 @@ LAB_DEFAULTS = {
     "enable_jersey": True,
     "jersey_backend": "best_temporal",
     "jersey_interval_frames": 24,
-    "persist_results": True,
+    # Worker-backed analyses persist platform state/summary/metrics through Supabase.
+    # Legacy local SQLite persistence is intentionally disabled for the Lab contract.
+    "persist_results": False,
     "live_preview": True,
     "preview_interval_frames": 15,
     "single_forward": True,
