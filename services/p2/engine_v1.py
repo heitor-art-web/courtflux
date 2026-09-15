@@ -3,6 +3,7 @@ from __future__ import annotations
 from typing import Any
 
 from core.basketball_event import (
+    BallControlState,
     BasketballEvent,
     BasketballEventType,
     EventDecision,
@@ -338,8 +339,7 @@ class P2EngineV1:
                 semantic_evidence=semantic_evidence,
             )
         elif shot_was_active or shot_is_active:
-            # Keep the explicit shot-flight control phase while the candidate is alive.
-            self.possession_tracker.control_state = self.possession_tracker.control_state.SHOT_FLIGHT
+            self.possession_tracker.control_state = BallControlState.SHOT_FLIGHT
 
         attributed_shots: list[BasketballEvent] = []
         for event in shot_events:
