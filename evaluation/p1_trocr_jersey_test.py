@@ -38,6 +38,27 @@ def test_sequence_confidence_ignores_special_tokens() -> None:
     assert confidence > 0.99
 
 
+def test_direct_sentencepiece_decoder_uses_xlm_roberta_offset() -> None:
+    class FakeSentencePiece:
+        pieces = ["<unk>", "<s>", "</s>", "▁2", "3"]
+
+        def get_piece_size(self) -> int:
+            return len(self.pieces)
+
+        def IdToPiece(self, index: int) -> str:
+            return self.pieces[index]
+
+    analyzer = object.__new__(TrOCRSmallPrintedJerseyAnalyzer)
+    analyzer.sp_model = FakeSentencePiece()
+    analyzer.fairseq_offset = 1
+    analyzer.mask_token_id = analyzer.sp_model.get_piece_size() + analyzer.fairseq_offset
+
+    # decoder-start/eos are fairseq id 2; real SPM ids are shifted by +1.
+    assert analyzer._decode_sequence(torch.tensor([2, 4, 5, 2])) == "23"
+    assert analyzer._decode_sequence(torch.tensor([2, 3, 2])) == "UNKNOWN"
+    assert analyzer._decode_sequence(torch.tensor([2, analyzer.mask_token_id, 2])) == "UNKNOWN"
+
+
 def test_backend_aliases() -> None:
     assert resolve_jersey_backend("trocr") == "trocr_small_printed"
     assert resolve_jersey_backend("trocr-small-printed") == "trocr_small_printed"
@@ -47,6 +68,7 @@ def test_backend_aliases() -> None:
 def main() -> int:
     test_strict_ocr_parser()
     test_sequence_confidence_ignores_special_tokens()
+    test_direct_sentencepiece_decoder_uses_xlm_roberta_offset()
     test_backend_aliases()
     print("p1_trocr_jersey_test: PASS")
     return 0
