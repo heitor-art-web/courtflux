@@ -33,6 +33,7 @@ class P2MetricsCollector:
         self.event_confidence_samples: Counter[str] = Counter()
         self.control_state_counts: Counter[str] = Counter()
         self.reset_reasons: Counter[str] = Counter()
+        self.loose_terminal_reasons: Counter[str] = Counter()
         self.events_with_actor = 0
         self.events_with_team = 0
         self.event_actor_counts: Counter[str] = Counter()
@@ -148,9 +149,13 @@ class P2MetricsCollector:
                 self.events_with_team += 1
                 self.event_team_counts[event_type] += 1
 
+            attributes = dict(row.get("attributes", {}) or {})
             if event_type == "shot_attempt":
-                attributes = dict(row.get("attributes", {}) or {})
                 self.shot_outcomes[str(attributes.get("outcome") or "unknown")] += 1
+            elif event_type == "loose_ball_ended":
+                self.loose_terminal_reasons[
+                    str(attributes.get("terminal_reason") or "unknown")
+                ] += 1
 
             self.event_rows.append(row)
 
@@ -231,6 +236,11 @@ class P2MetricsCollector:
             state: self._rate(count, self.engine_eligible_frames)
             for state, count in sorted(self.control_state_counts.items())
         }
+        loose_started = int(self.event_counts.get("loose_ball_started", 0))
+        loose_recovered = int(self.event_counts.get("loose_ball_recovered", 0))
+        loose_ended = int(self.event_counts.get("loose_ball_ended", 0))
+        loose_closed = loose_recovered + loose_ended
+        loose_open = max(0, loose_started - loose_closed)
 
         return {
             "version": "p2_real_video_probe_v3",
@@ -288,8 +298,13 @@ class P2MetricsCollector:
                 "turnovers": int(self.event_counts.get("turnover_candidate", 0)),
                 "turnovers_with_flight_evidence": turnovers_with_flight,
                 "direct_turnovers": direct_turnovers,
-                "loose_ball_started": int(self.event_counts.get("loose_ball_started", 0)),
-                "loose_ball_recovered": int(self.event_counts.get("loose_ball_recovered", 0)),
+                "loose_ball_started": loose_started,
+                "loose_ball_recovered": loose_recovered,
+                "loose_ball_ended": loose_ended,
+                "loose_ball_closed": loose_closed,
+                "loose_ball_open_intervals": loose_open,
+                "loose_ball_closure_rate": self._rate(loose_closed, loose_started),
+                "loose_ball_terminal_reasons": dict(sorted(self.loose_terminal_reasons.items())),
             },
             "passes": int(self.event_counts.get("pass_candidate", 0)),
             "turnovers": int(self.event_counts.get("turnover_candidate", 0)),
