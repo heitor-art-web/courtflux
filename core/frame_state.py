@@ -10,8 +10,10 @@ class FrameState:
 
     Legacy dictionaries remain available for detector/team/Jersey compatibility, while
     canonical P1 state objects are attached in parallel as ``player_states``,
-    ``ball_state`` and ``court_state``. Referees remain detector evidence and never become
-    PlayerState/team/Jersey identity by default.
+    ``ball_state`` and ``court_state``. P2 basketball-understanding primitives are kept
+    separately in ``p2_events`` so event decisions never become P1 perception truth.
+    Referees remain detector evidence and never become PlayerState/team/Jersey identity
+    by default.
     """
 
     # Primary Video Metadata
@@ -33,6 +35,9 @@ class FrameState:
     player_states: List[Any] = field(default_factory=list)
     ball_state: Optional[Any] = None
     court_state: Optional[Any] = None
+
+    # Canonical P2 Basketball Understanding
+    p2_events: List[Any] = field(default_factory=list)
 
     # Detected Entities (legacy/evidence dictionaries)
     players: List[Dict[str, Any]] = field(default_factory=list)
