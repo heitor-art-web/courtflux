@@ -1,0 +1,20 @@
+name: P2 Rebuilt CI
+
+on:
+  push:
+    branches: [p2-rebuilt]
+  pull_request:
+    branches: [main]
+
+jobs:
+  p2-unit-tests:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Install minimal test dependency
+        run: python -m pip install numpy
+      - name: Run P2 tests
+        run: python -m unittest evaluation.p2_event_engine_test
