@@ -1,7 +1,6 @@
 from .frame_state import FrameState
 from .player_state import PlayerState
 from .ball_state import BallState, BallStateStatus
-from .game_context import GameContext
 from .basketball_event import (
     BallControlState,
     BasketballEvent,
@@ -15,7 +14,6 @@ __all__ = [
     "PlayerState",
     "BallState",
     "BallStateStatus",
-    "GameContext",
     "BallControlState",
     "BasketballEvent",
     "BasketballEventType",
