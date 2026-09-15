@@ -4,6 +4,7 @@ import statistics
 
 import numpy as np
 
+from services.p2.engine_v1 import P2EngineV1
 from services.vision.ball_state_v1 import BallStateEstimatorV1
 from services.vision.court_state_v1 import CourtStateEstimatorV1
 from services.vision.diagnostic_preview import DiagnosticPreview
@@ -19,10 +20,8 @@ class Pipeline:
         database,
         renderer,
         profiler,
-        engine,
         backboard_roi,
         db_conn=None,
-        detection_only: bool = False,
         persist_results: bool = True,
     ):
         self.gameplay_filter = gameplay_filter
@@ -31,18 +30,19 @@ class Pipeline:
         self.database = database
         self.renderer = renderer
         self.profiler = profiler
-        self.engine = engine
         self.backboard_roi = backboard_roi
         self.db_conn = db_conn
-        self.detection_only = bool(detection_only)
         self.persist_results = bool(persist_results)
         self.player_state_estimator = PlayerStateEstimatorV1()
         self.ball_state_estimator = BallStateEstimatorV1()
         self.court_state_estimator = CourtStateEstimatorV1()
+        p2_env = os.getenv("BASKETBALL_P2_ENABLED", "0").strip().lower()
+        self.p2_enabled = p2_env not in {"", "0", "false", "no", "off"}
+        self.p2_engine = None
         self._camera_tracker_initialized = False
         self._renderer_closed = False
 
-        if self.renderer is None and self.detection_only:
+        if self.renderer is None:
             preview_path = os.getenv("BASKETBALL_PREVIEW_PATH", "").strip()
             if preview_path:
                 match_config = os.getenv("BASKETBALL_PREVIEW_MATCH_CONFIG", "").strip()
@@ -320,12 +320,11 @@ class Pipeline:
             frame_state.court_state = court_state
             frame_state.diagnostics["court_state"] = court_state.as_dict()
         self._apply_court_identity_gate(frame_state)
-        if self.detection_only:
-            frame_state.valid_gameplay = bool(court_state.analysis_eligible)
-            gameplay_diag = frame_state.diagnostics.setdefault("gameplay_filter", {})
-            gameplay_diag["pre_court_state_result"] = bool(is_gameplay)
-            gameplay_diag["post_court_state_result"] = bool(frame_state.valid_gameplay)
-            gameplay_diag["post_court_state_reason"] = court_state.eligibility_reason
+        frame_state.valid_gameplay = bool(court_state.analysis_eligible)
+        gameplay_diag = frame_state.diagnostics.setdefault("gameplay_filter", {})
+        gameplay_diag["pre_court_state_result"] = bool(is_gameplay)
+        gameplay_diag["post_court_state_result"] = bool(frame_state.valid_gameplay)
+        gameplay_diag["post_court_state_reason"] = court_state.eligibility_reason
         self.profiler.stop("CourtState")
 
         frame_state = self._enrich_player_tracking_diagnostics(frame_state)
@@ -333,47 +332,53 @@ class Pipeline:
         frame_state = self._attach_canonical_p1_states(frame_state)
         self.profiler.stop("P1 Canonical State")
 
+        if self.p2_enabled:
+            if self.p2_engine is None:
+                self.p2_engine = P2EngineV1(fps=float(getattr(frame_state, "fps", 30.0) or 30.0))
+            self.profiler.start("P2 Events")
+            frame_state = self.p2_engine.process(frame_state)
+            self.profiler.stop("P2 Events")
+        else:
+            frame_state.diagnostics.setdefault(
+                "p2",
+                {
+                    "enabled": False,
+                    "reason": "set BASKETBALL_P2_ENABLED=1 to enable experimental P2 runtime",
+                },
+            )
+
         detector_diag = frame_state.diagnostics.get("detector", {}) or {}
         for name, milliseconds in (detector_diag.get("timing_ms", {}) or {}).items():
             self.profiler.add(f"Detector/{name}", float(milliseconds) / 1000.0)
 
-        if not self.detection_only and self.engine is not None:
-            self.profiler.start("Analytics")
-            frame_state = self.engine.process(frame_state)
-            self.profiler.stop("Analytics")
-        else:
-            detector_ball_source = str(detector_diag.get("ball_source") or "").strip()
-            if not detector_ball_source:
-                detector_ball_source = "detector" if getattr(frame_state, "ball", None) is not None else "missing"
-            camera_diag = frame_state.diagnostics.get("camera", {}) or {}
-            analysis_players = [
-                player
-                for player in list(getattr(frame_state, "players", []) or [])
-                if not isinstance(player, dict) or player.get("active_on_court") is not False
-            ]
-            frame_state.diagnostics.setdefault("analytics", {}).update(
-                {
-                    "ball_source": detector_ball_source,
-                    "players_final": len(analysis_players),
-                    "players_detected_total": len(getattr(frame_state, "players", []) or []),
-                    "player_states": len(getattr(frame_state, "player_states", []) or []),
-                    "ball_state": frame_state.ball_state.status.value if frame_state.ball_state else "missing",
-                    "homography_active": bool(camera_diag.get("valid", False)),
-                    "homography_diagnostic_only": self.camera_tracker is not None,
-                    "detection_only": True,
-                    "court_state_mode": court_state.mode,
-                    "court_state_analysis_eligible": court_state.analysis_eligible,
-                }
-            )
+        detector_ball_source = str(detector_diag.get("ball_source") or "").strip()
+        if not detector_ball_source:
+            detector_ball_source = "detector" if getattr(frame_state, "ball", None) is not None else "missing"
+        camera_diag = frame_state.diagnostics.get("camera", {}) or {}
+        analysis_players = [
+            player
+            for player in list(getattr(frame_state, "players", []) or [])
+            if not isinstance(player, dict) or player.get("active_on_court") is not False
+        ]
+        frame_state.diagnostics.setdefault("analytics", {}).update(
+            {
+                "ball_source": detector_ball_source,
+                "players_final": len(analysis_players),
+                "players_detected_total": len(getattr(frame_state, "players", []) or []),
+                "player_states": len(getattr(frame_state, "player_states", []) or []),
+                "ball_state": frame_state.ball_state.status.value if frame_state.ball_state else "missing",
+                "homography_active": bool(camera_diag.get("valid", False)),
+                "homography_diagnostic_only": self.camera_tracker is not None,
+                "detection_only": True,
+                "court_state_mode": court_state.mode,
+                "court_state_analysis_eligible": court_state.analysis_eligible,
+            }
+        )
 
         if self.persist_results and self.database is not None:
             self.profiler.start("Database Buffer")
             self.database.save(frame_state)
             self.profiler.stop("Database Buffer")
-            if not self.detection_only:
-                self.profiler.start("Event Snapshots")
-                self.database.save_events(frame_state)
-                self.profiler.stop("Event Snapshots")
 
         if self.renderer is not None:
             stage_name = "Diagnostic Preview" if isinstance(self.renderer, DiagnosticPreview) else "Renderer"
