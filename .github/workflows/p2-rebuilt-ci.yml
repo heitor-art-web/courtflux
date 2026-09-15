@@ -23,6 +23,14 @@ jobs:
           evaluation/p2_event_engine_test.py
           evaluation/p2_real_video_probe.py
           evaluation/p2_real_video_probe_test.py
+      - name: Verify direct probe project-root bootstrap
+        working-directory: evaluation
+        run: >-
+          python -c "import pathlib,runpy,sys;
+          g=runpy.run_path('p2_real_video_probe.py');
+          root=pathlib.Path.cwd().parent.resolve();
+          assert g.get('PROJECT_ROOT') == root;
+          assert str(root) in sys.path"
       - name: Run P2 tests
         run: >-
           python -m unittest
