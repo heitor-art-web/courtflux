@@ -46,6 +46,14 @@ export async function POST(request: Request) {
     requestBody.persist_results = false;
     delete requestBody.db_batch_size;
 
+    // An explicit backend configured for the web Lab wins over stale worker health
+    // defaults or an older browser state. This makes
+    // `export BASKETBALL_JERSEY_BACKEND=... && npm run dev` deterministic.
+    const webBackend = process.env.BASKETBALL_JERSEY_BACKEND?.trim();
+    if (webBackend) {
+      requestBody.jersey_backend = webBackend;
+    }
+
     return proxyWorkerResponse(
       await workerFetch("/jobs", {
         method: "POST",
