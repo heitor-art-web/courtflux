@@ -61,6 +61,7 @@ class JobRequest(BaseModel):
         "roboflow_classification",
         "smolvlm2_jersey",
         "trocr_small_printed",
+        "parseq_soccernet",
         "ebqwen_vl",
         "uncertainty_vit_b",
         "legacy_digit_heads",
