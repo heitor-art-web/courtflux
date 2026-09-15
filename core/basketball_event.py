@@ -19,6 +19,7 @@ class BasketballEventType(str, Enum):
     TURNOVER_CANDIDATE = "turnover_candidate"
     LOOSE_BALL_STARTED = "loose_ball_started"
     LOOSE_BALL_RECOVERED = "loose_ball_recovered"
+    LOOSE_BALL_ENDED = "loose_ball_ended"
     SHOT_ATTEMPT = "shot_attempt"
     REBOUND_CANDIDATE = "rebound_candidate"
 
