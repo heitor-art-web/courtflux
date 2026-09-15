@@ -1,4 +1,6 @@
-opencv-python==4.10.0.84
+# Use the headless OpenCV build consistently: EasyOCR and Roboflow require it,
+# and CourtFlux does not rely on cv2.imshow/HighGUI in the current pipeline.
+opencv-python-headless==4.10.0.84
 imageio-ffmpeg>=0.5.1,<1.0.0
 ultralytics>=8.3.0
 easyocr==1.7.1
