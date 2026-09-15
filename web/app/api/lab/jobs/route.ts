@@ -41,6 +41,11 @@ export async function POST(request: Request) {
       requestBody.match_config = await canonicalMatchConfig();
     }
 
+    // Worker-backed CourtFlux persistence is Supabase-only. Never allow the Lab UI
+    // or an older cached client to reactivate the legacy local tracking.db path.
+    requestBody.persist_results = false;
+    delete requestBody.db_batch_size;
+
     return proxyWorkerResponse(
       await workerFetch("/jobs", {
         method: "POST",
