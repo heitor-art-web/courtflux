@@ -174,6 +174,64 @@ class ShotEventTrackerV1Test(unittest.TestCase):
         )
         self.assertEqual(events, [])
 
+    def test_unknown_timeout_requires_start_signal_to_clear_before_retrigger(self) -> None:
+        tracker = ShotEventTrackerV1(
+            fps=10.0,
+            reset_time_sec=0.2,
+            minimum_between_starts_sec=0.1,
+        )
+        above = lambda frame_id: ball(frame_id, 100, 70)
+
+        tracker.update(
+            frame_id=0,
+            timestamp_sec=0.0,
+            ball_state=above(0),
+            court_state=court(0),
+        )
+        tracker.update(
+            frame_id=1,
+            timestamp_sec=0.1,
+            ball_state=above(1),
+            court_state=court(1),
+        )
+        expired = tracker.update(
+            frame_id=2,
+            timestamp_sec=0.2,
+            ball_state=above(2),
+            court_state=court(2),
+        )
+        self.assertEqual(len(expired), 1)
+        self.assertEqual(expired[0].attributes["outcome"], ShotOutcome.UNKNOWN.value)
+        self.assertTrue(tracker.diagnostics()["awaiting_rearm"])
+
+        self.assertEqual(
+            tracker.update(
+                frame_id=3,
+                timestamp_sec=0.3,
+                ball_state=above(3),
+                court_state=court(3),
+            ),
+            [],
+        )
+        self.assertFalse(tracker.diagnostics()["active"])
+        self.assertTrue(tracker.diagnostics()["awaiting_rearm"])
+
+        tracker.update(
+            frame_id=4,
+            timestamp_sec=0.4,
+            ball_state=ball(4, 300, 300),
+            court_state=court(4),
+        )
+        self.assertFalse(tracker.diagnostics()["awaiting_rearm"])
+
+        tracker.update(
+            frame_id=5,
+            timestamp_sec=0.5,
+            ball_state=above(5),
+            court_state=court(5),
+        )
+        self.assertTrue(tracker.diagnostics()["active"])
+
 
 if __name__ == "__main__":
     unittest.main()
