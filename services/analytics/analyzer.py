@@ -25,6 +25,7 @@ from services.vision.identity_v2_detector import PerformanceDetector
 from services.vision.visual_analyzer import VisualAnalyzer
 from services.vision.team_only_analyzer import TeamOnlyAnalyzer
 from services.vision.p1_jersey_analyzer import PerformanceJerseyAnalyzer
+from services.vision.p1_temporal_jersey_analyzer import PerformanceTemporalJerseyAnalyzer
 from services.vision.p1_uncertainty_jersey_analyzer import PerformanceUncertaintyJerseyAnalyzer
 from services.analytics.engine import Engine
 from services.frame_loader import FrameLoader
@@ -54,13 +55,21 @@ def _project_path(value: str, fallback: Path) -> Path:
 def _build_detection_only_visual(profiling_path: str, device: str):
     """Select the P1 Jersey backend without silently changing its contract.
 
-    `auto` promotes the uncertainty-aware ViT-B path selected by PR #37 when its
-    local checkpoint is present. The legacy EfficientNet digit-head model remains a
-    compatibility fallback only. An explicit uncertainty_vit_b request fails loudly
-    when the checkpoint is missing instead of hiding the configuration error.
+    P1 visual revalidation defaults to the real temporal checkpoint benchmarked in
+    PR #37: ``weights/best_temporal.pt``. A missing default checkpoint is an error,
+    not permission to silently run the known-collapsed legacy digit heads.
+
+    ``auto`` remains available for deliberate local experimentation. Its preference
+    order is best_temporal -> uncertainty_vit_b -> legacy_digit_heads.
     """
-    requested = str(os.getenv("BASKETBALL_JERSEY_BACKEND", "auto") or "auto").strip().lower()
+    requested = str(
+        os.getenv("BASKETBALL_JERSEY_BACKEND", "best_temporal")
+        or "best_temporal"
+    ).strip().lower()
     aliases = {
+        "temporal": "best_temporal",
+        "bilstm": "best_temporal",
+        "best_temporal.pt": "best_temporal",
         "vit": "uncertainty_vit_b",
         "vit_b": "uncertainty_vit_b",
         "uncertainty": "uncertainty_vit_b",
@@ -68,12 +77,21 @@ def _build_detection_only_visual(profiling_path: str, device: str):
         "efficientnet": "legacy_digit_heads",
     }
     requested = aliases.get(requested, requested)
-    if requested not in {"auto", "uncertainty_vit_b", "legacy_digit_heads"}:
+    if requested not in {
+        "auto",
+        "best_temporal",
+        "uncertainty_vit_b",
+        "legacy_digit_heads",
+    }:
         raise ValueError(
             "BASKETBALL_JERSEY_BACKEND must be one of: "
-            "auto, uncertainty_vit_b, legacy_digit_heads"
+            "best_temporal, auto, uncertainty_vit_b, legacy_digit_heads"
         )
 
+    temporal_path = _project_path(
+        os.getenv("BASKETBALL_JERSEY_TEMPORAL_CHECKPOINT", ""),
+        PROJECT_ROOT / "weights" / "best_temporal.pt",
+    )
     uncertainty_path = _project_path(
         os.getenv("BASKETBALL_JERSEY_VIT_CHECKPOINT", ""),
         PROJECT_ROOT / "weights" / "jersey_uncertainty_vit_b.pt",
@@ -83,10 +101,30 @@ def _build_detection_only_visual(profiling_path: str, device: str):
         PROJECT_ROOT / "weights" / "jersey_number_recon.pt",
     )
 
-    use_uncertainty = requested == "uncertainty_vit_b" or (
+    if requested == "best_temporal" or (
+        requested == "auto" and temporal_path.exists()
+    ):
+        if not temporal_path.exists():
+            raise FileNotFoundError(
+                "Requested best_temporal Jersey backend, but checkpoint is missing: "
+                f"{temporal_path}. Put the PR #37 temporal checkpoint at "
+                "weights/best_temporal.pt or set BASKETBALL_JERSEY_TEMPORAL_CHECKPOINT."
+            )
+        print(
+            "⚡ Jersey recognition: best_temporal.pt / EfficientNet-B0 + BiLSTM / "
+            "ordered uniform 8-frame sequence (PR #37 temporal benchmark contract).",
+            flush=True,
+        )
+        return PerformanceTemporalJerseyAnalyzer(
+            profiling_path=profiling_path,
+            device=device,
+            model_path=str(temporal_path),
+            sequence_length=8,
+        )
+
+    if requested == "uncertainty_vit_b" or (
         requested == "auto" and uncertainty_path.exists()
-    )
-    if use_uncertainty:
+    ):
         if not uncertainty_path.exists():
             raise FileNotFoundError(
                 "Requested uncertainty_vit_b Jersey backend, but checkpoint is missing: "
@@ -94,7 +132,7 @@ def _build_detection_only_visual(profiling_path: str, device: str):
             )
         print(
             "⚡ Jersey recognition: uncertainty-aware ViT-B / torso_direct / "
-            "best_uncertainty (PR #37 selected direction).",
+            "best_uncertainty.",
             flush=True,
         )
         return PerformanceUncertaintyJerseyAnalyzer(
@@ -106,10 +144,9 @@ def _build_detection_only_visual(profiling_path: str, device: str):
 
     if requested == "auto":
         print(
-            "⚠️ Jersey uncertainty ViT-B checkpoint is unavailable; falling back to "
-            "legacy EfficientNet digit heads. This fallback showed severe digit collapse "
-            "on run 20260914_165736_812383. Expected checkpoint: "
-            f"{uncertainty_path}",
+            "⚠️ Neither best_temporal.pt nor the optional ViT-B checkpoint is available; "
+            "auto is falling back to the legacy EfficientNet digit heads. This fallback "
+            "showed severe digit collapse on run 20260914_165736_812383.",
             flush=True,
         )
     if not legacy_path.exists():
@@ -123,7 +160,9 @@ def _build_detection_only_visual(profiling_path: str, device: str):
     visual.checkpoint_diagnostics = dict(visual.checkpoint_diagnostics)
     visual.checkpoint_diagnostics.setdefault("backend", "legacy_digit_heads")
     visual.checkpoint_diagnostics["fallback_reason"] = (
-        "uncertainty_vit_b_checkpoint_missing" if requested == "auto" else "explicit_legacy_backend"
+        "temporal_and_uncertainty_checkpoints_missing"
+        if requested == "auto"
+        else "explicit_legacy_backend"
     )
     visual.checkpoint_diagnostics["known_runtime_limitation"] = (
         "digit_distribution_collapse_observed_on_20260914_165736_812383"
