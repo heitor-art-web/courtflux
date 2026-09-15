@@ -19,7 +19,7 @@ from fastapi.responses import FileResponse
 from pydantic import BaseModel, Field
 
 from services.ingestion.supabase_video import SupabaseVideoStore
-from services.lab_contract import LAB_DEFAULTS, lab_defaults
+from services.lab_contract import LAB_DEFAULTS, lab_defaults, resolve_jersey_backend
 from services.supabase_service import SupabaseRunStore
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
@@ -56,6 +56,15 @@ class JobRequest(BaseModel):
     match_config: dict[str, Any]
     detection_only: bool = LAB_DEFAULTS["detection_only"]
     enable_jersey: bool = LAB_DEFAULTS["enable_jersey"]
+    jersey_backend: Literal[
+        "best_temporal",
+        "roboflow_classification",
+        "smolvlm2_jersey",
+        "ebqwen_vl",
+        "uncertainty_vit_b",
+        "legacy_digit_heads",
+        "auto",
+    ] = LAB_DEFAULTS["jersey_backend"]
     jersey_interval_frames: int = Field(default=LAB_DEFAULTS["jersey_interval_frames"], ge=1, le=300)
     persist_results: bool = LAB_DEFAULTS["persist_results"]
     live_preview: bool = LAB_DEFAULTS["live_preview"]
@@ -356,11 +365,8 @@ def run_job(job_id: str, request_data: dict[str, Any]) -> None:
             str(match_config_path),
             "--jersey-interval",
             str(request_data["jersey_interval_frames"]),
-            "--db-batch-size",
-            str(request_data["db_batch_size"]),
             "--diagnostics-batch-size",
             str(request_data["diagnostics_batch_size"]),
-            "--reset-db",
         ]
         if request_data.get("detection_only", True):
             command.append("--detection-only")
@@ -369,7 +375,17 @@ def run_job(job_id: str, request_data: dict[str, Any]) -> None:
         if not request_data.get("persist_results", True):
             command.append("--no-persist")
 
+        selected_backend = resolve_jersey_backend(
+            str(request_data.get("jersey_backend") or LAB_DEFAULTS["jersey_backend"])
+        )
+        hf_home = Path(
+            os.getenv("HF_HOME", str(PROJECT_ROOT / "weights" / "huggingface"))
+        ).expanduser().resolve()
+        hf_home.mkdir(parents=True, exist_ok=True)
+
         child_env = os.environ.copy()
+        child_env["BASKETBALL_JERSEY_BACKEND"] = selected_backend
+        child_env["HF_HOME"] = str(hf_home)
         child_env["BASKETBALL_INFERENCE_CONF"] = str(request_data["inference_conf"])
         child_env["BASKETBALL_BALL_CONF"] = str(request_data["ball_conf"])
         child_env["BASKETBALL_SINGLE_FORWARD"] = "1" if request_data.get("single_forward", True) else "0"
@@ -382,6 +398,10 @@ def run_job(job_id: str, request_data: dict[str, Any]) -> None:
             child_env["BASKETBALL_PREVIEW_INTERVAL"] = str(request_data["preview_interval_frames"])
 
         with log_path.open("w", encoding="utf-8") as log_file:
+            log_file.write(
+                f"[WORKER] jersey_backend={selected_backend} hf_home={hf_home} persistence=supabase_only\n"
+            )
+            log_file.flush()
             process = subprocess.Popen(
                 command,
                 cwd=str(PROJECT_ROOT),
@@ -578,6 +598,12 @@ def create_job(payload: JobRequest) -> JobCreated:
         raise HTTPException(status_code=409, detail="Job already exists") from exc
 
     request_data = payload.model_dump()
+    # Worker-backed runs are Supabase-only. Never allow an older caller to revive
+    # the legacy local tracking.db path.
+    request_data["persist_results"] = False
+    request_data["jersey_backend"] = resolve_jersey_backend(
+        str(request_data.get("jersey_backend") or LAB_DEFAULTS["jersey_backend"])
+    )
     (directory / "request.json").write_text(json.dumps(request_data, indent=2, ensure_ascii=False), encoding="utf-8")
     (directory / "match_config.json").write_text(
         json.dumps(payload.match_config, indent=2, ensure_ascii=False) + "\n",
