@@ -20,21 +20,18 @@ test("Homepage → primary beta CTA opens signup with keyboard focus preserved",
   await expect(page.getByLabel("Password")).toBeVisible();
 });
 
-test("language selector is present on homepage", async ({ page }) => {
+test("language selector switches public route to Portuguese and Spanish", async ({ page }) => {
   await page.goto("/");
-  
-  // Wait for main content to be visible first
-  await expect(page.locator("#main-content")).toBeVisible();
-  
-  // Wait longer for the portal to render the language selector
-  await page.waitForTimeout(1000);
-  
-  // Find any select element with aria-label attribute
-  // The language switcher can have aria-label of "Language", "Língua", or "Idioma"
-  const languageSelect = page.locator("select[aria-label]").first();
-  
-  // Verify it exists and is visible
-  await expect(languageSelect).toBeVisible({ timeout: 5000 });
+  const language = page.locator("select[aria-label]");
+  await expect(language).toBeVisible();
+
+  await language.selectOption("pt-PT");
+  await expect(page).toHaveURL(/\/pt-pt(?:$|[?#])/);
+  await expect(page.locator("html")).toHaveAttribute("lang", "pt-PT");
+
+  await page.locator("select[aria-label]").selectOption("es-ES");
+  await expect(page).toHaveURL(/\/es-es(?:$|[?#])/);
+  await expect(page.locator("html")).toHaveAttribute("lang", "es-ES");
 });
 
 test("skip link moves focus to main content", async ({ page }) => {
