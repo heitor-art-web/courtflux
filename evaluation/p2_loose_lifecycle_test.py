@@ -5,8 +5,8 @@ from types import SimpleNamespace
 
 from core.basketball_event import BasketballEventType
 from evaluation.p2_event_engine_test import ball, frame_state, player
-from evaluation.p2_real_video_probe import P2MetricsCollector
 from services.p2.engine_v1 import P2EngineV1
+from services.p2.metrics import P2MetricsCollector
 from services.p2.possession_tracker_v1 import PossessionTrackerV1
 
 
@@ -101,7 +101,7 @@ class P2LooseLifecycleTest(unittest.TestCase):
         )
         self.assertEqual(
             ended.attributes["terminal_reason"],
-            "reset:analysis_ineligible_gap",
+            "reset:gameplay_absent_gap",
         )
         self.assertFalse(ended.attributes["recovered"])
         self.assertEqual(
@@ -137,6 +137,7 @@ class P2LooseLifecycleTest(unittest.TestCase):
             timestamp=1.0,
             fps=10.0,
             valid_gameplay=True,
+            court_state=None,
             diagnostics={
                 "p2": {
                     "engine_eligible": True,
