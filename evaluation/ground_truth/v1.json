@@ -1,6 +1,6 @@
 {
   "version": "courtflux_p2_gt_v1",
-  "annotation_status": "pass_a_coarse_timecodes",
+  "annotation_status": "pass_a_human_windows",
   "evaluation_ready": false,
   "video": {
     "source": "https://www.youtube.com/watch?v=hILf-ySowIo",
@@ -13,6 +13,9 @@
     "identity": "stable_track_id_when_visible; null_when_not_reliably_identifiable",
     "team": "neutral_clip; leave team_id null",
     "unknown_preferred_over_guess": true,
+    "event_timing": "human_event_window; exact release frame is optional",
+    "event_window_scoring": "prediction inside window has zero temporal error; tolerance applies only beyond window edges",
+    "control_scoring": "human interval continuity is primary; frame accuracy remains diagnostic",
     "control_states": [
       "unknown",
       "possessed",
@@ -20,8 +23,7 @@
       "pass_flight",
       "shot_flight"
     ],
-    "coarse_boundary_precision_sec": 1.0,
-    "event_precision_required_before_evaluation_sec": 0.2
+    "coarse_boundary_precision_sec": 1.0
   },
   "baseline": {
     "run_id": "20260916_142505_666541",
@@ -56,7 +58,7 @@
       "frame_end": 175,
       "source_time_start_sec": 17.0,
       "source_time_end_sec": 17.0,
-      "human_note": "shot flight observado por volta de 17s; duracao ainda por refinar",
+      "human_note": "shot flight observado por volta de 17s",
       "boundary_precision": "coarse_1s"
     },
     {
@@ -102,7 +104,7 @@
       "source_time_start_sec": 30.0,
       "source_time_end_sec": 30.0,
       "human_note": "primeiro passe; humano pediu assumir passe aos 30s",
-      "boundary_precision": "assumed_1s_point"
+      "boundary_precision": "human_second_marker"
     },
     {
       "state": "pass_flight",
@@ -111,7 +113,7 @@
       "source_time_start_sec": 31.0,
       "source_time_end_sec": 31.0,
       "human_note": "segundo passe; humano pediu assumir passe aos 31s",
-      "boundary_precision": "assumed_1s_point"
+      "boundary_precision": "human_second_marker"
     },
     {
       "state": "possessed",
@@ -150,16 +152,61 @@
       "human_note": "non game"
     }
   ],
-  "events": [],
-  "draft_event_windows": [
+  "events": [
     {
-      "kind": "shot_attempt",
+      "event_type": "shot_attempt",
+      "frame_start": 0,
+      "frame_end": 50,
+      "outcome": "made",
+      "team_id": null,
+      "actor_track_id": null,
+      "secondary_track_id": null,
       "source_time_start_sec": 10.0,
       "source_time_end_sec": 12.0,
+      "human_actor_note": "jogador de verde e branco"
+    },
+    {
+      "event_type": "shot_attempt",
+      "frame_start": 400,
+      "frame_end": 425,
       "outcome": "made",
-      "outcome_observed_at_sec": 13.0,
-      "human_actor_note": "jogador de verde e branco",
-      "needs": "precise release/attempt time before evaluator"
+      "team_id": null,
+      "actor_track_id": null,
+      "secondary_track_id": null,
+      "source_time_start_sec": 26.0,
+      "source_time_end_sec": 27.0
+    },
+    {
+      "event_type": "shot_attempt",
+      "frame_start": 550,
+      "frame_end": 575,
+      "outcome": "made",
+      "team_id": null,
+      "actor_track_id": null,
+      "secondary_track_id": null,
+      "source_time_start_sec": 32.0,
+      "source_time_end_sec": 33.0,
+      "human_note": "dunk"
+    },
+    {
+      "event_type": "shot_attempt",
+      "frame_start": 675,
+      "frame_end": 725,
+      "outcome": "made",
+      "team_id": null,
+      "actor_track_id": null,
+      "secondary_track_id": null,
+      "source_time_start_sec": 37.0,
+      "source_time_end_sec": 39.0
+    }
+  ],
+  "unresolved_event_windows": [
+    {
+      "kind": "shot_flight_observation",
+      "source_time_start_sec": 17.0,
+      "source_time_end_sec": 18.0,
+      "outcome": "made",
+      "reason": "human marked shot flight/made but did not independently identify attempt window"
     },
     {
       "kind": "free_throw_sequence",
@@ -167,29 +214,7 @@
       "source_time_end_sec": 21.0,
       "attempt_count": null,
       "outcome": "made",
-      "human_note": "human confirmed every free throw observed in this sequence was made",
-      "needs": "attempt count and per-attempt release time"
-    },
-    {
-      "kind": "shot_flight_observation",
-      "source_time_start_sec": 26.0,
-      "source_time_end_sec": 27.0,
-      "outcome": "made",
-      "needs": "precise attempt time"
-    },
-    {
-      "kind": "dunk",
-      "source_time_start_sec": 32.0,
-      "source_time_end_sec": 33.0,
-      "outcome": "made",
-      "needs": "precise attempt time"
-    },
-    {
-      "kind": "shot_flight_observation",
-      "source_time_start_sec": 37.0,
-      "source_time_end_sec": 39.0,
-      "outcome": "made",
-      "needs": "precise attempt time"
+      "reason": "all observed free throws were made; attempt count still unknown"
     }
   ],
   "human_source_notes": [
@@ -212,12 +237,12 @@
     "assumir primeiro passe aos 30s e segundo passe aos 31s"
   ],
   "notes": [
-    "Pass A coarse annotation recorded from the human review only.",
+    "Pass A uses human windows rather than millisecond/frame-exact event labels.",
     "Human reviewer confirmed all identified shot attempts in the annotated windows were made.",
-    "Two pass-flight observations previously grouped in 30-31s are now separated at 30.0s and 31.0s by explicit human instruction.",
-    "Do not run the GT evaluator while evaluation_ready is false.",
-    "Whole-second timecodes are sufficient for coarse control-state structure but not for 8-frame temporal event scoring.",
-    "Pass B actor-to-track alignment must happen only after event timing refinement.",
+    "Two pass-flight observations previously grouped in 30-31s are separated at human markers 30s and 31s.",
+    "Do not require exact release frames from the reviewer.",
+    "evaluation_ready remains false only because some event counts/windows are unresolved, not because timing lacks sub-second precision.",
+    "Pass B actor-to-track alignment happens after human basketball truth is frozen.",
     "For this neutral V1 clip, team_id remains null."
   ]
 }
