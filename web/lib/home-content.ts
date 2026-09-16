@@ -105,6 +105,8 @@ export type PricingPlan = {
   name: string;
   price: string;
   suffix: string;
+  annualPrice: string;
+  annualSuffix: string;
   description: string;
   allowance: string;
   allowanceCopy: string;
@@ -122,7 +124,19 @@ export type PricingSection = {
   title: string;
   highlight: string;
   copy: string;
+  trial: {
+    kicker: string;
+    title: string;
+    copy: string;
+    meta: string;
+    cta: HomeCta;
+  };
   plans: PricingPlan[];
+  organisation: {
+    title: string;
+    copy: string;
+    cta: HomeCta;
+  };
   note: string;
 };
 
