@@ -2,13 +2,17 @@ name: P2 Rebuilt CI
 
 on:
   push:
-    branches: [p2-rebuilt]
+    branches: [main, p2-rebuilt]
   pull_request:
     branches: [main]
+
+permissions:
+  contents: read
 
 jobs:
   p2-unit-tests:
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@v5
       - uses: actions/setup-python@v6
