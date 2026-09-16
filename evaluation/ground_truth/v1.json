@@ -158,29 +158,30 @@
       "source_time_start_sec": 19.0,
       "source_time_end_sec": 21.0,
       "attempt_count": null,
-      "outcomes": null,
-      "needs": "attempt count, per-attempt release time and outcome"
+      "outcome": "made",
+      "human_note": "human confirmed every free throw observed in this sequence was made",
+      "needs": "attempt count and per-attempt release time"
     },
     {
       "kind": "shot_flight_observation",
       "source_time_start_sec": 26.0,
       "source_time_end_sec": 27.0,
-      "outcome": "unknown",
-      "needs": "precise attempt time and outcome"
+      "outcome": "made",
+      "needs": "precise attempt time"
     },
     {
       "kind": "dunk",
       "source_time_start_sec": 32.0,
       "source_time_end_sec": 33.0,
-      "outcome": "unknown",
-      "needs": "precise attempt time and made/missed outcome"
+      "outcome": "made",
+      "needs": "precise attempt time"
     },
     {
       "kind": "shot_flight_observation",
       "source_time_start_sec": 37.0,
       "source_time_end_sec": 39.0,
-      "outcome": "unknown",
-      "needs": "precise attempt time and outcome"
+      "outcome": "made",
+      "needs": "precise attempt time"
     }
   ],
   "human_source_notes": [
@@ -198,10 +199,12 @@
     "32-33 dunk",
     "34 non game",
     "35-36 possessed jogador vermelho",
-    "37-39 shot_flight"
+    "37-39 shot_flight",
+    "todos os lancamentos identificados, incluindo free throws e dunk, foram made"
   ],
   "notes": [
     "Pass A coarse annotation recorded from the human review only.",
+    "Human reviewer confirmed all identified shot attempts in the annotated windows were made.",
     "Do not run the GT evaluator while evaluation_ready is false.",
     "Whole-second timecodes are sufficient for coarse control-state structure but not for 8-frame temporal event scoring.",
     "Pass B actor-to-track alignment must happen only after event timing refinement.",
