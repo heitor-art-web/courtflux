@@ -36,12 +36,17 @@ jobs:
           version: "0.12.15"
           enable-cache: true
 
+      - name: Seed existing lock preferences
+        shell: bash
+        run: |
+          [[ -f requirements.lock ]] && cp requirements.lock /tmp/requirements.lock
+          [[ -f requirements-tracking.lock ]] && cp requirements-tracking.lock /tmp/requirements-tracking.lock
+
       - name: Resolve base Python/ML lock
         run: >-
           uv pip compile requirements.txt
           --python-version 3.11
           --universal
-          --generate-hashes
           --output-file /tmp/requirements.lock
 
       - name: Resolve tracking Python/ML lock
@@ -49,7 +54,6 @@ jobs:
           uv pip compile requirements-tracking.txt
           --python-version 3.11
           --universal
-          --generate-hashes
           --output-file /tmp/requirements-tracking.lock
 
       - name: Upload resolved lock candidates
