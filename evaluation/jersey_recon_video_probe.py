@@ -87,56 +87,72 @@ def _build_probe_summary(run_dir: Path, backend: str) -> Path:
     crop_numeric = 0
     attempts_with_agreement = 0
     attempts_with_conflict = 0
+    attempts_without_regions = 0
     support_counts: Counter[int] = Counter()
     selected_image_counts: Counter[int] = Counter()
-    roi_outputs: Counter[str] = Counter()
-    roi_numeric: Counter[str] = Counter()
-    roi_consensus_votes: Counter[str] = Counter()
+    roi_stats: dict[str, Counter[str]] = {}
+    region_scores: list[float] = []
 
     for row in debug_rows:
-        per_crop = [item for item in list(row.get("per_crop_predictions") or []) if isinstance(item, dict)]
-        if per_crop:
+        per_crop = [
+            item
+            for item in list(row.get("per_crop_predictions") or [])
+            if isinstance(item, dict)
+        ]
+        consensus = dict(row.get("multiframe_consensus") or {})
+        selected_images = consensus.get("selected_images")
+        if isinstance(selected_images, int):
+            selected_image_counts[int(selected_images)] += 1
+        if not per_crop:
+            attempts_without_regions += 1
+        else:
             crop_total += len(per_crop)
-            crop_numeric += sum(1 for item in per_crop if item.get("raw_canonical") is not None)
-            numbers = [str(item.get("raw_canonical")) for item in per_crop if item.get("raw_canonical") is not None]
+            crop_numeric += sum(
+                1 for item in per_crop if item.get("raw_canonical") is not None
+            )
+            numbers = [
+                str(item.get("raw_canonical"))
+                for item in per_crop
+                if item.get("raw_canonical") is not None
+            ]
             unique = set(numbers)
             if numbers and len(unique) == 1:
                 attempts_with_agreement += 1
             elif len(unique) > 1:
                 attempts_with_conflict += 1
 
-            selected_images = (row.get("multiframe_consensus") or {}).get("selected_images")
-            if isinstance(selected_images, int):
-                selected_image_counts[selected_images] += 1
-
-            consensus_number = row.get("raw_canonical")
+            final_number = row.get("raw_canonical")
             for item in per_crop:
-                roi_name = str(item.get("roi_name") or "full_torso")
-                roi_outputs[roi_name] += 1
+                roi_name = str(item.get("roi_name") or "unknown")
+                stats = roi_stats.setdefault(roi_name, Counter())
+                stats["outputs"] += 1
                 if item.get("raw_canonical") is not None:
-                    roi_numeric[roi_name] += 1
-                if consensus_number is not None and str(item.get("raw_canonical")) == str(consensus_number):
-                    roi_consensus_votes[roi_name] += 1
+                    stats["numeric_outputs"] += 1
+                if final_number is not None and str(item.get("raw_canonical")) == str(final_number):
+                    stats["votes_for_final_consensus"] += 1
+                score = item.get("roi_prior")
+                if isinstance(score, (int, float)):
+                    region_scores.append(float(score))
 
         support = row.get("candidate_count")
         if isinstance(support, int):
             support_counts[int(support)] += 1
 
-    roi_stats: dict[str, dict[str, Any]] = {}
-    for roi_name in sorted(roi_outputs):
-        outputs = roi_outputs[roi_name]
-        numeric = roi_numeric[roi_name]
-        consensus_votes = roi_consensus_votes[roi_name]
-        roi_stats[roi_name] = {
+    roi_payload: dict[str, Any] = {}
+    for name, stats in sorted(roi_stats.items()):
+        outputs = int(stats.get("outputs", 0))
+        numeric = int(stats.get("numeric_outputs", 0))
+        votes = int(stats.get("votes_for_final_consensus", 0))
+        roi_payload[name] = {
             "outputs": outputs,
             "numeric_outputs": numeric,
             "numeric_yield": _rate(numeric, outputs),
-            "votes_for_final_consensus": consensus_votes,
-            "consensus_vote_rate": _rate(consensus_votes, numeric),
+            "votes_for_final_consensus": votes,
+            "consensus_vote_rate": _rate(votes, numeric),
         }
 
     payload = {
-        "version": "courtflux_jersey_recon_probe_v3_localized_roi",
+        "version": "courtflux_jersey_recon_probe_v4_number_region",
         "run_id": summary.get("run_id") or run_dir.name,
         "video_source": summary.get("video_source"),
         "start_time_sec": summary.get("start_time_sec"),
@@ -154,31 +170,44 @@ def _build_probe_summary(run_dir: Path, backend: str) -> Path:
         "consensus_numeric_outputs": len(consensus_numeric_rows),
         "consensus_numeric_yield": _rate(len(consensus_numeric_rows), debug_attempts),
         "tracks_with_consensus_numeric_output": len(consensus_numeric_tracks),
-        "per_roi_numeric_outputs": crop_numeric,
-        "per_roi_outputs": crop_total,
-        "per_roi_numeric_yield": _rate(crop_numeric, crop_total),
-        "attempts_all_roi_outputs_agree": attempts_with_agreement,
-        "attempts_roi_outputs_conflict": attempts_with_conflict,
-        "support_histogram": {str(key): value for key, value in sorted(support_counts.items())},
+        "region_proposal_outputs": crop_total,
+        "region_numeric_outputs": crop_numeric,
+        "region_numeric_yield": _rate(crop_numeric, crop_total),
+        "attempts_without_region_proposals": attempts_without_regions,
+        "region_proposals_per_attempt": round(crop_total / max(debug_attempts, 1), 4),
+        "mean_region_score": (
+            round(sum(region_scores) / len(region_scores), 6) if region_scores else 0.0
+        ),
+        "attempts_all_region_outputs_agree": attempts_with_agreement,
+        "attempts_region_outputs_conflict": attempts_with_conflict,
+        "support_histogram": {
+            str(key): value for key, value in sorted(support_counts.items())
+        },
         "selected_images_histogram": {
             str(key): value for key, value in sorted(selected_image_counts.items())
         },
-        "roi_stats": roi_stats,
+        "region_rank_stats": roi_payload,
         "high_quality_abstentions": debug.get("high_quality_abstentions"),
-        "rejection_reasons": debug.get("rejection_reasons") or identity.get("rejection_reasons") or {},
-        "candidate_counts": debug.get("candidate_counts") or identity.get("roster_candidate_counts") or {},
+        "rejection_reasons": debug.get("rejection_reasons")
+        or identity.get("rejection_reasons")
+        or {},
+        "candidate_counts": debug.get("candidate_counts")
+        or identity.get("roster_candidate_counts")
+        or {},
         "raw_prediction_counts": identity.get("raw_prediction_counts") or {},
         "checkpoint": identity.get("checkpoint") or {},
         "contact_sheets": debug.get("contact_sheets"),
         "analysis_note": (
-            "v3 evaluates localized torso ROI proposals across multiple frames. "
-            "ROI numeric yield still measures recognizer eagerness, not accuracy. "
-            "roi_stats.consensus_vote_rate helps compare which geometric proposal most often "
-            "supports the final cross-frame consensus before Identity-v2."
+            "v4 is a roster-blind, OCR-blind visual number-region proposal experiment. "
+            "Region proposal yield measures how selectively the visual scorer gates PARSeq; "
+            "consensus yield still measures stability, not ground-truth accuracy."
         ),
     }
     output = run_dir / "jersey_recon_probe_summary.json"
-    output.write_text(json.dumps(payload, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
+    output.write_text(
+        json.dumps(payload, indent=2, ensure_ascii=False) + "\n",
+        encoding="utf-8",
+    )
     return output
 
 
@@ -216,6 +245,34 @@ def run_probe(args: argparse.Namespace) -> None:
     os.environ["BASKETBALL_JERSEY_RESEARCH_MIN_SHARE"] = str(args.min_share)
 
     from services.analytics import analyzer
+    from services.vision.research_jersey_region_analyzer import (
+        ResearchNumberRegionPARSeqAnalyzer,
+    )
+
+    def _research_build_jersey_visual(
+        *, profiling_path: str, device: str, project_root: Path
+    ) -> Any:
+        del project_root
+        if args.jersey_backend != "parseq_soccernet":
+            raise ValueError(
+                "The v4 number-region probe currently supports only parseq_soccernet"
+            )
+        visual = ResearchNumberRegionPARSeqAnalyzer(
+            profiling_path=profiling_path,
+            device=device,
+        )
+        checkpoint = dict(getattr(visual, "checkpoint_diagnostics", {}) or {})
+        checkpoint["requested_backend"] = args.jersey_backend
+        checkpoint["backend_contract_verified"] = True
+        visual.checkpoint_diagnostics = checkpoint
+        print(
+            "[JERSEY_RESEARCH_REGION] method=contrast_components_geometry_v1 "
+            f"min_score={visual.REGION_MIN_SCORE:.2f} max_regions={visual.REGION_MAX_PROPOSALS}",
+            flush=True,
+        )
+        return visual
+
+    analyzer.build_jersey_visual = _research_build_jersey_visual
 
     before = _run_dirs()
     analyzer.main(
@@ -249,8 +306,8 @@ def run_probe(args: argparse.Namespace) -> None:
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         description=(
-            "Run CourtFlux Jersey recognition with experimental localized ROI + multi-frame "
-            "evidence and package diagnostics for offline analysis."
+            "Run CourtFlux Jersey recognition with research number-region proposals "
+            "and package diagnostics for offline analysis."
         )
     )
     parser.add_argument("--video", required=True, help="YouTube URL or local video path")
