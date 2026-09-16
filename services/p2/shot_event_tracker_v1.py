@@ -510,10 +510,10 @@ class ShotEventTrackerV1:
                 current_ball=ball_position,
                 current_rim=rim,
             )
-            if candidate.had_above_rim and bracketed_crossing:
+            if candidate.had_above_rim and bracketed_crossing and not rim_gap_before_current:
                 reason = (
                     "observed_downward_rim_crossing"
-                    if ball_gap_frames == 0 and not rim_gap_before_current
+                    if ball_gap_frames == 0
                     else "observed_bracketed_rim_crossing_after_gap"
                 )
                 candidate.evidence.add(reason)
