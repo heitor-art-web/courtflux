@@ -130,10 +130,55 @@ def _optional_candidate_signals(rows: list[dict[str, Any]]) -> dict[str, Any] | 
     }
 
 
+def _frame_input_signals(rows: list[dict[str, Any]]) -> dict[str, Any]:
+    ball_sources = Counter(str(row.get("ball_source") or "unknown") for row in rows)
+    gameplay_statuses: Counter[str] = Counter()
+    selected_confidences: list[float] = []
+    selected_ball_frames = 0
+    player_zero_frames = 0
+
+    for row in rows:
+        if bool(row.get("selected_ball", False)):
+            selected_ball_frames += 1
+        raw_confidence = row.get("selected_ball_conf")
+        try:
+            if raw_confidence is not None:
+                selected_confidences.append(float(raw_confidence))
+        except (TypeError, ValueError):
+            pass
+        try:
+            if int(row.get("players_final", 0) or 0) <= 0:
+                player_zero_frames += 1
+        except (TypeError, ValueError):
+            player_zero_frames += 1
+        court_state = row.get("court_state")
+        if isinstance(court_state, dict):
+            gameplay_statuses[str(court_state.get("gameplay_status") or "unknown")] += 1
+        else:
+            gameplay_statuses["unknown"] += 1
+
+    return {
+        "artifact_frames": len(rows),
+        "selected_ball_frames": selected_ball_frames,
+        "selected_ball_rate": _rate(selected_ball_frames, len(rows)),
+        "ball_source_counts": dict(sorted(ball_sources.items())),
+        "predicted_hold_frames": int(ball_sources.get("predicted_hold", 0)),
+        "missing_ball_frames": int(ball_sources.get("missing", 0)),
+        "player_zero_frames": player_zero_frames,
+        "gameplay_status_counts": dict(sorted(gameplay_statuses.items())),
+        "mean_selected_ball_confidence": (
+            None
+            if not selected_confidences
+            else round(sum(selected_confidences) / len(selected_confidences), 4)
+        ),
+    }
+
+
 def analyze_interval(
     truth_index: int,
     truth: dict[str, Any],
     rows: list[dict[str, Any]],
+    frame_rows: list[dict[str, Any]] | None = None,
 ) -> dict[str, Any]:
     frame_start = int(truth["frame_start"])
     frame_end = int(truth["frame_end"])
@@ -219,16 +264,29 @@ def analyze_interval(
     candidate_signals = _optional_candidate_signals(interval_rows)
     if candidate_signals is not None:
         result["candidate_signals"] = candidate_signals
+
+    if frame_rows is not None:
+        matching_frame_rows = [
+            row
+            for row in frame_rows
+            if frame_start <= int(row.get("frame_id", -1)) <= frame_end
+        ]
+        matching_frame_rows.sort(key=lambda row: int(row.get("frame_id", 0)))
+        result["p1_input_signals"] = _frame_input_signals(matching_frame_rows)
     return result
 
 
-def diagnose(states: list[dict[str, Any]], ground_truth: dict[str, Any]) -> dict[str, Any]:
+def diagnose(
+    states: list[dict[str, Any]],
+    ground_truth: dict[str, Any],
+    frame_rows: list[dict[str, Any]] | None = None,
+) -> dict[str, Any]:
     intervals_raw = ground_truth.get("control_intervals", [])
     if not isinstance(intervals_raw, list):
         raise ValueError("ground truth control_intervals must be a list")
 
     intervals = [
-        analyze_interval(index, interval, states)
+        analyze_interval(index, interval, states, frame_rows)
         for index, interval in enumerate(intervals_raw)
         if isinstance(interval, dict)
     ]
@@ -274,6 +332,7 @@ def diagnose(states: list[dict[str, Any]], ground_truth: dict[str, Any]) -> dict
         "version": VERSION,
         "contract": "diagnostic_only_no_runtime_decision_changes",
         "state_rows": len(states),
+        "frame_rows": None if frame_rows is None else len(frame_rows),
         "ground_truth_intervals": len(intervals),
         "aggregate_by_truth_state": dict(sorted(aggregate.items())),
         "intervals": intervals,
@@ -286,6 +345,10 @@ def parse_args() -> argparse.Namespace:
     )
     parser.add_argument("--states", required=True, help="P2 state JSONL artifact.")
     parser.add_argument("--ground-truth", required=True, help="Human P2 GT JSON.")
+    parser.add_argument(
+        "--frames",
+        help="Optional analyzer frames JSONL for P1 ball/player/gameplay input correlation.",
+    )
     parser.add_argument("--output", help="Optional JSON output path.")
     return parser.parse_args()
 
@@ -294,7 +357,12 @@ def main() -> None:
     args = parse_args()
     states_path = Path(args.states)
     ground_truth_path = Path(args.ground_truth)
-    report = diagnose(_load_jsonl(states_path), _load_json(ground_truth_path))
+    frame_rows = None if not args.frames else _load_jsonl(Path(args.frames))
+    report = diagnose(
+        _load_jsonl(states_path),
+        _load_json(ground_truth_path),
+        frame_rows,
+    )
     rendered = json.dumps(report, indent=2, ensure_ascii=False)
     if args.output:
         output_path = Path(args.output)
