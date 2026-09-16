@@ -409,7 +409,7 @@ class P2EngineV1Test(unittest.TestCase):
         self.assertIsNone(engine.possession_tracker.current_track_id)
         self.assertEqual(
             second_gap.diagnostics["p2"]["temporal_reset"]["last_reason"],
-            "analysis_ineligible_gap",
+            "gameplay_absent_gap",
         )
         self.assertFalse(second_gap.diagnostics["p2"]["engine_eligible"])
 
