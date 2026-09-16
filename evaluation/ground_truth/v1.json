@@ -1,7 +1,7 @@
 {
   "version": "courtflux_p2_gt_v1",
-  "annotation_status": "pass_a_human_windows",
-  "evaluation_ready": false,
+  "annotation_status": "pass_a_frozen_human_windows",
+  "evaluation_ready": true,
   "video": {
     "source": "https://www.youtube.com/watch?v=hILf-ySowIo",
     "start_time_sec": 10.0,
@@ -58,7 +58,7 @@
       "frame_end": 175,
       "source_time_start_sec": 17.0,
       "source_time_end_sec": 17.0,
-      "human_note": "shot flight observado por volta de 17s",
+      "human_note": "shot flight observado por volta de 17s; continuacao do evento anterior, nao e nova tentativa",
       "boundary_precision": "coarse_1s"
     },
     {
@@ -212,15 +212,7 @@
       "source_time_end_sec": 39.0
     }
   ],
-  "unresolved_event_windows": [
-    {
-      "kind": "shot_flight_observation",
-      "source_time_start_sec": 17.0,
-      "source_time_end_sec": 18.0,
-      "outcome": "made",
-      "reason": "human marked shot flight/made but did not independently identify whether this is a distinct shot attempt"
-    }
-  ],
+  "unresolved_event_windows": [],
   "human_source_notes": [
     "10-12 possessed jogador de verde e branco faz shot_attemp",
     "13 - shot scored",
@@ -239,16 +231,17 @@
     "37-39 shot_flight",
     "todos os lancamentos identificados, incluindo free throws e dunk, foram made",
     "assumir primeiro passe aos 30s e segundo passe aos 31s",
-    "houve 1 free throw entre 19-21s"
+    "houve 1 free throw entre 19-21s",
+    "o shot_flight 17-18s era continuacao do outro evento e nao uma tentativa distinta"
   ],
   "notes": [
-    "Pass A uses human windows rather than millisecond/frame-exact event labels.",
+    "Pass A is frozen using human windows rather than millisecond/frame-exact event labels.",
     "Human reviewer confirmed all identified shot attempts in the annotated windows were made.",
     "Human reviewer confirmed exactly one free throw in the 19-21s window; it was made.",
+    "The 17-18s shot-flight observation is continuation of another event and is not counted as a distinct shot attempt.",
     "Two pass-flight observations previously grouped in 30-31s are separated at human markers 30s and 31s.",
     "Do not require exact release frames from the reviewer.",
-    "evaluation_ready remains false only because the 17-18s shot-flight observation is not yet confirmed as a distinct shot attempt.",
-    "Pass B actor-to-track alignment happens after human basketball truth is frozen.",
+    "Pass B actor-to-track alignment is optional for event existence/outcome scoring and can add attribution constraints later.",
     "For this neutral V1 clip, team_id remains null."
   ]
 }
