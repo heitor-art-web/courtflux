@@ -468,7 +468,7 @@ class P2EngineV1:
                 and not self._reset_done_for_ineligible_gap
             ):
                 loose_end = self._reset_temporal_state(
-                    reason="analysis_ineligible_gap",
+                    reason="gameplay_absent_gap",
                     frame_id=frame_id,
                     timestamp=timestamp,
                 )
