@@ -77,6 +77,7 @@ export type AudienceSection = {
   title: string;
   highlight: string;
   copy: string;
+  actionLabel: string;
   items: Array<{
     audience: string;
     title: string;
