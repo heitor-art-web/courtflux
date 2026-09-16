@@ -28,6 +28,70 @@ type WorkerHealth = {
   lab_defaults?: LabDefaults;
 };
 
+type AttributionRow = {
+  total?: number;
+  actor_count?: number;
+  actor_rate?: number;
+  team_count?: number;
+  team_rate?: number;
+};
+
+type P2Summary = {
+  version?: string;
+  frames_seen?: number;
+  p2_processed_frames?: number;
+  metric_eligible_frames?: number;
+  engine_eligible_frames?: number;
+  control_state?: {
+    counts?: Record<string, number>;
+    rates?: Record<string, number>;
+  };
+  possession?: {
+    possessed_frames?: number;
+    possessed_rate?: number;
+    handler_memory_frames?: number;
+    handler_memory_rate?: number;
+    avg_possession_confidence?: number | null;
+    changes?: number;
+    acquisitions?: number;
+  };
+  events?: {
+    total?: number;
+    counts?: Record<string, number>;
+    decisions?: Record<string, number>;
+    mean_confidence_by_type?: Record<string, number>;
+    actor_attribution_rate?: number;
+    team_attribution_rate?: number;
+    attribution_by_event_type?: Record<string, AttributionRow>;
+  };
+  shots?: {
+    attempts?: number;
+    outcomes?: Record<string, number>;
+    unknown_outcome_rate?: number;
+    rapid_unknown_retrigger_count?: number;
+    minimum_inter_shot_gap_frames?: number | null;
+  };
+  transitions?: {
+    passes?: number;
+    passes_with_flight_evidence?: number;
+    turnovers?: number;
+    turnovers_with_flight_evidence?: number;
+    direct_turnovers?: number;
+    loose_ball_started?: number;
+    loose_ball_recovered?: number;
+    loose_ball_ended?: number;
+    loose_ball_closed?: number;
+    loose_ball_open_intervals?: number;
+    loose_ball_closure_rate?: number;
+    loose_ball_terminal_reasons?: Record<string, number>;
+  };
+  passes?: number;
+  turnovers?: number;
+  rebounds?: number;
+  resets?: { count?: number; reasons?: Record<string, number> };
+  p1_state_not_mutated_rate?: number;
+};
+
 type Summary = {
   run_id?: string;
   model?: string;
@@ -59,6 +123,7 @@ type Summary = {
     selected_conf_mean?: number | null;
     continuity?: Record<string, unknown>;
   };
+  p2?: P2Summary;
   extra?: { status?: string; error?: string; mode?: string; identity_debug?: Record<string, unknown> };
   [key: string]: unknown;
 };
@@ -91,8 +156,12 @@ function pct(value: number | undefined) {
   return `${Number(value ?? 0).toFixed(1)}%`;
 }
 
-function metric(value: number | undefined, digits = 2) {
+function metric(value: number | undefined | null, digits = 2) {
   return Number(value ?? 0).toFixed(digits);
+}
+
+function labelize(value: string) {
+  return value.replaceAll("_", " ");
 }
 
 export default function LabPage() {
@@ -259,12 +328,15 @@ export default function LabPage() {
   const players = summary?.players;
   const ball = summary?.ball;
   const performance = summary?.performance;
+  const p2 = summary?.p2;
   const processingFps = performance?.analysis_fps ??
     (summary?.total_frames && summary?.elapsed_sec ? summary.total_frames / summary.elapsed_sec : 0);
   const analysisActive = ["queued", "running"].includes(job?.status ?? "");
   const workerLabel = health.status === "ok" ? "online" : health.status ? "offline" : "checking";
   const previewUrl = job?.job_id ? `/api/lab/jobs/${job.job_id}/preview?t=${previewNonce}` : "";
   const videoUrl = job?.job_id ? `/api/lab/jobs/${job.job_id}/preview-video` : "";
+  const shotOutcomes = p2?.shots?.outcomes ?? {};
+  const attributionRows = Object.entries(p2?.events?.attribution_by_event_type ?? {});
 
   return (
     <main>
@@ -334,6 +406,62 @@ export default function LabPage() {
               <div className="metric"><div className="label">Ball selected</div><div className="value">{pct(ball?.selected_detection_frame_rate)}</div></div>
               <div className="metric"><div className="label">Ball missing</div><div className="value">{pct(ball?.missing_frame_rate)}</div></div>
             </div>
+
+            {p2 ? <>
+              <div className="status-line" style={{ marginTop: 24 }}>
+                <h2 style={{ margin: 0 }}>P2 basketball understanding</h2>
+                <span className="muted">{p2.version ?? "p2"} · Jersey-independent track identity</span>
+              </div>
+              <div className="metrics" style={{ marginTop: 14 }}>
+                <div className="metric"><div className="label">Possessed</div><div className="value">{pct(p2.possession?.possessed_rate)}</div></div>
+                <div className="metric"><div className="label">Handler memory</div><div className="value">{pct(p2.possession?.handler_memory_rate)}</div></div>
+                <div className="metric"><div className="label">Control UNKNOWN</div><div className="value">{pct(p2.control_state?.rates?.unknown)}</div></div>
+                <div className="metric"><div className="label">Possession confidence</div><div className="value">{metric(p2.possession?.avg_possession_confidence, 3)}</div></div>
+                <div className="metric"><div className="label">P2 events</div><div className="value">{p2.events?.total ?? 0}</div></div>
+                <div className="metric"><div className="label">Actor attribution</div><div className="value">{pct(p2.events?.actor_attribution_rate)}</div></div>
+                <div className="metric"><div className="label">Team attribution</div><div className="value">{pct(p2.events?.team_attribution_rate)}</div></div>
+                <div className="metric"><div className="label">P1 invariant</div><div className="value">{pct(p2.p1_state_not_mutated_rate)}</div></div>
+                <div className="metric"><div className="label">Shots</div><div className="value">{p2.shots?.attempts ?? 0}</div></div>
+                <div className="metric"><div className="label">Shot outcomes M/M/U</div><div className="value">{shotOutcomes.made ?? 0}/{shotOutcomes.missed ?? 0}/{shotOutcomes.unknown ?? 0}</div></div>
+                <div className="metric"><div className="label">Unknown shot outcome</div><div className="value">{pct(p2.shots?.unknown_outcome_rate)}</div></div>
+                <div className="metric"><div className="label">Rapid shot retriggers</div><div className="value">{p2.shots?.rapid_unknown_retrigger_count ?? 0}</div></div>
+                <div className="metric"><div className="label">Passes</div><div className="value">{p2.transitions?.passes ?? p2.passes ?? 0}</div></div>
+                <div className="metric"><div className="label">Passes with flight</div><div className="value">{p2.transitions?.passes_with_flight_evidence ?? 0}</div></div>
+                <div className="metric"><div className="label">Turnovers</div><div className="value">{p2.transitions?.turnovers ?? p2.turnovers ?? 0}</div></div>
+                <div className="metric"><div className="label">Direct turnovers</div><div className="value">{p2.transitions?.direct_turnovers ?? 0}</div></div>
+                <div className="metric"><div className="label">Rebounds</div><div className="value">{p2.rebounds ?? 0}</div></div>
+                <div className="metric"><div className="label">Loose closure</div><div className="value">{pct(p2.transitions?.loose_ball_closure_rate)}</div></div>
+                <div className="metric"><div className="label">Loose open</div><div className="value">{p2.transitions?.loose_ball_open_intervals ?? 0}</div></div>
+                <div className="metric"><div className="label">Temporal resets</div><div className="value">{p2.resets?.count ?? 0}</div></div>
+              </div>
+
+              <details style={{ marginTop: 18 }} open>
+                <summary>Control-state distribution</summary>
+                <div className="metrics" style={{ marginTop: 12 }}>
+                  {Object.entries(p2.control_state?.rates ?? {}).map(([state, rate]) => <div className="metric" key={state}><div className="label">{labelize(state)}</div><div className="value">{pct(rate)}</div></div>)}
+                </div>
+              </details>
+
+              <details style={{ marginTop: 18 }} open>
+                <summary>Attribution by event type</summary>
+                {attributionRows.length ? <div style={{ overflowX: "auto", marginTop: 12 }}>
+                  <table style={{ width: "100%", borderCollapse: "collapse", textAlign: "left" }}>
+                    <thead><tr><th>Event</th><th>Total</th><th>Actor</th><th>Team</th></tr></thead>
+                    <tbody>{attributionRows.map(([eventType, row]) => <tr key={eventType}><td>{labelize(eventType)}</td><td>{row.total ?? 0}</td><td>{pct(row.actor_rate)}</td><td>{pct(row.team_rate)}</td></tr>)}</tbody>
+                  </table>
+                </div> : <p className="muted">No P2 events emitted in this run.</p>}
+              </details>
+
+              <details style={{ marginTop: 18 }}>
+                <summary>Loose lifecycle and reset diagnostics</summary>
+                <pre>{JSON.stringify({
+                  loose: p2.transitions,
+                  resets: p2.resets,
+                  event_counts: p2.events?.counts,
+                }, null, 2)}</pre>
+              </details>
+            </> : <p className="muted" style={{ marginTop: 18 }}>P2 metrics are unavailable for this older run.</p>}
+
             {summary.extra?.identity_debug ? <details style={{ marginTop: 18 }}><summary>Identity debug</summary><pre>{JSON.stringify(summary.extra.identity_debug, null, 2)}</pre></details> : null}
             <details style={{ marginTop: 18 }}><summary>Raw summary JSON</summary><pre>{JSON.stringify(summary, null, 2)}</pre></details>
           </> : null}
