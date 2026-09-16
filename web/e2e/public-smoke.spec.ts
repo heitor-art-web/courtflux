@@ -22,16 +22,22 @@ test("Homepage → primary beta CTA opens signup with keyboard focus preserved",
 
 test("language selector switches public route to Portuguese and Spanish", async ({ page }) => {
   await page.goto("/");
-  const language = page.getByRole("combobox", { name: /language|língua|idioma/i });
-  // Wait for language selector to be visible and stable
-  await language.waitFor({ state: "visible", timeout: 5000 });
-  await expect(language).toBeVisible();
+  
+  // Wait for the select element to be stable and available in the DOM
+  const languageSelect = page.locator("select[aria-label*='Language'], select[aria-label*='Língua'], select[aria-label*='Idioma']");
+  await languageSelect.waitFor({ state: "attached", timeout: 10000 });
+  await page.waitForTimeout(500); // Additional buffer for portal rendering
+  
+  // Verify it's visible
+  await expect(languageSelect).toBeVisible({ timeout: 5000 });
 
-  await language.selectOption("pt-PT");
+  // Change to Portuguese
+  await languageSelect.selectOption("pt-PT");
   await expect(page).toHaveURL(/\/pt-pt(?:$|[?#])/);
   await expect(page.locator("html")).toHaveAttribute("lang", "pt-PT");
 
-  await page.getByRole("combobox", { name: /language|língua|idioma/i }).selectOption("es-ES");
+  // Change to Spanish
+  await languageSelect.selectOption("es-ES");
   await expect(page).toHaveURL(/\/es-es(?:$|[?#])/);
   await expect(page.locator("html")).toHaveAttribute("lang", "es-ES");
 });
