@@ -1,6 +1,14 @@
 # CourtFlux P1 Roadmap — Perception + Game State
 
-**Status:** CURRENT PHASE  
+> [!IMPORTANT]
+> ## HISTORICAL / SUPERSEDED
+> This document is retained as the technical execution history of P1. It is **not** the current project roadmap or an active operational checklist.
+>
+> P1 was accepted and closed through PR #43, merged on 2026-09-15, with final Jersey/Identity correctness explicitly deferred to the end of P2. The current sources of truth are `README.md` and `docs/p2_roadmap.md`.
+>
+> Status labels such as `CURRENT PHASE`, `ACTIVE`, `PLANNED` or `PENDING` below describe the state **at the time this P1 plan was written** and must not be interpreted as current work.
+
+**Historical status at time of writing:** CURRENT PHASE  
 **Entry condition:** P0 Vision Foundation Complete  
 **Primary objective:** produce stable, confidence-aware `PlayerState`, `BallState`, team and jersey identity evidence from broadcast basketball video.
 
