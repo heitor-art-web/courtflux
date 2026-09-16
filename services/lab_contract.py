@@ -8,6 +8,7 @@ from typing import Any
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 DEFAULT_MATCH_CONFIG_PATH = PROJECT_ROOT / "data" / "match_config.json"
 DEFAULT_HF_HOME = PROJECT_ROOT / "weights" / "huggingface"
+DEFAULT_JERSEY_BACKEND = "parseq_soccernet"
 JERSEY_BACKENDS = (
     "best_temporal",
     "roboflow_classification",
@@ -58,7 +59,7 @@ LAB_DEFAULTS = {
     "device": "mps",
     "tracker": "botsort.yaml",
     "enable_jersey": True,
-    "jersey_backend": "best_temporal",
+    "jersey_backend": DEFAULT_JERSEY_BACKEND,
     "jersey_interval_frames": 24,
     "persist_results": False,
     "live_preview": True,
@@ -82,6 +83,26 @@ def resolve_jersey_backend(value: str | None = None) -> str:
             "BASKETBALL_JERSEY_BACKEND must be one of: " + ", ".join(JERSEY_BACKENDS)
         )
     return requested
+
+
+def validate_jersey_backend_contract(
+    requested: str | None,
+    actual: str | None,
+) -> str:
+    """Fail closed when an explicit Jersey backend resolves to a different runtime."""
+    expected = resolve_jersey_backend(requested)
+    observed = str(actual or "").strip().lower()
+    if observed not in JERSEY_BACKENDS or observed == "auto":
+        raise RuntimeError(
+            "Jersey backend contract violation: runtime did not report a concrete "
+            f"supported backend (requested={expected!r}, actual={observed or 'missing'!r})."
+        )
+    if expected != "auto" and observed != expected:
+        raise RuntimeError(
+            "Jersey backend contract violation: "
+            f"requested={expected!r} but runtime built={observed!r}."
+        )
+    return observed
 
 
 def lab_defaults() -> dict[str, Any]:

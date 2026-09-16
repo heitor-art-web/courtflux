@@ -20,7 +20,7 @@ from fastapi.responses import FileResponse
 from pydantic import BaseModel, Field
 
 from services.ingestion.supabase_video import SupabaseVideoStore
-from services.lab_contract import LAB_DEFAULTS, lab_defaults
+from services.lab_contract import LAB_DEFAULTS, lab_defaults, resolve_jersey_backend
 from services.supabase_service import SupabaseRunStore
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
@@ -64,6 +64,7 @@ class JobRequest(BaseModel):
     tracker: Literal["botsort.yaml", "bytetrack.yaml"] = LAB_DEFAULTS["tracker"]
     match_config: dict[str, Any]
     enable_jersey: bool = LAB_DEFAULTS["enable_jersey"]
+    jersey_backend: str = Field(default=LAB_DEFAULTS["jersey_backend"], min_length=1, max_length=64)
     jersey_interval_frames: int = Field(default=LAB_DEFAULTS["jersey_interval_frames"], ge=1, le=300)
     persist_results: bool = LAB_DEFAULTS["persist_results"]
     live_preview: bool = LAB_DEFAULTS["live_preview"]
@@ -328,6 +329,9 @@ def recover_incomplete_jobs() -> int:
                 raise ValueError("inference_conf must be <= both detector_conf and ball_conf")
             validate_match_config(payload.match_config)
             request_data = payload.model_dump()
+            request_data["jersey_backend"] = resolve_jersey_backend(
+                str(request_data.get("jersey_backend") or LAB_DEFAULTS["jersey_backend"])
+            )
         except Exception as exc:
             error_text = f"Worker restart recovery failed: invalid durable request ({type(exc).__name__}: {exc})"
             try:
@@ -474,7 +478,17 @@ def run_job(job_id: str, request_data: dict[str, Any]) -> None:
         if not request_data.get("persist_results", True):
             command.append("--no-persist")
 
+        selected_backend = resolve_jersey_backend(
+            str(request_data.get("jersey_backend") or LAB_DEFAULTS["jersey_backend"])
+        )
+        hf_home = Path(
+            os.getenv("HF_HOME", str(PROJECT_ROOT / "weights" / "huggingface"))
+        ).expanduser().resolve()
+        hf_home.mkdir(parents=True, exist_ok=True)
+
         child_env = os.environ.copy()
+        child_env["BASKETBALL_JERSEY_BACKEND"] = selected_backend
+        child_env["HF_HOME"] = str(hf_home)
         child_env["BASKETBALL_INFERENCE_CONF"] = str(request_data["inference_conf"])
         child_env["BASKETBALL_BALL_CONF"] = str(request_data["ball_conf"])
         child_env["BASKETBALL_SINGLE_FORWARD"] = "1" if request_data.get("single_forward", True) else "0"
@@ -487,6 +501,10 @@ def run_job(job_id: str, request_data: dict[str, Any]) -> None:
             child_env["BASKETBALL_PREVIEW_INTERVAL"] = str(request_data["preview_interval_frames"])
 
         with log_path.open("w", encoding="utf-8") as log_file:
+            log_file.write(
+                f"[WORKER] jersey_backend={selected_backend} hf_home={hf_home}\n"
+            )
+            log_file.flush()
             process = subprocess.Popen(
                 command,
                 cwd=str(PROJECT_ROOT),
@@ -683,6 +701,9 @@ def create_job(payload: JobRequest) -> JobCreated:
         raise HTTPException(status_code=409, detail="Job already exists") from exc
 
     request_data = payload.model_dump()
+    request_data["jersey_backend"] = resolve_jersey_backend(
+        str(request_data.get("jersey_backend") or LAB_DEFAULTS["jersey_backend"])
+    )
     (directory / "request.json").write_text(json.dumps(request_data, indent=2, ensure_ascii=False), encoding="utf-8")
     (directory / "match_config.json").write_text(
         json.dumps(payload.match_config, indent=2, ensure_ascii=False) + "\n",
