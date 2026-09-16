@@ -102,12 +102,16 @@ class P2ControlStateDiagnoseTest(unittest.TestCase):
             pass_flight["diagnostic_signals"]["pass_truth_without_locked_origin_frames"],
             1,
         )
+        self.assertEqual(
+            pass_flight["diagnostic_signals"]["pass_truth_predicted_unknown_frames"],
+            1,
+        )
 
         shot = report["intervals"][2]
         self.assertEqual(shot["matching_rate"], 0.5)
         self.assertEqual(shot["shot_active_frames"], 1)
         self.assertEqual(
-            shot["diagnostic_signals"]["shot_truth_before_shot_tracker_activation_frames"],
+            shot["diagnostic_signals"]["shot_truth_not_predicted_shot_flight_frames"],
             1,
         )
         self.assertEqual(
