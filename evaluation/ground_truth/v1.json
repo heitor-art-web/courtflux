@@ -167,6 +167,18 @@
     },
     {
       "event_type": "shot_attempt",
+      "frame_start": 225,
+      "frame_end": 275,
+      "outcome": "made",
+      "team_id": null,
+      "actor_track_id": null,
+      "secondary_track_id": null,
+      "source_time_start_sec": 19.0,
+      "source_time_end_sec": 21.0,
+      "human_note": "single free throw; human confirmed one attempt and made outcome"
+    },
+    {
+      "event_type": "shot_attempt",
       "frame_start": 400,
       "frame_end": 425,
       "outcome": "made",
@@ -206,15 +218,7 @@
       "source_time_start_sec": 17.0,
       "source_time_end_sec": 18.0,
       "outcome": "made",
-      "reason": "human marked shot flight/made but did not independently identify attempt window"
-    },
-    {
-      "kind": "free_throw_sequence",
-      "source_time_start_sec": 19.0,
-      "source_time_end_sec": 21.0,
-      "attempt_count": null,
-      "outcome": "made",
-      "reason": "all observed free throws were made; attempt count still unknown"
+      "reason": "human marked shot flight/made but did not independently identify whether this is a distinct shot attempt"
     }
   ],
   "human_source_notes": [
@@ -234,14 +238,16 @@
     "35-36 possessed jogador vermelho",
     "37-39 shot_flight",
     "todos os lancamentos identificados, incluindo free throws e dunk, foram made",
-    "assumir primeiro passe aos 30s e segundo passe aos 31s"
+    "assumir primeiro passe aos 30s e segundo passe aos 31s",
+    "houve 1 free throw entre 19-21s"
   ],
   "notes": [
     "Pass A uses human windows rather than millisecond/frame-exact event labels.",
     "Human reviewer confirmed all identified shot attempts in the annotated windows were made.",
+    "Human reviewer confirmed exactly one free throw in the 19-21s window; it was made.",
     "Two pass-flight observations previously grouped in 30-31s are separated at human markers 30s and 31s.",
     "Do not require exact release frames from the reviewer.",
-    "evaluation_ready remains false only because some event counts/windows are unresolved, not because timing lacks sub-second precision.",
+    "evaluation_ready remains false only because the 17-18s shot-flight observation is not yet confirmed as a distinct shot attempt.",
     "Pass B actor-to-track alignment happens after human basketball truth is frozen.",
     "For this neutral V1 clip, team_id remains null."
   ]
