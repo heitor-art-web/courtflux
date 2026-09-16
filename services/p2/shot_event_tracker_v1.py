@@ -43,12 +43,13 @@ class _ShotCandidate:
     semantic_start: bool = False
     evidence: set[str] = field(default_factory=set)
 
-    previous_observed_ball_position: tuple[float, float] | None = None
-    previous_observed_rim_bbox: RimBBox | None = None
-    previous_observed_frame: int | None = None
-    last_observed_ball_position: tuple[float, float] | None = None
-    last_observed_rim_bbox: RimBBox | None = None
-    last_observed_frame: int | None = None
+    last_direct_ball_frame: int | None = None
+    previous_geometry_ball_position: tuple[float, float] | None = None
+    previous_geometry_rim_bbox: RimBBox | None = None
+    previous_geometry_frame: int | None = None
+    last_geometry_ball_position: tuple[float, float] | None = None
+    last_geometry_rim_bbox: RimBBox | None = None
+    last_geometry_frame: int | None = None
 
     current_rim_gap_frames: int = 0
     max_ball_gap_frames: int = 0
@@ -71,11 +72,11 @@ class ShotEventTrackerV1:
     Direct observed ball/rim samples drive geometry.
 
     Direct consecutive observations may resolve MADE/MISSED immediately. If a downward
-    rim-plane crossing is bracketed across an observation gap, the tracker creates a
-    pending bridge and waits for one more direct sample. The post-gap fall ratio is
-    exported as diagnostic evidence only; it is not yet calibrated to classify MADE.
-    Therefore a settled pending bridge resolves UNKNOWN unless independent semantic
-    ball-in-basket evidence confirms MADE.
+    rim-plane crossing is bracketed across an observation or rim-evidence gap, the tracker
+    creates a pending bridge and waits for one more direct geometric sample. The post-gap
+    fall ratio is exported as diagnostic evidence only; it is not yet calibrated to
+    classify MADE. Therefore a settled pending bridge resolves UNKNOWN unless independent
+    semantic ball-in-basket evidence confirms MADE.
     """
 
     def __init__(
@@ -244,7 +245,6 @@ class ShotEventTrackerV1:
         current_ball: tuple[float, float],
         current_rim: RimBBox,
     ) -> dict[str, float | bool | None]:
-        """Intersect the observed ball segment with the moving rim plane."""
         prev_x, prev_y = previous_ball
         cur_x, cur_y = current_ball
         prev_rim_y = cls._rim_center_y(previous_rim)
@@ -328,12 +328,15 @@ class ShotEventTrackerV1:
         ball_position: tuple[float, float],
         rim: RimBBox | None,
     ) -> None:
-        candidate.previous_observed_ball_position = candidate.last_observed_ball_position
-        candidate.previous_observed_rim_bbox = candidate.last_observed_rim_bbox
-        candidate.previous_observed_frame = candidate.last_observed_frame
-        candidate.last_observed_ball_position = ball_position
-        candidate.last_observed_rim_bbox = rim
-        candidate.last_observed_frame = int(frame_id)
+        candidate.last_direct_ball_frame = int(frame_id)
+        if rim is None:
+            return
+        candidate.previous_geometry_ball_position = candidate.last_geometry_ball_position
+        candidate.previous_geometry_rim_bbox = candidate.last_geometry_rim_bbox
+        candidate.previous_geometry_frame = candidate.last_geometry_frame
+        candidate.last_geometry_ball_position = ball_position
+        candidate.last_geometry_rim_bbox = rim
+        candidate.last_geometry_frame = int(frame_id)
 
     def _start(
         self,
@@ -501,14 +504,14 @@ class ShotEventTrackerV1:
     ) -> None:
         pre_gap_rate = None
         if (
-            candidate.previous_observed_ball_position is not None
-            and candidate.previous_observed_rim_bbox is not None
-            and candidate.previous_observed_frame is not None
+            candidate.previous_geometry_ball_position is not None
+            and candidate.previous_geometry_rim_bbox is not None
+            and candidate.previous_geometry_frame is not None
         ):
             pre_gap_rate = self._relative_fall_per_frame(
-                first_frame=candidate.previous_observed_frame,
-                first_ball=candidate.previous_observed_ball_position,
-                first_rim=candidate.previous_observed_rim_bbox,
+                first_frame=candidate.previous_geometry_frame,
+                first_ball=candidate.previous_geometry_ball_position,
+                first_rim=candidate.previous_geometry_rim_bbox,
                 second_frame=previous_frame,
                 second_ball=previous_ball,
                 second_rim=previous_rim,
@@ -640,12 +643,16 @@ class ShotEventTrackerV1:
         else:
             candidate.current_rim_gap_frames = 0
 
-        previous_observed_ball = candidate.last_observed_ball_position
-        previous_observed_rim = candidate.last_observed_rim_bbox
-        previous_observed_frame = candidate.last_observed_frame
+        previous_observed_ball = candidate.last_geometry_ball_position
+        previous_observed_rim = candidate.last_geometry_rim_bbox
+        previous_observed_frame = candidate.last_geometry_frame
+        geometry_gap_frames = 0
+        if previous_observed_frame is not None:
+            geometry_gap_frames = max(0, int(frame_id) - int(previous_observed_frame) - 1)
+
         ball_gap_frames = 0
-        if direct_observed and previous_observed_frame is not None:
-            ball_gap_frames = max(0, int(frame_id) - int(previous_observed_frame) - 1)
+        if direct_observed and candidate.last_direct_ball_frame is not None:
+            ball_gap_frames = max(0, int(frame_id) - int(candidate.last_direct_ball_frame) - 1)
             if ball_gap_frames > 0 and (candidate.had_above_rim or candidate.had_rim_band):
                 candidate.outcome_geometry_tainted = True
             candidate.max_ball_gap_frames = max(
@@ -720,7 +727,7 @@ class ShotEventTrackerV1:
                 candidate.last_crossing_fraction = float(crossing["fraction"])
                 geometry_coherent = self._rim_boxes_overlap(previous_observed_rim, rim)
 
-                if ball_gap_frames == 0 and rim_gap_before_current == 0:
+                if ball_gap_frames == 0 and geometry_gap_frames == 0 and rim_gap_before_current == 0:
                     candidate.evidence.add("observed_downward_rim_plane_crossing")
                     return [
                         self._resolve(
@@ -744,7 +751,7 @@ class ShotEventTrackerV1:
                         current_frame=frame_id,
                         crossing=crossing,
                         ball_gap_frames=ball_gap_frames,
-                        rim_gap_frames=rim_gap_before_current,
+                        rim_gap_frames=max(rim_gap_before_current, geometry_gap_frames),
                     )
                     self._record_direct_observation(
                         candidate,
@@ -829,7 +836,8 @@ class ShotEventTrackerV1:
             "had_above_rim": False if candidate is None else candidate.had_above_rim,
             "had_rim_band": False if candidate is None else candidate.had_rim_band,
             "direct_ball_observations": 0 if candidate is None else candidate.direct_ball_observations,
-            "last_direct_observed_frame": None if candidate is None else candidate.last_observed_frame,
+            "last_direct_observed_frame": None if candidate is None else candidate.last_direct_ball_frame,
+            "last_geometry_observed_frame": None if candidate is None else candidate.last_geometry_frame,
             "current_rim_gap_frames": 0 if candidate is None else candidate.current_rim_gap_frames,
             "max_ball_observation_gap_frames": 0 if candidate is None else candidate.max_ball_gap_frames,
             "max_rim_evidence_gap_frames": 0 if candidate is None else candidate.max_rim_gap_frames,
