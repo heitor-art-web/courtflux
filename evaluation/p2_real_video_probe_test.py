@@ -3,7 +3,7 @@ from __future__ import annotations
 import unittest
 from types import SimpleNamespace
 
-from evaluation.p2_real_video_probe import P2MetricsCollector
+from services.p2.metrics import P2MetricsCollector
 
 
 class P2RealVideoProbeTest(unittest.TestCase):
@@ -51,6 +51,7 @@ class P2RealVideoProbeTest(unittest.TestCase):
             timestamp=frame_id / fps,
             fps=fps,
             valid_gameplay=eligible,
+            court_state=None,
             diagnostics=diagnostics,
         )
 
@@ -104,11 +105,12 @@ class P2RealVideoProbeTest(unittest.TestCase):
         )
 
         summary = collector.summary()
-        self.assertEqual(summary["version"], "p2_real_video_probe_v3")
+        self.assertEqual(summary["version"], "p2_metrics_v5")
         self.assertEqual(summary["frames_seen"], 3)
         self.assertEqual(summary["p2_processed_frames"], 3)
         self.assertEqual(summary["metric_eligible_frames"], 3)
         self.assertEqual(summary["engine_eligible_frames"], 3)
+        self.assertEqual(summary["scope"]["limited_gameplay_frames"], 0)
         self.assertEqual(summary["possession"]["possessed_frames"], 2)
         self.assertEqual(summary["possession"]["possessed_rate"], 66.67)
         self.assertEqual(summary["possession"]["handler_memory_frames"], 2)
@@ -207,7 +209,7 @@ class P2RealVideoProbeTest(unittest.TestCase):
                 frame_id=20,
                 control_state="pass_flight",
                 reset_count=1,
-                reset_reason="analysis_ineligible_gap",
+                reset_reason="gameplay_absent_gap",
                 events=[
                     {
                         "event_type": "pass_candidate",
@@ -245,7 +247,7 @@ class P2RealVideoProbeTest(unittest.TestCase):
         summary = collector.summary()
         self.assertEqual(summary["transitions"]["passes_with_flight_evidence"], 1)
         self.assertEqual(summary["resets"]["count"], 1)
-        self.assertEqual(summary["resets"]["reasons"]["analysis_ineligible_gap"], 1)
+        self.assertEqual(summary["resets"]["reasons"]["gameplay_absent_gap"], 1)
         self.assertEqual(summary["shots"]["rapid_unknown_retrigger_count"], 1)
         self.assertEqual(summary["shots"]["minimum_inter_shot_gap_frames"], 2)
 
