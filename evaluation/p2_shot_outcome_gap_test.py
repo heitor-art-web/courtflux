@@ -172,6 +172,50 @@ class ShotOutcomeGapRegressionTest(unittest.TestCase):
         self.assertEqual(events[0].attributes["outcome"], ShotOutcome.UNKNOWN.value)
         self.assertGreaterEqual(events[0].attributes["bridge_rim_gap_frames"], 1)
 
+    def test_direct_ball_can_continue_while_rim_is_missing_until_geometry_recovers(self) -> None:
+        tracker = ShotEventTrackerV1(fps=10.0)
+        tracker.update(
+            frame_id=0,
+            timestamp_sec=0.0,
+            ball_state=ball(0, 95, 75),
+            court_state=court(0),
+        )
+        tracker.update(
+            frame_id=1,
+            timestamp_sec=0.1,
+            ball_state=ball(1, 98, 88),
+            court_state=court(1),
+        )
+        for frame_id, y in ((2, 100), (3, 108), (4, 116)):
+            tracker.update(
+                frame_id=frame_id,
+                timestamp_sec=frame_id / 10.0,
+                ball_state=ball(frame_id, 100 + frame_id, y),
+                court_state=court(frame_id, rim_visible=False),
+            )
+
+        self.assertEqual(
+            tracker.update(
+                frame_id=5,
+                timestamp_sec=0.5,
+                ball_state=ball(5, 104, 120),
+                court_state=court(5),
+            ),
+            [],
+        )
+        self.assertTrue(tracker.diagnostics()["pending_bridge"])
+        self.assertGreaterEqual(tracker.diagnostics()["max_rim_evidence_gap_frames"], 3)
+
+        events = tracker.update(
+            frame_id=6,
+            timestamp_sec=0.6,
+            ball_state=ball(6, 105, 125),
+            court_state=court(6),
+        )
+        self.assertEqual(len(events), 1)
+        self.assertEqual(events[0].attributes["outcome"], ShotOutcome.UNKNOWN.value)
+        self.assertIsNotNone(events[0].attributes["post_gap_fall_ratio"])
+
     def test_camera_jump_does_not_bridge_non_overlapping_rim_geometry(self) -> None:
         tracker = ShotEventTrackerV1(fps=10.0, reset_time_sec=0.5)
         tracker.update(
