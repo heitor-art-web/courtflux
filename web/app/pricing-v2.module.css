@@ -27,8 +27,7 @@
 .priceCard { min-height: 520px; padding: 30px; }
 .annualPrice { margin: 0 0 15px; color: #65717a; font-size: .82rem; font-weight: 760; }
 .annualPrice span { font-weight: 600; }
-
-.priceCard:global(.priceCardFeatured) .annualPrice { color: #9fb0bc; }
+:global([class*="priceCardFeatured"]) .annualPrice { color: #9fb0bc; }
 
 .organisationRow {
   margin: 18px auto 0;
