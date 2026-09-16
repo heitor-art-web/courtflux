@@ -499,6 +499,19 @@ class PossessionTrackerV1:
         threshold = self.acquire_threshold if self.current_track_id is None else self.switch_threshold
         usable = best if best is not None and best.score >= threshold else None
 
+        # Once a release flight exists, owner memory may expire before a receiver has
+        # accumulated enough frames to lock. Keep collecting ball evidence across that
+        # ownerless interval instead of freezing the flight at its first observation.
+        if (
+            self.current_track_id is None
+            and self._flight is not None
+            and ball_state is not None
+            and ball_state.available
+        ):
+            self._flight.observe(frame_id, ball_state)
+            if self._flight_supported():
+                self.control_state = BallControlState.PASS_FLIGHT
+
         if usable is None:
             self._advance_candidate(None)
             self._lost_frames += 1
@@ -523,6 +536,8 @@ class PossessionTrackerV1:
                     )
                     if loose_event is not None:
                         events.append(loose_event)
+            elif self._flight_supported():
+                self.control_state = BallControlState.PASS_FLIGHT
             elif self._lost_frames >= self.loose_confirm_frames:
                 self.control_state = BallControlState.UNKNOWN
 
