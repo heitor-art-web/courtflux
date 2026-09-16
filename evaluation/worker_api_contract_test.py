@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import inspect
 import os
 import sys
 import types
@@ -18,6 +19,11 @@ sys.modules.setdefault("torch", torch_stub)
 from fastapi import HTTPException
 
 from services import worker_api
+from services.lab_contract import (
+    LAB_DEFAULTS,
+    resolve_jersey_backend,
+    validate_jersey_backend_contract,
+)
 
 
 class WorkerApiContractTest(unittest.TestCase):
@@ -82,6 +88,33 @@ class WorkerApiContractTest(unittest.TestCase):
                 with self.assertRaises(HTTPException) as raised:
                     worker_api.job_dir(invalid)
                 self.assertEqual(raised.exception.status_code, 400)
+
+    def test_selected_parseq_backend_is_part_of_worker_contract(self) -> None:
+        self.assertEqual(LAB_DEFAULTS["jersey_backend"], "parseq_soccernet")
+        payload = worker_api.JobRequest(match_config={})
+        self.assertEqual(payload.jersey_backend, "parseq_soccernet")
+        self.assertEqual(resolve_jersey_backend("parseq"), "parseq_soccernet")
+
+        run_job_source = inspect.getsource(worker_api.run_job)
+        self.assertIn(
+            'child_env["BASKETBALL_JERSEY_BACKEND"] = selected_backend',
+            run_job_source,
+        )
+        self.assertIn("resolve_jersey_backend", run_job_source)
+
+    def test_backend_contract_rejects_silent_fallback(self) -> None:
+        self.assertEqual(
+            validate_jersey_backend_contract(
+                "parseq_soccernet",
+                "parseq_soccernet",
+            ),
+            "parseq_soccernet",
+        )
+        with self.assertRaises(RuntimeError):
+            validate_jersey_backend_contract(
+                "parseq_soccernet",
+                "best_temporal",
+            )
 
 
 if __name__ == "__main__":
