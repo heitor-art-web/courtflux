@@ -1,9 +1,19 @@
 from collections import deque
+
 import cv2
 import numpy as np
 
 
 class GameplayFilter:
+    """Cheap broadcast prefilter with a high-recall canonical runtime policy.
+
+    The image-only heuristics remain useful as evidence, but they are not reliable enough
+    to veto detector/tracker inference across courts, lighting conditions, camera cuts,
+    zooms, and painted areas. By default the filter therefore fails open for every valid
+    frame and exposes its historical gameplay decision as ``likely_gameplay`` diagnostics.
+
+    ``hard_reject=True`` retains the historical gating behaviour for explicit experiments.
+    """
 
     def __init__(
         self,
@@ -11,11 +21,13 @@ class GameplayFilter:
         min_motion_ratio=0.003,
         max_grace_frames=15,
         processing_scale=0.25,
+        hard_reject=False,
     ):
         self.min_court_ratio = min_court_ratio
         self.min_motion_ratio = min_motion_ratio
         self.max_grace_frames = max_grace_frames
         self.processing_scale = processing_scale
+        self.hard_reject = bool(hard_reject)
         self.grace_counter = 0
 
         self.prev_gray_small = None
@@ -25,7 +37,13 @@ class GameplayFilter:
 
     def is_gameplay(self, frame) -> bool:
         if frame is None:
-            self.last_diagnostics = {"result": False, "reason": "empty_frame"}
+            self.last_diagnostics = {
+                "result": False,
+                "should_infer": False,
+                "likely_gameplay": False,
+                "prefilter_mode": "high_recall_fail_open",
+                "reason": "empty_frame",
+            }
             return False
 
         if self.processing_scale != 1.0:
@@ -78,15 +96,13 @@ class GameplayFilter:
         confidence = 0.45 * court_score + 0.35 * motion_score + 0.20 * edge_score
         confidence = min(confidence, 1.0)
 
-        # Gameplay needs some actual court evidence. This prevents close-ups, crowd shots,
-        # benches, score graphics, and other moving broadcast content from winning on motion alone.
+        # Historical image-only vote. Keep it as evidence, but do not let it create
+        # tracker/Identity gaps in the canonical runtime.
         court_vote_floor = max(0.01, self.min_court_ratio * 0.60)
         court_grace_floor = max(0.01, self.min_court_ratio * 0.40)
         has_court_evidence = court_ratio >= court_vote_floor
         vote = confidence > 0.70 and has_court_evidence and not scene_cut
 
-        # A scene cut is a boundary, not positive gameplay evidence. Reset temporal state so
-        # grace from the previous camera shot cannot bleed into replays/close-ups/graphics.
         if scene_cut:
             self.gameplay_votes.clear()
             self.grace_counter = 0
@@ -96,28 +112,32 @@ class GameplayFilter:
 
         used_grace = False
         if scene_cut:
-            result = False
+            likely_gameplay = False
         elif voted_gameplay:
             self.grace_counter = self.max_grace_frames
-            result = True
+            likely_gameplay = True
         elif self.grace_counter > 0 and court_ratio >= court_grace_floor:
             self.grace_counter -= 1
             used_grace = True
-            result = True
+            likely_gameplay = True
         else:
             self.grace_counter = 0
-            result = False
+            likely_gameplay = False
 
         if scene_cut:
-            reason = "scene_cut_reset"
+            evidence_reason = "scene_cut_reset"
         elif voted_gameplay:
-            reason = "temporal_vote"
+            evidence_reason = "temporal_vote"
         elif used_grace:
-            reason = "court_supported_grace"
+            evidence_reason = "court_supported_grace"
         elif not has_court_evidence:
-            reason = "insufficient_court_evidence"
+            evidence_reason = "insufficient_court_evidence"
         else:
-            reason = "insufficient_temporal_votes"
+            evidence_reason = "insufficient_temporal_votes"
+
+        # Canonical policy: valid frames continue to detector/tracker/Identity. Richer
+        # post-detector CourtState evidence decides gameplay presence and analysis quality.
+        should_infer = bool(likely_gameplay) if self.hard_reject else True
 
         self.last_diagnostics = {
             "scene_similarity": round(float(similarity), 4),
@@ -137,7 +157,22 @@ class GameplayFilter:
             "votes_true": int(sum(self.gameplay_votes)),
             "votes_window": int(len(self.gameplay_votes)),
             "used_grace": bool(used_grace),
-            "reason": reason,
-            "result": bool(result),
+            "likely_gameplay": bool(likely_gameplay),
+            "should_infer": bool(should_infer),
+            "hard_reject_enabled": bool(self.hard_reject),
+            "prefilter_mode": (
+                "legacy_hard_reject" if self.hard_reject else "high_recall_fail_open"
+            ),
+            "evidence_reason": evidence_reason,
+            "reason": (
+                evidence_reason
+                if self.hard_reject
+                else (
+                    "prefilter_likely_gameplay"
+                    if likely_gameplay
+                    else "prefilter_uncertain_fail_open"
+                )
+            ),
+            "result": bool(should_infer),
         }
-        return result
+        return should_infer

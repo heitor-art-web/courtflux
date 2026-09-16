@@ -64,9 +64,23 @@ class P2MetricsCollector:
         except (TypeError, ValueError):
             pass
 
+        # Metric eligibility stays conservative (wide/court-visible analysis scope).
+        # P2 engine eligibility is tracked separately and may include GAMEPLAY_LIMITED.
         metric_eligible = bool(getattr(frame_state, "valid_gameplay", False))
         if metric_eligible:
             self.metric_eligible_frames += 1
+
+        court_state = getattr(frame_state, "court_state", None)
+        gameplay_present = (
+            bool(getattr(court_state, "gameplay_present"))
+            if court_state is not None and getattr(court_state, "gameplay_present", None) is not None
+            else metric_eligible
+        )
+        gameplay_status = (
+            str(getattr(court_state, "gameplay_status", "unknown"))
+            if court_state is not None
+            else ("gameplay_analysis" if metric_eligible else "unknown")
+        )
 
         diagnostics = dict(getattr(frame_state, "diagnostics", {}) or {})
         p2 = dict(diagnostics.get("p2", {}) or {})
@@ -77,7 +91,7 @@ class P2MetricsCollector:
         if bool(p2.get("p1_state_is_not_mutated", False)):
             self.p1_not_mutated_frames += 1
 
-        engine_eligible = bool(p2.get("engine_eligible", metric_eligible))
+        engine_eligible = bool(p2.get("engine_eligible", gameplay_present))
         if engine_eligible:
             self.engine_eligible_frames += 1
 
@@ -87,10 +101,12 @@ class P2MetricsCollector:
         if engine_eligible:
             self.control_state_counts[control_state] += 1
 
-        if metric_eligible and engine_eligible and current_track_id is not None:
+        # Possession/control metrics intentionally use P2 engine scope rather than the
+        # stricter spatial-analysis scope. This keeps GAMEPLAY_LIMITED continuity visible.
+        if engine_eligible and current_track_id is not None:
             self.handler_memory_frames += 1
 
-        if metric_eligible and engine_eligible and control_state == "possessed":
+        if engine_eligible and control_state == "possessed":
             self.possessed_frames += 1
             self._team_counter(possession.get("current_team_id"))["possessed_frames"] += 1
             try:
@@ -118,6 +134,8 @@ class P2MetricsCollector:
                 "frame_id": int(getattr(frame_state, "frame_id", 0)),
                 "timestamp_sec": float(getattr(frame_state, "timestamp", 0.0) or 0.0),
                 "metric_eligible": metric_eligible,
+                "gameplay_present": gameplay_present,
+                "gameplay_status": gameplay_status,
                 "engine_eligible": engine_eligible,
                 "control_state": control_state,
                 "current_track_id": current_track_id,
@@ -312,11 +330,19 @@ class P2MetricsCollector:
         loose_open = max(0, loose_started - loose_closed)
 
         return {
-            "version": "p2_metrics_v4",
+            "version": "p2_metrics_v5",
             "frames_seen": self.frames_seen,
             "p2_processed_frames": self.p2_processed_frames,
             "metric_eligible_frames": self.metric_eligible_frames,
             "engine_eligible_frames": self.engine_eligible_frames,
+            "scope": {
+                "metric_policy": "court_state_analysis_eligible",
+                "engine_policy": "court_state_gameplay_present",
+                "limited_gameplay_frames": max(
+                    0,
+                    self.engine_eligible_frames - self.metric_eligible_frames,
+                ),
+            },
             "control_state": {
                 "counts": dict(sorted(self.control_state_counts.items())),
                 "rates": control_rates,

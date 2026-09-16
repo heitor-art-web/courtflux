@@ -19,7 +19,7 @@ class P2EngineV1:
     P1 owns state/evidence. This engine consumes canonical PlayerState/BallState/
     CourtState plus optional detector/team evidence and emits event primitives without
     mutating P1 truth. Temporal P2 state is reset at meaningful segment boundaries so
-    possession/shot candidates never bridge replay/camera/ineligible gaps.
+    possession/shot candidates never bridge replay/camera/non-gameplay gaps.
     """
 
     def __init__(
@@ -104,10 +104,19 @@ class P2EngineV1:
 
     @staticmethod
     def _analysis_eligible(frame_state: Any) -> bool:
+        """Return P2 engine eligibility without conflating it with metric eligibility.
+
+        New CourtState instances expose high-recall ``gameplay_present`` separately from
+        conservative ``analysis_eligible``. P2 continuity follows gameplay presence; old
+        callers without that field retain the historical analysis-eligible behaviour.
+        """
         gameplay = bool(getattr(frame_state, "valid_gameplay", True))
         court_state = getattr(frame_state, "court_state", None)
         if court_state is None:
             return gameplay
+        gameplay_present = getattr(court_state, "gameplay_present", None)
+        if gameplay_present is not None:
+            return bool(gameplay_present)
         return bool(gameplay and getattr(court_state, "analysis_eligible", False))
 
     def _loose_snapshot(self) -> dict[str, Any] | None:
@@ -395,7 +404,8 @@ class P2EngineV1:
             diagnostics = frame_state.diagnostics
         diagnostics["p2"] = {
             "version": "p2_engine_v1",
-            "behavior_revision": "control_state_v3_loose_lifecycle",
+            "behavior_revision": "control_state_v4_gameplay_presence",
+            "eligibility_policy": "court_state_gameplay_present_fallback_analysis_eligible",
             "engine_eligible": bool(engine_eligible),
             "skipped_reason": skipped_reason,
             "event_count": len(emitted),
@@ -472,7 +482,7 @@ class P2EngineV1:
                 semantic_evidence=semantic_evidence,
                 team_evidence=team_evidence,
                 engine_eligible=False,
-                skipped_reason="analysis_ineligible",
+                skipped_reason="gameplay_not_present",
             )
             return frame_state
 
