@@ -98,12 +98,20 @@
     {
       "state": "pass_flight",
       "frame_start": 500,
-      "frame_end": 525,
+      "frame_end": 500,
       "source_time_start_sec": 30.0,
+      "source_time_end_sec": 30.0,
+      "human_note": "primeiro passe; humano pediu assumir passe aos 30s",
+      "boundary_precision": "assumed_1s_point"
+    },
+    {
+      "state": "pass_flight",
+      "frame_start": 525,
+      "frame_end": 525,
+      "source_time_start_sec": 31.0,
       "source_time_end_sec": 31.0,
-      "human_note": "dois pass flights observados neste intervalo; nao assumir flight continuo sem refinamento",
-      "boundary_precision": "coarse_1s",
-      "requires_split_refinement": true
+      "human_note": "segundo passe; humano pediu assumir passe aos 31s",
+      "boundary_precision": "assumed_1s_point"
     },
     {
       "state": "possessed",
@@ -200,11 +208,13 @@
     "34 non game",
     "35-36 possessed jogador vermelho",
     "37-39 shot_flight",
-    "todos os lancamentos identificados, incluindo free throws e dunk, foram made"
+    "todos os lancamentos identificados, incluindo free throws e dunk, foram made",
+    "assumir primeiro passe aos 30s e segundo passe aos 31s"
   ],
   "notes": [
     "Pass A coarse annotation recorded from the human review only.",
     "Human reviewer confirmed all identified shot attempts in the annotated windows were made.",
+    "Two pass-flight observations previously grouped in 30-31s are now separated at 30.0s and 31.0s by explicit human instruction.",
     "Do not run the GT evaluator while evaluation_ready is false.",
     "Whole-second timecodes are sufficient for coarse control-state structure but not for 8-frame temporal event scoring.",
     "Pass B actor-to-track alignment must happen only after event timing refinement.",
