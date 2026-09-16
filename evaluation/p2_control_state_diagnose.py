@@ -158,6 +158,8 @@ def analyze_interval(
     flight_active = sum(bool(row.get("flight_active", False)) for row in interval_rows)
     flight_supported = sum(bool(row.get("flight_supported", False)) for row in interval_rows)
     shot_active = sum(bool(row.get("shot_active", False)) for row in interval_rows)
+    predicted_shot_flight = int(state_counts.get("shot_flight", 0))
+    predicted_unknown = int(state_counts.get("unknown", 0))
 
     result: dict[str, Any] = {
         "truth_index": truth_index,
@@ -177,6 +179,8 @@ def analyze_interval(
         "flight_active_frames": flight_active,
         "flight_supported_frames": flight_supported,
         "shot_active_frames": shot_active,
+        "predicted_shot_flight_frames": predicted_shot_flight,
+        "predicted_unknown_frames": predicted_unknown,
         "current_track_switches": _track_switches(interval_rows, "current_track_id"),
         "reset_increments": _reset_increments(interval_rows),
         "state_runs": _state_runs(interval_rows),
@@ -186,11 +190,8 @@ def analyze_interval(
         result["diagnostic_signals"] = {
             "possessed_truth_without_handler_frames": max(0, observed - handler_frames),
             "possessed_truth_with_lost_counter_frames": lost_frames_positive,
-            "possessed_truth_overridden_by_shot_frames": sum(
-                bool(row.get("shot_active", False))
-                and str(row.get("control_state") or "unknown") == "shot_flight"
-                for row in interval_rows
-            ),
+            "possessed_truth_predicted_shot_flight_frames": predicted_shot_flight,
+            "possessed_truth_engine_ineligible_frames": max(0, observed - engine_eligible),
         }
     elif truth_state == "pass_flight":
         result["diagnostic_signals"] = {
@@ -200,15 +201,16 @@ def analyze_interval(
             ),
             "pass_truth_with_flight_active_frames": flight_active,
             "pass_truth_with_flight_supported_frames": flight_supported,
-            "pass_truth_overridden_by_shot_frames": sum(
-                bool(row.get("shot_active", False))
-                and str(row.get("control_state") or "unknown") == "shot_flight"
-                for row in interval_rows
-            ),
+            "pass_truth_predicted_shot_flight_frames": predicted_shot_flight,
+            "pass_truth_predicted_unknown_frames": predicted_unknown,
         }
     elif truth_state == "shot_flight":
         result["diagnostic_signals"] = {
-            "shot_truth_before_shot_tracker_activation_frames": max(0, observed - shot_active),
+            "shot_truth_predicted_shot_flight_frames": predicted_shot_flight,
+            "shot_truth_shot_tracker_active_frames": shot_active,
+            "shot_truth_not_predicted_shot_flight_frames": max(
+                0, observed - predicted_shot_flight
+            ),
             "shot_truth_with_handler_still_locked_frames": handler_frames,
         }
     else:
@@ -242,9 +244,12 @@ def diagnose(states: list[dict[str, Any]], ground_truth: dict[str, Any]) -> dict
                 "matching_frames": 0,
                 "engine_ineligible_frames": 0,
                 "no_current_handler_frames": 0,
+                "lost_frames_positive": 0,
                 "flight_active_frames": 0,
                 "flight_supported_frames": 0,
                 "shot_active_frames": 0,
+                "predicted_shot_flight_frames": 0,
+                "predicted_unknown_frames": 0,
             },
         )
         bucket["intervals"] += 1
@@ -253,9 +258,12 @@ def diagnose(states: list[dict[str, Any]], ground_truth: dict[str, Any]) -> dict
             "matching_frames",
             "engine_ineligible_frames",
             "no_current_handler_frames",
+            "lost_frames_positive",
             "flight_active_frames",
             "flight_supported_frames",
             "shot_active_frames",
+            "predicted_shot_flight_frames",
+            "predicted_unknown_frames",
         ):
             bucket[key] += int(interval.get(key, 0) or 0)
 
