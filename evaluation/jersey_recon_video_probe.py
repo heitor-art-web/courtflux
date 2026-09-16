@@ -5,6 +5,7 @@ import json
 import os
 import sys
 import zipfile
+from collections import Counter
 from pathlib import Path
 from typing import Any
 
@@ -75,15 +76,37 @@ def _build_probe_summary(run_dir: Path, backend: str) -> Path:
     successes_all = int(identity.get("jersey_successes_all_inferred_frames") or 0)
     debug_attempts = int(debug.get("attempts") or len(debug_rows))
     debug_accepted = int(debug.get("accepted") or 0)
-    raw_numeric_rows = [row for row in debug_rows if row.get("raw_canonical") is not None]
-    raw_numeric_tracks = {
+    consensus_numeric_rows = [row for row in debug_rows if row.get("raw_canonical") is not None]
+    consensus_numeric_tracks = {
         int(row.get("track_id"))
-        for row in raw_numeric_rows
+        for row in consensus_numeric_rows
         if isinstance(row.get("track_id"), int) and int(row.get("track_id")) >= 0
     }
 
+    crop_total = 0
+    crop_numeric = 0
+    attempts_with_agreement = 0
+    attempts_with_conflict = 0
+    support_counts: Counter[int] = Counter()
+    selected_image_counts: Counter[int] = Counter()
+    for row in debug_rows:
+        per_crop = [item for item in list(row.get("per_crop_predictions") or []) if isinstance(item, dict)]
+        if per_crop:
+            crop_total += len(per_crop)
+            crop_numeric += sum(1 for item in per_crop if item.get("raw_canonical") is not None)
+            numbers = [str(item.get("raw_canonical")) for item in per_crop if item.get("raw_canonical") is not None]
+            unique = set(numbers)
+            if numbers and len(unique) == 1:
+                attempts_with_agreement += 1
+            elif len(unique) > 1:
+                attempts_with_conflict += 1
+            selected_image_counts[len(per_crop)] += 1
+        support = row.get("candidate_count")
+        if isinstance(support, int):
+            support_counts[int(support)] += 1
+
     payload = {
-        "version": "courtflux_jersey_recon_probe_v1",
+        "version": "courtflux_jersey_recon_probe_v2_multiframe",
         "run_id": summary.get("run_id") or run_dir.name,
         "video_source": summary.get("video_source"),
         "start_time_sec": summary.get("start_time_sec"),
@@ -98,9 +121,18 @@ def _build_probe_summary(run_dir: Path, backend: str) -> Path:
         "debug_attempts": debug_attempts,
         "debug_accepted": debug_accepted,
         "debug_acceptance_rate": _rate(debug_accepted, debug_attempts),
-        "raw_numeric_outputs": len(raw_numeric_rows),
-        "raw_numeric_yield": _rate(len(raw_numeric_rows), debug_attempts),
-        "tracks_with_raw_numeric_output": len(raw_numeric_tracks),
+        "consensus_numeric_outputs": len(consensus_numeric_rows),
+        "consensus_numeric_yield": _rate(len(consensus_numeric_rows), debug_attempts),
+        "tracks_with_consensus_numeric_output": len(consensus_numeric_tracks),
+        "per_crop_numeric_outputs": crop_numeric,
+        "per_crop_outputs": crop_total,
+        "per_crop_numeric_yield": _rate(crop_numeric, crop_total),
+        "attempts_all_selected_crops_agree": attempts_with_agreement,
+        "attempts_selected_crops_conflict": attempts_with_conflict,
+        "support_histogram": {str(key): value for key, value in sorted(support_counts.items())},
+        "selected_images_histogram": {
+            str(key): value for key, value in sorted(selected_image_counts.items())
+        },
         "high_quality_abstentions": debug.get("high_quality_abstentions"),
         "rejection_reasons": debug.get("rejection_reasons") or identity.get("rejection_reasons") or {},
         "candidate_counts": debug.get("candidate_counts") or identity.get("roster_candidate_counts") or {},
@@ -108,9 +140,9 @@ def _build_probe_summary(run_dir: Path, backend: str) -> Path:
         "checkpoint": identity.get("checkpoint") or {},
         "contact_sheets": debug.get("contact_sheets"),
         "analysis_note": (
-            "raw_numeric_yield is roster-independent recognizer output yield, not accuracy. "
-            "accepted/identification metrics can be suppressed by unknown-team match configs. "
-            "Upload the generated bundle for visual and failure-mode analysis."
+            "v2 is an automatic multi-frame evidence probe, not an accuracy benchmark. "
+            "Per-crop yield measures recognizer eagerness; consensus yield measures how often "
+            "multiple selected frames support one stable number before Identity-v2."
         ),
     }
     output = run_dir / "jersey_recon_probe_summary.json"
@@ -129,17 +161,14 @@ def _build_bundle(run_dir: Path) -> Path:
         run_dir / "identity_debug" / "identity_debug_summary.json",
         run_dir / "identity_debug" / "identity_debug.jsonl",
     ]
-
     with zipfile.ZipFile(bundle, "w", compression=zipfile.ZIP_DEFLATED) as archive:
         for path in include_files:
             if path.exists() and path.is_file():
                 archive.write(path, arcname=str(path.relative_to(run_dir)))
-
         contact_root = run_dir / "identity_debug" / "contact_sheets"
         if contact_root.exists():
             for path in sorted(contact_root.glob("*.jpg")):
                 archive.write(path, arcname=str(path.relative_to(run_dir)))
-
     return bundle
 
 
@@ -148,6 +177,10 @@ def run_probe(args: argparse.Namespace) -> None:
     os.environ["BASKETBALL_IDENTITY_DEBUG"] = "1"
     os.environ["BASKETBALL_SMART_BALL_MODE"] = "off"
     os.environ["BASKETBALL_SMART_BALL_PIPELINE"] = "0"
+    os.environ["BASKETBALL_JERSEY_RESEARCH_MULTIFRAME"] = "1"
+    os.environ["BASKETBALL_JERSEY_RESEARCH_TOP_K"] = str(args.top_k)
+    os.environ["BASKETBALL_JERSEY_RESEARCH_MIN_SUPPORT"] = str(args.min_support)
+    os.environ["BASKETBALL_JERSEY_RESEARCH_MIN_SHARE"] = str(args.min_share)
 
     from services.analytics import analyzer
 
@@ -183,8 +216,8 @@ def run_probe(args: argparse.Namespace) -> None:
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         description=(
-            "Run CourtFlux Jersey recognition on a real video and package automatic "
-            "diagnostics/contact sheets for offline analysis."
+            "Run CourtFlux Jersey recognition with experimental multi-frame evidence "
+            "selection and package diagnostics for offline analysis."
         )
     )
     parser.add_argument("--video", required=True, help="YouTube URL or local video path")
@@ -195,19 +228,26 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--imgsz", type=int, default=960)
     parser.add_argument("--device", choices=("mps", "cpu", "cuda"), default="mps")
     parser.add_argument(
-        "--tracker",
-        choices=("botsort.yaml", "bytetrack.yaml"),
-        default="botsort.yaml",
+        "--tracker", choices=("botsort.yaml", "bytetrack.yaml"), default="botsort.yaml"
     )
     parser.add_argument("--match-config", default="data/match_config.json")
     parser.add_argument("--jersey-backend", default="parseq_soccernet")
     parser.add_argument("--jersey-interval", type=int, default=24)
+    parser.add_argument("--top-k", type=int, default=5)
+    parser.add_argument("--min-support", type=int, default=2)
+    parser.add_argument("--min-share", type=float, default=0.60)
     parser.add_argument("--diagnostics-batch-size", type=int, default=100)
     args = parser.parse_args()
     if args.end <= args.start:
         parser.error("--end must be greater than --start")
     if args.jersey_interval <= 0:
         parser.error("--jersey-interval must be greater than zero")
+    if not 2 <= args.top_k <= 8:
+        parser.error("--top-k must be between 2 and 8")
+    if not 2 <= args.min_support <= args.top_k:
+        parser.error("--min-support must be between 2 and --top-k")
+    if not 0.50 <= args.min_share <= 0.95:
+        parser.error("--min-share must be between 0.50 and 0.95")
     return args
 
 
