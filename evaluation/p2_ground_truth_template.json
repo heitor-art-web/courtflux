@@ -1,0 +1,29 @@
+{
+  "version": "courtflux_p2_gt_v1",
+  "video": {
+    "source": "REPLACE_WITH_VIDEO_OR_FIXTURE_ID",
+    "start_time_sec": 0.0,
+    "end_time_sec": 60.0,
+    "fps": 25.0
+  },
+  "annotation_policy": {
+    "identity": "stable_track_id_when_visible; null_when_not_reliably_identifiable",
+    "team": "optional; null_when_uncertain",
+    "unknown_preferred_over_guess": true,
+    "control_states": [
+      "unknown",
+      "possessed",
+      "loose",
+      "pass_flight",
+      "shot_flight"
+    ]
+  },
+  "control_intervals": [],
+  "events": [],
+  "notes": [
+    "Human labels only. Do not bootstrap labels from P2 predictions.",
+    "Event rows require event_type and frame; outcome/team/actor fields are optional constraints.",
+    "Example event shape: {\"event_type\":\"shot_attempt\",\"frame\":123,\"outcome\":\"made\",\"actor_track_id\":null,\"team_id\":null}.",
+    "Example control interval shape: {\"state\":\"possessed\",\"frame_start\":100,\"frame_end\":130}."
+  ]
+}

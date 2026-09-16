@@ -46,8 +46,6 @@ JERSEY_BACKEND_ALIASES = {
     "efficientnet": "legacy_digit_heads",
 }
 
-# Keep Hugging Face model artefacts inside the project-local weights tree by default.
-# A deliberate HF_HOME supplied by the operator still wins.
 os.environ.setdefault("HF_HOME", str(DEFAULT_HF_HOME))
 
 LAB_DEFAULTS = {
@@ -59,12 +57,9 @@ LAB_DEFAULTS = {
     "imgsz": 960,
     "device": "mps",
     "tracker": "botsort.yaml",
-    "detection_only": True,
     "enable_jersey": True,
     "jersey_backend": "best_temporal",
     "jersey_interval_frames": 24,
-    # Worker-backed analyses persist platform state/summary/metrics through Supabase.
-    # Legacy local SQLite persistence is intentionally disabled for the Lab contract.
     "persist_results": False,
     "live_preview": True,
     "preview_interval_frames": 15,
@@ -84,16 +79,13 @@ def resolve_jersey_backend(value: str | None = None) -> str:
     requested = JERSEY_BACKEND_ALIASES.get(requested, requested)
     if requested not in JERSEY_BACKENDS:
         raise ValueError(
-            "BASKETBALL_JERSEY_BACKEND must be one of: "
-            + ", ".join(JERSEY_BACKENDS)
+            "BASKETBALL_JERSEY_BACKEND must be one of: " + ", ".join(JERSEY_BACKENDS)
         )
     return requested
 
 
 def lab_defaults() -> dict[str, Any]:
     defaults: dict[str, Any] = dict(LAB_DEFAULTS)
-    # Health/UI defaults must reflect the backend selected in the worker process,
-    # rather than always advertising best_temporal after an operator export.
     defaults["jersey_backend"] = resolve_jersey_backend()
     defaults["hf_home"] = os.getenv("HF_HOME", str(DEFAULT_HF_HOME))
     defaults["match_config"] = lab_match_config()
@@ -102,7 +94,6 @@ def lab_defaults() -> dict[str, Any]:
 
 
 def lab_match_config() -> dict[str, Any]:
-    """Return the repository-canonical match configuration used by Beta Lab."""
     data = json.loads(DEFAULT_MATCH_CONFIG_PATH.read_text(encoding="utf-8"))
     if not isinstance(data, dict):
         raise TypeError(f"Lab match config must be a JSON object: {DEFAULT_MATCH_CONFIG_PATH}")

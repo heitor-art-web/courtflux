@@ -1,10 +1,11 @@
+from __future__ import annotations
+
 from pathlib import Path
+import argparse
 import json
+import os
 import sqlite3
 import sys
-import torch
-import os
-import argparse
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
 if str(PROJECT_ROOT) not in sys.path:
@@ -12,35 +13,24 @@ if str(PROJECT_ROOT) not in sys.path:
 os.chdir(PROJECT_ROOT)
 
 import cv2
+import torch
 from ultralytics import YOLO
 
-from services.vision.camera_tracker import CameraTracker
 from core.config import settings
-from services.profiler import PipelineProfiler
 from services.database_service import DatabaseService
-from services.persistence import db_setup
-from services.ingestion.youtube_downloader import YouTubeDownloader
-from services.vision.detector import Detector
-from services.vision.identity_v2_detector import PerformanceDetector
-from services.vision.visual_analyzer import VisualAnalyzer
-from services.vision.team_only_analyzer import TeamOnlyAnalyzer
-from services.vision.p1_jersey_analyzer import PerformanceJerseyAnalyzer
-from services.vision.p1_temporal_jersey_analyzer import PerformanceTemporalJerseyAnalyzer
-from services.vision.p1_uncertainty_jersey_analyzer import PerformanceUncertaintyJerseyAnalyzer
-from services.vision.p1_jersey_challengers import (
-    EBQwenJerseyAnalyzer,
-    RoboflowClassificationJerseyAnalyzer,
-    SmolVLM2JerseyAnalyzer,
-)
-from services.vision.p1_trocr_jersey_analyzer import TrOCRSmallPrintedJerseyAnalyzer
-from services.vision.p1_parseq_jersey_analyzer import SoccerNetPARSeqJerseyAnalyzer
-from services.vision.p1_parseq_literature_analyzer import LiteraturePARSeqJerseyAnalyzer
-from services.analytics.engine import Engine
+from services.diagnostics import RunDiagnostics
 from services.frame_loader import FrameLoader
 from services.gameplay_filter import GameplayFilter
+from services.ingestion.youtube_downloader import YouTubeDownloader
+from services.p2.metrics import P2MetricsCollector
+from services.persistence import db_setup
 from services.pipeline import Pipeline
+from services.profiler import PipelineProfiler
 from services.video_session import VideoSession
-from services.diagnostics import RunDiagnostics
+from services.vision.camera_tracker import CameraTracker
+from services.vision.identity_v2_detector import PerformanceDetector
+from services.vision.jersey_backend_factory import build_jersey_visual
+from services.vision.team_only_analyzer import TeamOnlyAnalyzer
 
 DEFAULT_MATCH_CONFIG_PATH = PROJECT_ROOT / "data" / "match_config.json"
 
@@ -50,222 +40,6 @@ def _env_bool(name: str, fallback: bool = False) -> bool:
     if raw is None or not raw.strip():
         return bool(fallback)
     return raw.strip().lower() not in {"0", "false", "no", "off"}
-
-
-def _project_path(value: str, fallback: Path) -> Path:
-    raw = str(value or "").strip()
-    path = Path(raw).expanduser() if raw else fallback
-    if not path.is_absolute():
-        path = PROJECT_ROOT / path
-    return path.resolve()
-
-
-def _build_detection_only_visual(profiling_path: str, device: str):
-    """Select the P1 Jersey backend without silently changing its contract.
-
-    P1 visual revalidation defaults to the real temporal checkpoint benchmarked in
-    PR #37: ``weights/best_temporal.pt``. External challengers are explicit opt-ins
-    so their integrated metrics can be compared against that baseline without changing
-    the accepted detector/ball/team configuration.
-
-    ``auto`` remains available for deliberate local experimentation. Its preference
-    order is best_temporal -> uncertainty_vit_b -> legacy_digit_heads.
-    """
-    requested = str(
-        os.getenv("BASKETBALL_JERSEY_BACKEND", "best_temporal")
-        or "best_temporal"
-    ).strip().lower()
-    aliases = {
-        "temporal": "best_temporal",
-        "bilstm": "best_temporal",
-        "best_temporal.pt": "best_temporal",
-        "vit": "uncertainty_vit_b",
-        "vit_b": "uncertainty_vit_b",
-        "uncertainty": "uncertainty_vit_b",
-        "legacy": "legacy_digit_heads",
-        "efficientnet": "legacy_digit_heads",
-        "roboflow": "roboflow_classification",
-        "rf": "roboflow_classification",
-        "ebqwen": "ebqwen_vl",
-        "qwen": "ebqwen_vl",
-        "smolvlm2": "smolvlm2_jersey",
-        "smol": "smolvlm2_jersey",
-        "trocr": "trocr_small_printed",
-        "trocr_small": "trocr_small_printed",
-        "trocr-small-printed": "trocr_small_printed",
-        "parseq": "parseq_soccernet",
-        "soccernet_parseq": "parseq_soccernet",
-        "parseq-soccernet": "parseq_soccernet",
-        "parseq_lit": "parseq_soccernet_lit",
-        "parseq-lit": "parseq_soccernet_lit",
-        "parseq_literature": "parseq_soccernet_lit",
-    }
-    requested = aliases.get(requested, requested)
-    if requested not in {
-        "auto",
-        "best_temporal",
-        "uncertainty_vit_b",
-        "legacy_digit_heads",
-        "roboflow_classification",
-        "ebqwen_vl",
-        "smolvlm2_jersey",
-        "trocr_small_printed",
-        "parseq_soccernet",
-        "parseq_soccernet_lit",
-    }:
-        raise ValueError(
-            "BASKETBALL_JERSEY_BACKEND must be one of: best_temporal, "
-            "roboflow_classification, ebqwen_vl, smolvlm2_jersey, "
-            "trocr_small_printed, parseq_soccernet, parseq_soccernet_lit, auto, "
-            "uncertainty_vit_b, legacy_digit_heads"
-        )
-
-    if requested == "roboflow_classification":
-        print(
-            "⚡ Jersey challenger: Roboflow hosted ResNet50 classification / "
-            "raw visual class + roster validation.",
-            flush=True,
-        )
-        return RoboflowClassificationJerseyAnalyzer(
-            profiling_path=profiling_path,
-            device=device,
-        )
-
-    if requested == "ebqwen_vl":
-        print(
-            "⚡ Jersey challenger: E-BARD EBQwen2.5-VL / multi-image raw OCR / "
-            "roster validation.",
-            flush=True,
-        )
-        return EBQwenJerseyAnalyzer(
-            profiling_path=profiling_path,
-            device=device,
-        )
-
-    if requested == "smolvlm2_jersey":
-        print(
-            "⚡ Jersey challenger: jersey-finetuned SmolVLM2 / raw OCR / "
-            "roster validation.",
-            flush=True,
-        )
-        return SmolVLM2JerseyAnalyzer(
-            profiling_path=profiling_path,
-            device=device,
-        )
-
-    if requested == "trocr_small_printed":
-        print(
-            "⚡ Jersey challenger: microsoft/trocr-small-printed / strict raw OCR / "
-            "roster validation.",
-            flush=True,
-        )
-        return TrOCRSmallPrintedJerseyAnalyzer(
-            profiling_path=profiling_path,
-            device=device,
-        )
-
-    if requested == "parseq_soccernet":
-        print(
-            "⚡ Jersey challenger: SoccerNet-finetuned PARSeq / strict raw OCR / "
-            "existing CourtFlux torso crop / roster validation.",
-            flush=True,
-        )
-        return SoccerNetPARSeqJerseyAnalyzer(
-            profiling_path=profiling_path,
-            device=device,
-        )
-
-    if requested == "parseq_soccernet_lit":
-        print(
-            "⚡ Jersey challenger: same SoccerNet PARSeq reader / Hockey legibility / "
-            "localized ROI proposals / multi-frame visual consensus / roster validation.",
-            flush=True,
-        )
-        return LiteraturePARSeqJerseyAnalyzer(
-            profiling_path=profiling_path,
-            device=device,
-        )
-
-    temporal_path = _project_path(
-        os.getenv("BASKETBALL_JERSEY_TEMPORAL_CHECKPOINT", ""),
-        PROJECT_ROOT / "weights" / "best_temporal.pt",
-    )
-    uncertainty_path = _project_path(
-        os.getenv("BASKETBALL_JERSEY_VIT_CHECKPOINT", ""),
-        PROJECT_ROOT / "weights" / "jersey_uncertainty_vit_b.pt",
-    )
-    legacy_path = _project_path(
-        os.getenv("BASKETBALL_JERSEY_LEGACY_CHECKPOINT", ""),
-        PROJECT_ROOT / "weights" / "jersey_number_recon.pt",
-    )
-
-    if requested == "best_temporal" or (
-        requested == "auto" and temporal_path.exists()
-    ):
-        if not temporal_path.exists():
-            raise FileNotFoundError(
-                "Requested best_temporal Jersey backend, but checkpoint is missing: "
-                f"{temporal_path}. Put the PR #37 temporal checkpoint at "
-                "weights/best_temporal.pt or set BASKETBALL_JERSEY_TEMPORAL_CHECKPOINT."
-            )
-        print(
-            "⚡ Jersey recognition: best_temporal.pt / EfficientNet-B0 + BiLSTM / "
-            "ordered uniform 8-frame sequence (PR #37 temporal benchmark contract).",
-            flush=True,
-        )
-        return PerformanceTemporalJerseyAnalyzer(
-            profiling_path=profiling_path,
-            device=device,
-            model_path=str(temporal_path),
-            sequence_length=8,
-        )
-
-    if requested == "uncertainty_vit_b" or (
-        requested == "auto" and uncertainty_path.exists()
-    ):
-        if not uncertainty_path.exists():
-            raise FileNotFoundError(
-                "Requested uncertainty_vit_b Jersey backend, but checkpoint is missing: "
-                f"{uncertainty_path}"
-            )
-        print(
-            "⚡ Jersey recognition: uncertainty-aware ViT-B / torso_direct / "
-            "best_uncertainty.",
-            flush=True,
-        )
-        return PerformanceUncertaintyJerseyAnalyzer(
-            profiling_path=profiling_path,
-            device=device,
-            model_path=str(uncertainty_path),
-            sequence_length=8,
-        )
-
-    if requested == "auto":
-        print(
-            "⚠️ Neither best_temporal.pt nor the optional ViT-B checkpoint is available; "
-            "auto is falling back to the legacy EfficientNet digit heads. This fallback "
-            "showed severe digit collapse on run 20260914_165736_812383.",
-            flush=True,
-        )
-    if not legacy_path.exists():
-        raise FileNotFoundError(f"Legacy Jersey checkpoint not found: {legacy_path}")
-    visual = PerformanceJerseyAnalyzer(
-        profiling_path=profiling_path,
-        device=device,
-        model_path=str(legacy_path),
-        sequence_length=8,
-    )
-    visual.checkpoint_diagnostics = dict(visual.checkpoint_diagnostics)
-    visual.checkpoint_diagnostics.setdefault("backend", "legacy_digit_heads")
-    visual.checkpoint_diagnostics["fallback_reason"] = (
-        "temporal_and_uncertainty_checkpoints_missing"
-        if requested == "auto"
-        else "explicit_legacy_backend"
-    )
-    visual.checkpoint_diagnostics["known_runtime_limitation"] = (
-        "digit_distribution_collapse_observed_on_20260914_165736_812383"
-    )
-    return visual
 
 
 def _generate_identity_debug(summary_path: Path, run_dir: Path) -> dict | None:
@@ -285,15 +59,6 @@ def _generate_identity_debug(summary_path: Path, run_dir: Path) -> dict | None:
             json.dumps(payload, indent=2, ensure_ascii=False) + "\n",
             encoding="utf-8",
         )
-        print(
-            "[IDENTITY_DEBUG] "
-            f"attempts={debug.get('attempts', 0)} "
-            f"accepted={debug.get('accepted', 0)} "
-            f"high_quality_abstentions={debug.get('high_quality_abstentions', 0)} "
-            f"contact_sheets={debug.get('contact_sheets', 0)} "
-            f"dir={(run_dir / 'identity_debug').resolve()}",
-            flush=True,
-        )
         return debug
     except Exception as exc:
         print(
@@ -301,6 +66,29 @@ def _generate_identity_debug(summary_path: Path, run_dir: Path) -> dict | None:
             flush=True,
         )
         return None
+
+
+def _attach_p2_metrics(
+    summary_path: Path,
+    run_dir: Path,
+    collector: P2MetricsCollector,
+) -> dict:
+    p2_summary = collector.summary()
+    metrics_path = run_dir / "p2_metrics.json"
+    metrics_path.write_text(
+        json.dumps(p2_summary, indent=2, ensure_ascii=False) + "\n",
+        encoding="utf-8",
+    )
+    payload = json.loads(summary_path.read_text(encoding="utf-8"))
+    payload["p2"] = p2_summary
+    payload["p2_metrics_file"] = str(metrics_path)
+    summary_path.write_text(
+        json.dumps(payload, indent=2, ensure_ascii=False) + "\n",
+        encoding="utf-8",
+    )
+    print(f"[P2_METRICS] {json.dumps(p2_summary, separators=(',', ':'))}", flush=True)
+    print(f"[P2_METRICS_FILE] {metrics_path.resolve()}", flush=True)
+    return p2_summary
 
 
 def resolve_device(requested: str | None) -> str:
@@ -331,13 +119,17 @@ def main(
     tracker: str = "botsort.yaml",
     reset_db: bool = False,
     match_config_path: str | None = None,
-    detection_only: bool = False,
     enable_jersey: bool = True,
     jersey_interval_frames: int = 24,
     db_batch_size: int = 100,
     diagnostics_batch_size: int = 100,
     persist_results: bool = True,
 ):
+    """Run the single canonical CourtFlux P1 -> P2 analysis path."""
+    # P2 is now part of the canonical rebuilt runtime. Keeping this explicit here makes
+    # worker/Lab runs and direct analyzer runs share the same execution contract.
+    os.environ["BASKETBALL_P2_ENABLED"] = "1"
+
     resolved_device = resolve_device(device)
     chosen_model = model_path or settings.model
     chosen_match_config = Path(match_config_path) if match_config_path else DEFAULT_MATCH_CONFIG_PATH
@@ -355,14 +147,18 @@ def main(
         imgsz=imgsz,
         device=resolved_device,
         tracker=tracker,
-        detection_only=detection_only,
         enable_jersey=enable_jersey,
         jersey_interval_frames=jersey_interval_frames,
         batch_size=diagnostics_batch_size,
     )
+    # RunDiagnostics still supports the historical field for older standalone callers,
+    # but the canonical P1->P2 runtime must not emit a retired detection-only mode.
+    diagnostics.config.pop("detection_only", None)
+    diagnostics._write_meta()
     diagnostics.capture_match_config(chosen_match_config)
     print(f"[RUN_DIR] {diagnostics.run_dir.resolve()}", flush=True)
 
+    p2_metrics = P2MetricsCollector()
     conn = None
     session = None
     pipeline = None
@@ -384,8 +180,7 @@ def main(
 
         print(f"🎬 Initializing video source: {video_source}", flush=True)
         if "youtube.com" in video_source or "youtu.be" in video_source:
-            downloader = YouTubeDownloader(output_dir="data")
-            video_path = downloader.get_local_video(video_source)
+            video_path = YouTubeDownloader(output_dir="data").get_local_video(video_source)
         else:
             video_path = video_source
 
@@ -398,75 +193,48 @@ def main(
         session.cap.set(cv2.CAP_PROP_POS_MSEC, start_time * 1000)
 
         court_calibration_enabled = _env_bool("BASKETBALL_COURT_CALIBRATION", False)
-        if detection_only:
-            engine = None
-            if court_calibration_enabled:
-                print("📐 Detection-only mode: diagnostic court calibration enabled.", flush=True)
-                camera_tracker = CameraTracker(first_frame=first_frame)
-                court_polygon = camera_tracker.base_polygon
-            else:
-                print("⚡ Detection-only mode: camera/homography and analytics engine disabled.", flush=True)
-                camera_tracker = None
-                court_polygon = None
-        else:
-            print("📐 Calibrating court...", flush=True)
+        if court_calibration_enabled:
+            print("📐 Canonical runtime: diagnostic court calibration enabled.", flush=True)
             camera_tracker = CameraTracker(first_frame=first_frame)
             court_polygon = camera_tracker.base_polygon
-            homography = camera_tracker.initial_H
-            camera_tracker = CameraTracker(first_frame, homography, court_polygon)
-            engine = Engine(fps=int(round(session.fps or 30.0)))
-
-        if detection_only:
-            if enable_jersey:
-                visual = _build_detection_only_visual(
-                    profiling_path=str(chosen_match_config),
-                    device=resolved_device,
-                )
-            else:
-                print("⚡ Jersey model disabled; using lightweight team-only classifier.", flush=True)
-                visual = TeamOnlyAnalyzer(profiling_path=str(chosen_match_config))
         else:
-            visual = VisualAnalyzer(reader=None, profiling_path=str(chosen_match_config))
+            print("⚡ Canonical runtime: image-space CourtState; homography disabled.", flush=True)
+            camera_tracker = None
+            court_polygon = None
+
+        if enable_jersey:
+            visual = build_jersey_visual(
+                profiling_path=str(chosen_match_config),
+                device=resolved_device,
+                project_root=PROJECT_ROOT,
+            )
+        else:
+            print("⚡ Jersey disabled; Identity v2 uses team/track evidence only.", flush=True)
+            visual = TeamOnlyAnalyzer(profiling_path=str(chosen_match_config))
 
         chosen_model_path = Path(chosen_model)
         if not chosen_model_path.is_absolute():
             chosen_model_path = PROJECT_ROOT / chosen_model_path
         if not chosen_model_path.exists():
-            raise FileNotFoundError(f"Model not found: {chosen_model}. Select a checkpoint available on the worker.")
+            raise FileNotFoundError(
+                f"Model not found: {chosen_model}. Select a checkpoint available on the worker."
+            )
 
         model = YOLO(str(chosen_model_path))
         model.to(resolved_device)
-        print(
-            f"🧠 YOLO model={chosen_model} device={resolved_device} conf={detector_conf:.2f} "
-            f"imgsz={imgsz} tracker={tracker}", flush=True,
+        detector = PerformanceDetector(
+            model=model,
+            visual_analyzer=visual,
+            profiling_path=str(chosen_match_config),
+            device=resolved_device,
+            detector_conf=detector_conf,
+            imgsz=imgsz,
+            iou=0.5,
+            tracker=tracker,
+            max_det=40,
+            enable_jersey=enable_jersey,
+            jersey_interval_frames=jersey_interval_frames,
         )
-
-        if detection_only:
-            detector = PerformanceDetector(
-                model=model,
-                visual_analyzer=visual,
-                profiling_path=str(chosen_match_config),
-                device=resolved_device,
-                detector_conf=detector_conf,
-                imgsz=imgsz,
-                iou=0.5,
-                tracker=tracker,
-                max_det=40,
-                enable_jersey=enable_jersey,
-                jersey_interval_frames=jersey_interval_frames,
-            )
-        else:
-            detector = Detector(
-                model=model,
-                visual_analyzer=visual,
-                profiling_path=str(chosen_match_config),
-                device=resolved_device,
-                detector_conf=detector_conf,
-                imgsz=imgsz,
-                iou=0.5,
-                tracker=tracker,
-                max_det=40,
-            )
 
         profiler = PipelineProfiler()
         pipeline = Pipeline(
@@ -479,21 +247,14 @@ def main(
             detector=detector,
             camera_tracker=camera_tracker,
             backboard_roi=None,
-            engine=engine,
             database=db_service,
             renderer=None,
             profiler=profiler,
             db_conn=conn,
-            detection_only=detection_only,
             persist_results=persist_results,
         )
 
         loader = FrameLoader(session)
-        print(
-            f"\n🚀 Processing video ({start_time:.1f}s → "
-            f"{end_time_val if end_time_val != float('inf') else 'End'}s)", flush=True,
-        )
-
         frame_id = 0
         total_window_sec = (
             max(0.0, float(end_time_val) - float(start_time))
@@ -509,14 +270,19 @@ def main(
                 frame_state.court_polygon = court_polygon
             frame_state = pipeline.process(frame_state)
             diagnostics.log_frame(frame_state)
+            p2_metrics.observe(frame_state)
             frame_id += 1
 
             if total_window_sec and (frame_id == 1 or frame_id % 15 == 0):
                 current_timestamp = float(getattr(frame_state, "timestamp", start_time) or start_time)
-                processed_sec = max(0.0, min(current_timestamp, float(end_time_val)) - float(start_time))
+                processed_sec = max(
+                    0.0,
+                    min(current_timestamp, float(end_time_val)) - float(start_time),
+                )
                 percent = min(100.0, max(0.0, (processed_sec / total_window_sec) * 100.0))
                 print(
-                    "[PROGRESS] " + json.dumps(
+                    "[PROGRESS] "
+                    + json.dumps(
                         {
                             "timestamp_sec": round(current_timestamp, 3),
                             "processed_seconds": round(processed_sec, 3),
@@ -529,21 +295,6 @@ def main(
                     flush=True,
                 )
 
-        if total_window_sec:
-            print(
-                "[PROGRESS] " + json.dumps(
-                    {
-                        "timestamp_sec": round(float(end_time_val), 3),
-                        "processed_seconds": round(total_window_sec, 3),
-                        "total_seconds": round(total_window_sec, 3),
-                        "percent": 100.0,
-                        "frames_processed": frame_id,
-                    },
-                    separators=(",", ":"),
-                ),
-                flush=True,
-            )
-
         pipeline.flush()
         video_fps = float(session.fps or 30.0)
         performance = profiler.snapshot(video_fps=video_fps)
@@ -552,12 +303,13 @@ def main(
         extra = {
             "status": "completed",
             "video_path": str(video_path),
-            "mode": "detection_only" if detection_only else "full",
+            "mode": "canonical_p1_p2",
+            "p2_enabled": True,
             "persist_results": persist_results,
             "court_calibration_enabled": bool(camera_tracker is not None),
-            "court_calibration_diagnostic_only": bool(detection_only and camera_tracker is not None),
+            "court_calibration_diagnostic_only": bool(camera_tracker is not None),
         }
-        if detection_only and enable_jersey and visual is not None:
+        if enable_jersey and visual is not None:
             checkpoint = dict(getattr(visual, "checkpoint_diagnostics", {}) or {})
             extra["jersey_backend"] = {
                 "backend": checkpoint.get("backend", "unknown"),
@@ -567,7 +319,6 @@ def main(
                 "preprocessing": checkpoint.get("preprocessing"),
                 "temporal_aggregation": checkpoint.get("temporal_aggregation"),
                 "roster_policy": checkpoint.get("roster_policy"),
-                "fallback_reason": checkpoint.get("fallback_reason"),
                 "provider": checkpoint.get("provider"),
                 "experimental_challenger": checkpoint.get("experimental_challenger", False),
             }
@@ -577,19 +328,12 @@ def main(
                 "keypoint_schema": getattr(camera_tracker, "keypoint_schema", None),
                 "keypoint_map_size": len(getattr(camera_tracker, "keypoint_map", {}) or {}),
             }
-        if detection_only and hasattr(detector, "ball_candidate_backend_metadata"):
+        if hasattr(detector, "ball_candidate_backend_metadata"):
             extra["ball_detector_backend"] = detector.ball_candidate_backend_metadata()
-        if engine is not None:
-            metrics_path = engine.metrics.export()
-            extra["legacy_metrics_file"] = str(metrics_path)
 
         summary_path = diagnostics.finish(extra=extra, performance=performance)
-        identity_debug_enabled = bool(
-            detection_only
-            and enable_jersey
-            and _env_bool("BASKETBALL_IDENTITY_DEBUG", True)
-        )
-        if identity_debug_enabled:
+        _attach_p2_metrics(summary_path, diagnostics.run_dir, p2_metrics)
+        if enable_jersey and _env_bool("BASKETBALL_IDENTITY_DEBUG", True):
             _generate_identity_debug(summary_path, diagnostics.run_dir)
         print(f"[SUMMARY] {summary_path.resolve()}", flush=True)
         print("\n✅ Analysis completed successfully.", flush=True)
@@ -600,15 +344,20 @@ def main(
                 pipeline.flush()
             except Exception:
                 pass
-        performance = pipeline.profiler.snapshot(video_fps=float(getattr(session, "fps", 30.0) or 30.0)) if pipeline else {}
+        performance = (
+            pipeline.profiler.snapshot(
+                video_fps=float(getattr(session, "fps", 30.0) or 30.0)
+            )
+            if pipeline
+            else {}
+        )
         summary_path = diagnostics.finish(
             extra={"status": "failed", "error": f"{type(exc).__name__}: {exc}"},
             performance=performance,
         )
+        _attach_p2_metrics(summary_path, diagnostics.run_dir, p2_metrics)
         print(f"[SUMMARY] {summary_path.resolve()}", flush=True)
-        print(f"❌ Analysis failed: {type(exc).__name__}: {exc}", flush=True)
         raise
-
     finally:
         if conn is not None:
             try:
@@ -630,7 +379,7 @@ def parse_time_to_seconds(time_str: str) -> float:
         return 0.0
     if ":" not in time_str:
         return float(time_str)
-    parts = [float(p) for p in time_str.split(":")]
+    parts = [float(part) for part in time_str.split(":")]
     if len(parts) == 2:
         return parts[0] * 60 + parts[1]
     if len(parts) == 3:
@@ -639,7 +388,7 @@ def parse_time_to_seconds(time_str: str) -> float:
 
 
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser(description="Basketball Analytics Beta Pipeline")
+    parser = argparse.ArgumentParser(description="CourtFlux canonical P1/P2 analysis pipeline")
     parser.add_argument("--video", type=str, required=True, help="Local video path or YouTube URL")
     parser.add_argument("--start", type=str, default="0", help="Start in seconds or MM:SS")
     parser.add_argument("--end", type=str, default="", help="End in seconds or MM:SS")
@@ -648,16 +397,15 @@ if __name__ == "__main__":
     parser.add_argument("--imgsz", type=int, default=640, help="YOLO inference image size")
     parser.add_argument("--device", type=str, default=settings.device, choices=["mps", "cpu", "cuda"])
     parser.add_argument("--tracker", type=str, default="botsort.yaml", choices=["botsort.yaml", "bytetrack.yaml"])
-    parser.add_argument("--match-config", type=str, default=str(DEFAULT_MATCH_CONFIG_PATH), help="Match config JSON path")
-    parser.add_argument("--reset-db", action="store_true", help="Reset SQLite before the run")
-    parser.add_argument("--detection-only", action="store_true", help="Skip tactical analytics; court calibration can be enabled diagnostically via env")
-    parser.add_argument("--no-jersey", action="store_true", help="Disable temporal jersey recognition")
-    parser.add_argument("--jersey-interval", type=int, default=24, help="Frames between jersey attempts per tracked player")
-    parser.add_argument("--db-batch-size", type=int, default=100, help="Frames buffered per SQLite commit")
-    parser.add_argument("--diagnostics-batch-size", type=int, default=100, help="Frame records buffered per JSONL write")
-    parser.add_argument("--no-persist", action="store_true", help="Do not write SQLite during the benchmark")
-
+    parser.add_argument("--match-config", type=str, default=str(DEFAULT_MATCH_CONFIG_PATH))
+    parser.add_argument("--reset-db", action="store_true")
+    parser.add_argument("--no-jersey", action="store_true")
+    parser.add_argument("--jersey-interval", type=int, default=24)
+    parser.add_argument("--db-batch-size", type=int, default=100)
+    parser.add_argument("--diagnostics-batch-size", type=int, default=100)
+    parser.add_argument("--no-persist", action="store_true")
     args = parser.parse_args()
+
     main(
         video_source=args.video,
         start_time=parse_time_to_seconds(args.start),
@@ -669,7 +417,6 @@ if __name__ == "__main__":
         tracker=args.tracker,
         reset_db=args.reset_db,
         match_config_path=args.match_config,
-        detection_only=args.detection_only,
         enable_jersey=not args.no_jersey,
         jersey_interval_frames=args.jersey_interval,
         db_batch_size=args.db_batch_size,

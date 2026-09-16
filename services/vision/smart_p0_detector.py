@@ -15,10 +15,9 @@ class PerformanceDetector(P0PerformanceDetector):
     """P0 detector with conservative smart candidate generation before association.
 
     Smart Ball can be ablated with ``BASKETBALL_SMART_BALL_MODE``:
-    ``off`` | ``verify`` | ``zoom`` | ``full``. The legacy
-    ``BASKETBALL_SMART_BALL_PIPELINE`` toggle remains a fallback when the explicit mode
-    is absent. Crop inference has its own image size so a 640px crop is not needlessly
-    upscaled to the 960px full-frame operating point.
+    ``off`` | ``verify`` | ``zoom`` | ``full``. The default is ``off``. Crop inference
+    has its own image size so a 640px crop is not needlessly upscaled to the 960px
+    full-frame operating point.
     """
 
     SMART_MODES = {"off", "verify", "zoom", "full"}
@@ -27,19 +26,15 @@ class PerformanceDetector(P0PerformanceDetector):
         super().__init__(*args, **kwargs)
         self.smart_ball_pipeline: SmartBallCandidatePipeline | None = None
 
-        requested_mode = os.getenv("BASKETBALL_SMART_BALL_MODE", "").strip().lower()
-        if requested_mode and requested_mode not in self.SMART_MODES:
+        requested_mode = (
+            os.getenv("BASKETBALL_SMART_BALL_MODE", "off").strip().lower() or "off"
+        )
+        if requested_mode not in self.SMART_MODES:
             print(
-                f"⚠️ Invalid BASKETBALL_SMART_BALL_MODE={requested_mode!r}; using full.",
+                f"⚠️ Invalid BASKETBALL_SMART_BALL_MODE={requested_mode!r}; using off.",
                 flush=True,
             )
-            requested_mode = "full"
-        if not requested_mode:
-            requested_mode = (
-                "full"
-                if self._env_bool("BASKETBALL_SMART_BALL_PIPELINE", True)
-                else "off"
-            )
+            requested_mode = "off"
         self.smart_ball_mode = requested_mode
         self.smart_ball_pipeline_enabled = self.smart_ball_mode != "off"
         self.smart_crop_imgsz = self._env_int(

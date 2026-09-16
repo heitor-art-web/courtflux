@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import gc
-import os
 from time import perf_counter
 from typing import Any
 
