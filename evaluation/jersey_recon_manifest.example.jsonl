@@ -1,0 +1,3 @@
+{"track_id":"example-001","gt_number":"21","visible":true,"oracle_roi":[0.30,0.24,0.68,0.58],"auto_roi":[0.32,0.25,0.69,0.59],"oracle_prediction":"21","auto_prediction":"21","final_track_prediction":"21","notes":"clear back-facing number"}
+{"track_id":"example-002","gt_number":"4","visible":true,"oracle_roi":[0.34,0.20,0.62,0.52],"auto_roi":[0.16,0.12,0.52,0.46],"oracle_prediction":"4","auto_prediction":"8","final_track_prediction":"4","notes":"oracle crop readable; automatic ROI drifts left"}
+{"track_id":"example-003","gt_number":"13","visible":false,"oracle_roi":null,"auto_roi":null,"oracle_prediction":null,"auto_prediction":null,"final_track_prediction":null,"notes":"number never genuinely readable in sampled track"}
