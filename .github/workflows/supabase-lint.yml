@@ -17,10 +17,10 @@ jobs:
       SUPABASE_TELEMETRY_DISABLED: "1"
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
 
       - name: Set up Supabase CLI
-        uses: supabase/setup-cli@v1
+        uses: supabase/setup-cli@v2
         with:
           version: 2.117.0
 
