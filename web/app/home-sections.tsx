@@ -28,39 +28,43 @@ function SectionHeading({ eyebrow, title, highlight, copy }: { eyebrow: string; 
 function Hero({ section }: { section: HeroSection }) {
   return (
     <section id={section.id} className={styles.hero} aria-labelledby="hero-title">
+      <div className={styles.heroMedia} aria-hidden="true">
+        <Image
+          src={section.media.src}
+          alt=""
+          fill
+          sizes="(max-width: 900px) 100vw, 1240px"
+          priority
+          className={styles.heroImage}
+        />
+        <div className={styles.heroScrim} />
+      </div>
+
       <div className={styles.heroContent}>
         <div className={styles.eyebrow}>{section.eyebrow}</div>
         <h1 id="hero-title">{section.title} <span>{section.highlight}</span></h1>
         <p className={styles.heroCopy}>{section.copy}</p>
         <div className={styles.actions}>
           <Link className={styles.primaryButton} href={section.primary.href}>{section.primary.label}</Link>
-          <Link className={styles.secondaryButton} href={section.secondary.href}>{section.secondary.label}</Link>
+          <Link className={styles.heroSecondaryButton} href={section.secondary.href}>{section.secondary.label}</Link>
         </div>
         <div className={styles.pills} aria-label={section.eyebrow}>
           {section.pills.map((pill) => <span className={styles.pill} key={pill}>{pill}</span>)}
         </div>
       </div>
 
-      <div className={styles.heroVisual}>
-        <div className={styles.visualFrame}>
-          <Image
-            src={section.media.src}
-            alt={section.media.alt}
-            width={section.media.width}
-            height={section.media.height}
-            sizes="(max-width: 900px) 100vw, 58vw"
-            priority
-          />
-        </div>
-        <div className={styles.heroInsight}>
+      <aside className={styles.heroInsight} aria-label={section.overlay.kicker}>
+        <div className={styles.heroInsightTopline}>
           <span>{section.overlay.kicker}</span>
-          <strong>{section.overlay.title}</strong>
-          <div className={styles.heroMetrics}>
-            {section.overlay.metrics.map((metric) => <em key={metric}>{metric}</em>)}
-          </div>
-          <small>{section.overlay.note}</small>
+          <i aria-hidden="true" />
         </div>
-      </div>
+        <strong>{section.overlay.title}</strong>
+        <div className={styles.heroMetrics}>
+          {section.overlay.metrics.map((metric) => <em key={metric}>{metric}</em>)}
+        </div>
+        <div className={styles.heroTimeline} aria-hidden="true"><span /></div>
+        <small>{section.overlay.note}</small>
+      </aside>
     </section>
   );
 }
@@ -86,10 +90,10 @@ function Story({ section }: { section: StorySection }) {
       <p className={styles.sectionCopy}>{section.copy}</p>
       {section.points?.length ? (
         <div className={styles.storyPoints}>
-          {section.points.map((point) => (
+          {section.points.map((point, index) => (
             <div className={styles.storyPoint} key={point.title}>
-              <strong>{point.title}</strong>
-              <p>{point.copy}</p>
+              <span>0{index + 1}</span>
+              <div><strong>{point.title}</strong><p>{point.copy}</p></div>
             </div>
           ))}
         </div>
@@ -99,14 +103,21 @@ function Story({ section }: { section: StorySection }) {
   );
 
   const media = (
-    <div className={styles.visualFrame}>
+    <div className={styles.storyMedia} aria-hidden="true">
       <Image
         src={section.media.src}
-        alt={section.media.alt}
-        width={section.media.width}
-        height={section.media.height}
+        alt=""
+        fill
         sizes="(max-width: 900px) 100vw, 52vw"
+        className={styles.storyImage}
       />
+      <div className={styles.storyMediaScrim} />
+      <div className={styles.trackingOverlay}>
+        <span className={styles.trackingDotOne} />
+        <span className={styles.trackingDotTwo} />
+        <span className={styles.trackingDotThree} />
+        <div className={styles.trackingLine} />
+      </div>
     </div>
   );
 
@@ -124,20 +135,31 @@ function Evidence({ section }: { section: EvidenceSection }) {
     <section id={section.id} className={`${styles.section} ${styles.evidenceSection}`}>
       <SectionHeading eyebrow={section.eyebrow} title={section.title} highlight={section.highlight} copy={section.copy} />
       <div className={styles.evidenceGrid}>
-        <div className={styles.visualFrame}>
+        <div className={styles.evidenceMedia} aria-hidden="true">
           <Image
             src={section.media.src}
-            alt={section.media.alt}
-            width={section.media.width}
-            height={section.media.height}
+            alt=""
+            fill
             sizes="(max-width: 900px) 100vw, 58vw"
+            className={styles.evidenceImage}
           />
+          <div className={styles.evidenceScrim} />
+          <div className={styles.evidenceChrome}>
+            <span />
+            <span />
+            <span />
+          </div>
+          <div className={styles.evidenceTimeline}>
+            <i />
+            <b />
+          </div>
         </div>
         <article className={styles.insightCard}>
           <span className={styles.kicker}>{section.insight.kicker}</span>
           <strong>{section.insight.title}</strong>
           <p>{section.insight.copy}</p>
-          <div className={styles.insightAction}>{section.insight.action} <span aria-hidden="true">→</span></div>
+          <div className={styles.insightDivider} />
+          <div className={styles.insightAction}>{section.insight.action} <span aria-hidden="true">↗</span></div>
         </article>
       </div>
     </section>
@@ -149,12 +171,13 @@ function Audiences({ section }: { section: AudienceSection }) {
     <section id={section.id} className={styles.section}>
       <SectionHeading eyebrow={section.eyebrow} title={section.title} highlight={section.highlight} copy={section.copy} />
       <div className={styles.audienceGrid}>
-        {section.items.map((item) => (
+        {section.items.map((item, index) => (
           <Link className={styles.audienceCard} href={item.href} key={item.audience}>
+            <small>0{index + 1}</small>
             <span>{item.audience}</span>
             <strong>{item.title}</strong>
             <p>{item.copy}</p>
-            <em>{section.actionLabel} <span aria-hidden="true">→</span></em>
+            <em>{section.actionLabel} <span aria-hidden="true">↗</span></em>
           </Link>
         ))}
       </div>
@@ -181,7 +204,7 @@ function HowItWorks({ section }: { section: HowSection }) {
 
 function Pricing({ section }: { section: PricingSection }) {
   return (
-    <section id={section.id} className={styles.section}>
+    <section id={section.id} className={`${styles.section} ${styles.pricingSection}`}>
       <SectionHeading eyebrow={section.eyebrow} title={section.title} highlight={section.highlight} copy={section.copy} />
 
       <div className={pricingStyles.trialBanner}>
@@ -239,12 +262,18 @@ function Faq({ section }: { section: FaqSection }) {
 function FinalCta({ section }: { section: FinalCtaSection }) {
   return (
     <section id={section.id} className={styles.finalCta}>
-      <div className={styles.eyebrow}>{section.eyebrow}</div>
-      <h2 className={styles.sectionTitle}>{section.title} <span>{section.highlight}</span></h2>
-      <p className={styles.sectionCopy}>{section.copy}</p>
-      <div className={styles.actions}>
-        <Link className={styles.primaryButton} href={section.primary.href}>{section.primary.label}</Link>
-        <Link className={styles.secondaryButton} href={section.secondary.href}>{section.secondary.label}</Link>
+      <div className={styles.finalCtaGrid}>
+        <div>
+          <div className={styles.eyebrow}>{section.eyebrow}</div>
+          <h2 className={styles.sectionTitle}>{section.title} <span>{section.highlight}</span></h2>
+        </div>
+        <div className={styles.finalCtaCopy}>
+          <p className={styles.sectionCopy}>{section.copy}</p>
+          <div className={styles.actions}>
+            <Link className={styles.primaryButton} href={section.primary.href}>{section.primary.label}</Link>
+            <Link className={styles.heroSecondaryButton} href={section.secondary.href}>{section.secondary.label}</Link>
+          </div>
+        </div>
       </div>
     </section>
   );
