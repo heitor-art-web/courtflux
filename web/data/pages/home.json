@@ -38,7 +38,7 @@
     { "label": "How it works", "href": "#how" },
     { "label": "Pricing", "href": "#pricing" },
     { "label": "Sign in", "href": "/login" },
-    { "label": "Analyze a game", "href": "/login?mode=signup", "cta": true }
+    { "label": "Analyze your first game free", "href": "/login?mode=signup", "cta": true }
   ],
   "sections": [
     {
@@ -48,7 +48,7 @@
       "title": "Turn every game into your next",
       "highlight": "improvement.",
       "copy": "CourtFlux turns ordinary basketball video into structured game intelligence, player insights and the moments that explain them — so you can understand what happened and what to work on next.",
-      "primary": { "label": "Analyze a game", "href": "/login?mode=signup" },
+      "primary": { "label": "Analyze your first game free", "href": "/login?mode=signup" },
       "secondary": { "label": "See how it works", "href": "#how" },
       "pills": ["Use ordinary game film", "No proprietary camera", "Evidence-first analysis"],
       "media": {
@@ -159,66 +159,56 @@
     {
       "type": "pricing",
       "id": "pricing",
-      "eyebrow": "Private beta pricing",
-      "title": "Pay for the video you",
-      "highlight": "actually analyse.",
-      "copy": "Plans are structured around processed video minutes rather than an arbitrary game count. Billing is not active during the private beta.",
+      "eyebrow": "Simple launch pricing",
+      "title": "Start with one game. Pay when CourtFlux earns its",
+      "highlight": "place in your workflow.",
+      "copy": "Analyze your first game free. The launch model is a 14-day trial with no credit card, followed by two simple plans built around how coaches and teams actually review basketball.",
+      "trial": {
+        "kicker": "Free trial",
+        "title": "Your first game is on us.",
+        "copy": "Analyze one game, up to 60 minutes, with the real CourtFlux workflow before choosing a paid plan.",
+        "meta": "14 days · 1 game · no credit card required",
+        "cta": { "label": "Analyze your first game free", "href": "/login?mode=signup" }
+      },
       "plans": [
-        {
-          "kicker": "Private beta",
-          "name": "Beta",
-          "price": "€0",
-          "suffix": "/ month",
-          "description": "Explore the current tracking and basketball-state layers while CourtFlux is benchmarked and refined.",
-          "allowance": "60 analysis minutes / month",
-          "allowanceCopy": "About one full-game recording, or several shorter clips.",
-          "features": ["Player and team tracking", "Ball intelligence", "P2 game-state outputs", "Processing diagnostics"],
-          "cta": "Analyze a game",
-          "href": "/login?mode=signup",
-          "featured": false
-        },
         {
           "kicker": "Individual workflow",
           "name": "Coach",
-          "price": "€14.99",
+          "price": "€29",
           "suffix": "/ month",
-          "description": "For an individual coach or analyst who wants a repeatable video-analysis workflow.",
-          "allowance": "300 analysis minutes / month",
-          "allowanceCopy": "About five full-game recordings, or dozens of shorter clips.",
-          "features": ["Everything in Beta", "Saved analyses", "Game summaries as validated", "One coach workspace"],
-          "cta": "Join the beta",
+          "annualPrice": "€249",
+          "annualSuffix": "/ year, billed annually",
+          "description": "For an individual coach or analyst turning game film into a repeatable review and improvement workflow.",
+          "allowance": "About 5 full games / month",
+          "allowanceCopy": "300 analysis minutes included. Additional processing can be added when needed.",
+          "features": ["Game analysis", "Player, team and ball tracking", "P2 basketball-state and event outputs", "Video-linked evidence and saved analyses"],
+          "cta": "Start with a free game",
           "href": "/login?mode=signup",
           "featured": false
         },
         {
           "tag": "Best for teams",
-          "kicker": "Shared workflow",
+          "kicker": "Shared team workflow",
           "name": "Team",
-          "price": "€29.99",
+          "price": "€69",
           "suffix": "/ month",
-          "description": "For one squad and coaching staff building a season-long analysis workflow.",
-          "allowance": "720 analysis minutes / month",
-          "allowanceCopy": "About twelve full-game recordings, with clips charged only by duration.",
-          "features": ["Everything in Coach", "Saved roster and identity context", "Shared staff workflow", "Structured analytics as validated"],
-          "cta": "Join the beta",
+          "annualPrice": "€699",
+          "annualSuffix": "/ year, billed annually",
+          "description": "For one squad and coaching staff building shared game, player and season intelligence.",
+          "allowance": "About 16 full games / month",
+          "allowanceCopy": "1,000 analysis minutes included. Additional processing can be added when needed.",
+          "features": ["Everything in Coach", "Team workspace and roster context", "Shared coaching workflow", "Structured team and player analytics as validated"],
+          "cta": "Start with a free game",
           "href": "/login?mode=signup",
           "featured": true
-        },
-        {
-          "kicker": "Multi-team development",
-          "name": "Academy",
-          "price": "From €79",
-          "suffix": "/ month",
-          "description": "Indicative future packaging for organisations managing multiple squads and development pathways.",
-          "allowance": "2,400 analysis minutes / month",
-          "allowanceCopy": "About forty full-game recordings across the organisation.",
-          "features": ["Multi-team workflow", "Multiple rosters", "Staff permissions", "Development reporting as the product matures"],
-          "cta": "Talk to CourtFlux",
-          "href": "/login?mode=signup",
-          "featured": false
         }
       ],
-      "note": "Indicative product pricing only. Billing is not active during private beta. Final allowances, feature availability and paid launch terms will be confirmed before charging customers."
+      "organisation": {
+        "title": "Running multiple teams?",
+        "copy": "Clubs and academies can talk to CourtFlux about multi-team access, higher processing volume and organisation-level workflows.",
+        "cta": { "label": "Discuss club or academy access", "href": "/login?mode=signup" }
+      },
+      "note": "Target launch pricing. Billing is not active during the private beta. The 14-day trial, paid allowances and any additional-processing options will be enabled and confirmed before paid launch."
     },
     {
       "type": "faq",
@@ -230,8 +220,9 @@
         { "question": "Who is CourtFlux for?", "answer": "CourtFlux is being built for basketball players, coaches, teams, academies and performance analysts who want to get more useful information from the game film they already record." },
         { "question": "What can CourtFlux understand today?", "answer": "The current system tracks players, teams and the ball and includes a P2 basketball-state layer for ball control, possession changes, loose-ball sequences, shot attempts and candidate pass, turnover and rebound events. Formal event and attribution accuracy is still being validated against reviewed human ground truth." },
         { "question": "Do I need specialist cameras?", "answer": "No proprietary capture system is required. CourtFlux is designed around ordinary basketball game film, although camera position, resolution, occlusion and motion blur can affect analysis quality." },
+        { "question": "How will the free trial work?", "answer": "The launch model is a 14-day trial with no credit card required and one game of up to 60 minutes included. During the private beta, billing and trial enforcement are not yet active." },
         { "question": "Does CourtFlux replace the coach or analyst?", "answer": "No. CourtFlux is intended to structure evidence, reduce manual video work and help people review the game faster while keeping basketball judgement with the player, coach or analyst." },
-        { "question": "How do analysis minutes work?", "answer": "Usage is based on processed video duration rather than the number of uploads. A 3-minute clip uses about 3 analysis minutes and a 60-minute recording uses about 60." }
+        { "question": "How do game allowances work?", "answer": "Plans are presented in approximate full games because that is how coaches think about usage. Under the hood, usage is measured by processed video duration: Coach includes 300 analysis minutes and Team includes 1,000 per month." }
       ]
     },
     {
@@ -241,7 +232,7 @@
       "title": "Turn the game you played into what you",
       "highlight": "work on next.",
       "copy": "Start with the footage you already have and see how CourtFlux turns basketball video into structured game understanding.",
-      "primary": { "label": "Analyze a game", "href": "/login?mode=signup" },
+      "primary": { "label": "Analyze your first game free", "href": "/login?mode=signup" },
       "secondary": { "label": "For coaches", "href": "/basketball-analysis-for-coaches" }
     }
   ],
