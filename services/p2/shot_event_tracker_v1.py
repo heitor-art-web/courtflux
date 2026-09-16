@@ -13,39 +13,69 @@ from core.basketball_event import (
 from core.court_state import CourtState
 
 
+RimBBox = tuple[float, float, float, float]
+
+
+@dataclass(slots=True)
+class _PendingBridge:
+    pre_frame: int
+    pre_ball: tuple[float, float]
+    pre_rim: RimBBox
+    first_post_frame: int
+    first_post_ball: tuple[float, float]
+    first_post_rim: RimBBox
+    crossing_x_px: float
+    crossing_fraction: float
+    ball_gap_frames: int
+    rim_gap_frames: int
+    pre_gap_relative_fall_px_per_frame: float | None = None
+
+
 @dataclass(slots=True)
 class _ShotCandidate:
     frame_start: int
     timestamp_start_sec: float | None
     last_frame: int
-    rim_bbox: tuple[float, float, float, float] | None = None
+    rim_bbox: RimBBox | None = None
     had_above_rim: bool = False
     had_rim_band: bool = False
     direct_ball_observations: int = 0
     semantic_start: bool = False
     evidence: set[str] = field(default_factory=set)
+
+    previous_observed_ball_position: tuple[float, float] | None = None
+    previous_observed_rim_bbox: RimBBox | None = None
+    previous_observed_frame: int | None = None
     last_observed_ball_position: tuple[float, float] | None = None
-    last_observed_rim_bbox: tuple[float, float, float, float] | None = None
+    last_observed_rim_bbox: RimBBox | None = None
     last_observed_frame: int | None = None
+
     current_rim_gap_frames: int = 0
     max_ball_gap_frames: int = 0
     max_rim_gap_frames: int = 0
     outcome_geometry_tainted: bool = False
 
+    pending_bridge: _PendingBridge | None = None
+    bridge_count: int = 0
+    post_gap_fall_ratio: float | None = None
+    pre_gap_relative_fall_px_per_frame: float | None = None
+    post_gap_relative_fall_px_per_frame: float | None = None
+    last_crossing_x_px: float | None = None
+    last_crossing_fraction: float | None = None
+
 
 class ShotEventTrackerV1:
     """Conservative temporal shot candidate/resolution state machine.
 
-    Semantic detections are supporting evidence only. Missing trajectory evidence resolves
-    to UNKNOWN. Geometric outcomes use direct ball observations only: predicted holds may
-    preserve temporal continuity, but cannot independently prove MADE or MISSED. A direct
-    observation after a short ball gap can bracket a MADE crossing when both observed
-    endpoints are consistent with the rim. An outside-rim reappearance after any ball/rim
-    evidence gap abstains to UNKNOWN instead of manufacturing a miss.
+    P1 predictions preserve continuity but do not independently prove an outcome.
+    Direct observed ball/rim samples drive geometry.
 
-    After any resolution, a new candidate requires direct observed evidence that the ball
-    left the previous start/rim zone before the tracker is re-armed. This prevents one
-    physical flight from becoming UNKNOWN -> immediate duplicate shot.
+    Direct consecutive observations may resolve MADE/MISSED immediately. If a downward
+    rim-plane crossing is bracketed across an observation gap, the tracker creates a
+    pending bridge and waits for one more direct sample. The post-gap fall ratio is
+    exported as diagnostic evidence only; it is not yet calibrated to classify MADE.
+    Therefore a settled pending bridge resolves UNKNOWN unless independent semantic
+    ball-in-basket evidence confirms MADE.
     """
 
     def __init__(
@@ -61,17 +91,14 @@ class ShotEventTrackerV1:
         self.fps = max(1.0, float(fps))
         self.reset_frames = max(1, int(round(self.fps * float(reset_time_sec))))
         self.minimum_between_starts_frames = max(
-            1,
-            int(round(self.fps * float(minimum_between_starts_sec))),
+            1, int(round(self.fps * float(minimum_between_starts_sec)))
         )
         self.cooldown_after_made_frames = max(
-            1,
-            int(round(self.fps * float(cooldown_after_made_sec))),
+            1, int(round(self.fps * float(cooldown_after_made_sec)))
         )
         self.rearm_clear_observed_frames = max(1, int(rearm_clear_observed_frames))
         self.rearm_min_separation_frames = max(
-            1,
-            int(round(self.fps * float(rearm_min_separation_sec))),
+            1, int(round(self.fps * float(rearm_min_separation_sec)))
         )
 
         self._active: _ShotCandidate | None = None
@@ -123,10 +150,10 @@ class ShotEventTrackerV1:
         return flags
 
     @staticmethod
-    def _rim_candidates(court_state: CourtState | None) -> list[tuple[float, float, float, float]]:
+    def _rim_candidates(court_state: CourtState | None) -> list[RimBBox]:
         if court_state is None:
             return []
-        rims: list[tuple[float, float, float, float]] = []
+        rims: list[RimBBox] = []
         for row in list(court_state.basket_evidence or []):
             if not isinstance(row, dict) or str(row.get("kind") or "").lower() != "rim":
                 continue
@@ -144,8 +171,8 @@ class ShotEventTrackerV1:
     @staticmethod
     def _nearest_rim(
         ball_position: tuple[float, float] | None,
-        rims: list[tuple[float, float, float, float]],
-    ) -> tuple[float, float, float, float] | None:
+        rims: list[RimBBox],
+    ) -> RimBBox | None:
         if not rims:
             return None
         if ball_position is None:
@@ -162,7 +189,7 @@ class ShotEventTrackerV1:
     @staticmethod
     def _relative_to_rim(
         ball_position: tuple[float, float] | None,
-        rim: tuple[float, float, float, float] | None,
+        rim: RimBBox | None,
     ) -> dict[str, bool]:
         result = {
             "above": False,
@@ -186,9 +213,7 @@ class ShotEventTrackerV1:
             and result["near_x"]
         )
         result["below"] = by > rim_y + 0.65 * height
-        result["inside_mouth"] = (
-            (x1 - 0.20 * width) <= bx <= (x2 + 0.20 * width)
-        )
+        result["inside_mouth"] = (x1 - 0.20 * width) <= bx <= (x2 + 0.20 * width)
         return result
 
     @staticmethod
@@ -200,29 +225,80 @@ class ShotEventTrackerV1:
         )
 
     @staticmethod
-    def _crosses_rim_between_observations(
+    def _rim_center_y(rim: RimBBox) -> float:
+        return (rim[1] + rim[3]) / 2.0
+
+    @staticmethod
+    def _rim_boxes_overlap(a: RimBBox, b: RimBBox) -> bool:
+        return bool(
+            min(a[2], b[2]) > max(a[0], b[0])
+            and min(a[3], b[3]) > max(a[1], b[1])
+        )
+
+    @classmethod
+    def _crossing_at_rim_plane(
+        cls,
         *,
         previous_ball: tuple[float, float],
-        previous_rim: tuple[float, float, float, float],
+        previous_rim: RimBBox,
         current_ball: tuple[float, float],
-        current_rim: tuple[float, float, float, float],
-    ) -> bool:
+        current_rim: RimBBox,
+    ) -> dict[str, float | bool | None]:
+        """Intersect the observed ball segment with the moving rim plane."""
         prev_x, prev_y = previous_ball
         cur_x, cur_y = current_ball
-        prev_x1, prev_y1, prev_x2, prev_y2 = previous_rim
-        cur_x1, cur_y1, cur_x2, cur_y2 = current_rim
-        prev_width = max(1.0, prev_x2 - prev_x1)
-        cur_width = max(1.0, cur_x2 - cur_x1)
-        prev_rim_y = (prev_y1 + prev_y2) / 2.0
-        cur_rim_y = (cur_y1 + cur_y2) / 2.0
-        crossed_downward = prev_y <= prev_rim_y and cur_y > cur_rim_y
-        previous_inside = (
-            (prev_x1 - 0.20 * prev_width) <= prev_x <= (prev_x2 + 0.20 * prev_width)
-        )
-        current_inside = (
-            (cur_x1 - 0.20 * cur_width) <= cur_x <= (cur_x2 + 0.20 * cur_width)
-        )
-        return bool(crossed_downward and previous_inside and current_inside)
+        prev_rim_y = cls._rim_center_y(previous_rim)
+        cur_rim_y = cls._rim_center_y(current_rim)
+
+        prev_rel_y = prev_y - prev_rim_y
+        cur_rel_y = cur_y - cur_rim_y
+        denominator = cur_rel_y - prev_rel_y
+        if not (prev_rel_y <= 0.0 < cur_rel_y) or denominator <= 0.0:
+            return {
+                "crossed_downward": False,
+                "inside_mouth": False,
+                "fraction": None,
+                "x_px": None,
+            }
+
+        fraction = -prev_rel_y / denominator
+        if not 0.0 <= fraction <= 1.0:
+            return {
+                "crossed_downward": False,
+                "inside_mouth": False,
+                "fraction": None,
+                "x_px": None,
+            }
+
+        cross_x = prev_x + fraction * (cur_x - prev_x)
+        cross_x1 = previous_rim[0] + fraction * (current_rim[0] - previous_rim[0])
+        cross_x2 = previous_rim[2] + fraction * (current_rim[2] - previous_rim[2])
+        width = max(1.0, cross_x2 - cross_x1)
+        inside = (cross_x1 - 0.20 * width) <= cross_x <= (cross_x2 + 0.20 * width)
+        return {
+            "crossed_downward": True,
+            "inside_mouth": bool(inside),
+            "fraction": float(fraction),
+            "x_px": float(cross_x),
+        }
+
+    @classmethod
+    def _relative_fall_per_frame(
+        cls,
+        *,
+        first_frame: int,
+        first_ball: tuple[float, float],
+        first_rim: RimBBox,
+        second_frame: int,
+        second_ball: tuple[float, float],
+        second_rim: RimBBox,
+    ) -> float | None:
+        delta_frames = int(second_frame) - int(first_frame)
+        if delta_frames <= 0:
+            return None
+        first_rel = first_ball[1] - cls._rim_center_y(first_rim)
+        second_rel = second_ball[1] - cls._rim_center_y(second_rim)
+        return (second_rel - first_rel) / float(delta_frames)
 
     def _can_start(self, frame_id: int) -> bool:
         return bool(
@@ -244,12 +320,27 @@ class ShotEventTrackerV1:
             quality *= 0.72
         return max(0.0, min(quality, 1.0))
 
+    def _record_direct_observation(
+        self,
+        candidate: _ShotCandidate,
+        *,
+        frame_id: int,
+        ball_position: tuple[float, float],
+        rim: RimBBox | None,
+    ) -> None:
+        candidate.previous_observed_ball_position = candidate.last_observed_ball_position
+        candidate.previous_observed_rim_bbox = candidate.last_observed_rim_bbox
+        candidate.previous_observed_frame = candidate.last_observed_frame
+        candidate.last_observed_ball_position = ball_position
+        candidate.last_observed_rim_bbox = rim
+        candidate.last_observed_frame = int(frame_id)
+
     def _start(
         self,
         *,
         frame_id: int,
         timestamp_sec: float | None,
-        rim: tuple[float, float, float, float] | None,
+        rim: RimBBox | None,
         ball_state: BallState | None,
         semantic_start: bool,
     ) -> None:
@@ -264,17 +355,21 @@ class ShotEventTrackerV1:
             candidate.evidence.add("semantic_shot_action")
         if self._direct_observed(ball_state):
             position = ball_state.position()
-            candidate.direct_ball_observations = 1
-            candidate.last_observed_ball_position = position
-            candidate.last_observed_rim_bbox = rim
-            candidate.last_observed_frame = int(frame_id)
-            relative = self._relative_to_rim(position, rim)
-            if relative["above"]:
-                candidate.had_above_rim = True
-                candidate.evidence.add("ball_above_rim")
-            if relative["rim_band"]:
-                candidate.had_rim_band = True
-                candidate.evidence.add("ball_near_rim")
+            if position is not None:
+                candidate.direct_ball_observations = 1
+                self._record_direct_observation(
+                    candidate,
+                    frame_id=frame_id,
+                    ball_position=position,
+                    rim=rim,
+                )
+                relative = self._relative_to_rim(position, rim)
+                if relative["above"]:
+                    candidate.had_above_rim = True
+                    candidate.evidence.add("ball_above_rim")
+                if relative["rim_band"]:
+                    candidate.had_rim_band = True
+                    candidate.evidence.add("ball_near_rim")
         self._active = candidate
         self._last_start_frame = int(frame_id)
 
@@ -299,6 +394,7 @@ class ShotEventTrackerV1:
         if outcome is ShotOutcome.UNKNOWN:
             final_confidence = min(final_confidence, 0.55)
 
+        bridge = candidate.pending_bridge
         event = BasketballEvent(
             event_id=f"shot-attempt:{candidate.frame_start}:{frame_id}",
             event_type=BasketballEventType.SHOT_ATTEMPT,
@@ -318,17 +414,14 @@ class ShotEventTrackerV1:
                 "version": "shot_event_tracker_v1",
                 "semantic_classes_are_supporting_evidence_only": True,
                 "missing_evidence_policy": "unknown_not_missed",
-                "outcome_geometry_policy": "direct_observation_endpoints_only",
+                "outcome_geometry_policy": "rim_plane_intersection_plus_pending_bridge",
+                "post_gap_fall_ratio_policy": "diagnostic_only_unvalidated",
                 "rearm_policy": "direct_observed_clearance_plus_min_separation",
             },
             attributes={
                 "outcome": outcome.value,
                 "resolution_reason": reason,
-                "rim_bbox_px": (
-                    list(candidate.rim_bbox)
-                    if candidate.rim_bbox is not None
-                    else None
-                ),
+                "rim_bbox_px": list(candidate.rim_bbox) if candidate.rim_bbox is not None else None,
                 "had_above_rim": candidate.had_above_rim,
                 "had_rim_band": candidate.had_rim_band,
                 "direct_ball_observations": candidate.direct_ball_observations,
@@ -336,6 +429,16 @@ class ShotEventTrackerV1:
                 "max_rim_evidence_gap_frames": candidate.max_rim_gap_frames,
                 "outcome_geometry_tainted": candidate.outcome_geometry_tainted,
                 "semantic_start": candidate.semantic_start,
+                "pending_bridge_used": candidate.bridge_count > 0,
+                "pending_bridge_count": candidate.bridge_count,
+                "crossing_x_px": candidate.last_crossing_x_px,
+                "crossing_fraction": candidate.last_crossing_fraction,
+                "post_gap_fall_ratio": candidate.post_gap_fall_ratio,
+                "pre_gap_relative_fall_px_per_frame": candidate.pre_gap_relative_fall_px_per_frame,
+                "post_gap_relative_fall_px_per_frame": candidate.post_gap_relative_fall_px_per_frame,
+                "bridge_ball_gap_frames": None if bridge is None else bridge.ball_gap_frames,
+                "bridge_rim_gap_frames": None if bridge is None else bridge.rim_gap_frames,
+                "post_gap_fall_ratio_validated_for_outcome": False,
             },
         )
 
@@ -356,8 +459,6 @@ class ShotEventTrackerV1:
         semantic_start: bool,
         trajectory_start: bool,
     ) -> bool:
-        """Return True only on the frame that completes the re-arm gate."""
-
         if not self._awaiting_rearm:
             return False
 
@@ -368,7 +469,6 @@ class ShotEventTrackerV1:
             and not trajectory_start
             and not relative.get("rim_band", False)
         )
-
         if clear_of_previous_shot_zone:
             self._rearm_clear_frames += 1
         elif semantic_start or trajectory_start or relative.get("rim_band", False):
@@ -384,6 +484,99 @@ class ShotEventTrackerV1:
             self._rearm_count += 1
             return True
         return False
+
+    def _start_pending_bridge(
+        self,
+        candidate: _ShotCandidate,
+        *,
+        previous_ball: tuple[float, float],
+        previous_rim: RimBBox,
+        previous_frame: int,
+        current_ball: tuple[float, float],
+        current_rim: RimBBox,
+        current_frame: int,
+        crossing: dict[str, float | bool | None],
+        ball_gap_frames: int,
+        rim_gap_frames: int,
+    ) -> None:
+        pre_gap_rate = None
+        if (
+            candidate.previous_observed_ball_position is not None
+            and candidate.previous_observed_rim_bbox is not None
+            and candidate.previous_observed_frame is not None
+        ):
+            pre_gap_rate = self._relative_fall_per_frame(
+                first_frame=candidate.previous_observed_frame,
+                first_ball=candidate.previous_observed_ball_position,
+                first_rim=candidate.previous_observed_rim_bbox,
+                second_frame=previous_frame,
+                second_ball=previous_ball,
+                second_rim=previous_rim,
+            )
+
+        candidate.pending_bridge = _PendingBridge(
+            pre_frame=previous_frame,
+            pre_ball=previous_ball,
+            pre_rim=previous_rim,
+            first_post_frame=current_frame,
+            first_post_ball=current_ball,
+            first_post_rim=current_rim,
+            crossing_x_px=float(crossing["x_px"]),
+            crossing_fraction=float(crossing["fraction"]),
+            ball_gap_frames=int(ball_gap_frames),
+            rim_gap_frames=int(rim_gap_frames),
+            pre_gap_relative_fall_px_per_frame=pre_gap_rate,
+        )
+        candidate.bridge_count += 1
+        candidate.last_crossing_x_px = float(crossing["x_px"])
+        candidate.last_crossing_fraction = float(crossing["fraction"])
+        candidate.pre_gap_relative_fall_px_per_frame = pre_gap_rate
+        candidate.evidence.add("pending_rim_crossing_bridge")
+
+    def _settle_pending_bridge(
+        self,
+        candidate: _ShotCandidate,
+        *,
+        frame_id: int,
+        timestamp_sec: float | None,
+        ball_state: BallState | None,
+        ball_position: tuple[float, float] | None,
+        rim: RimBBox | None,
+    ) -> list[BasketballEvent] | None:
+        bridge = candidate.pending_bridge
+        if bridge is None or not self._direct_observed(ball_state):
+            return None
+        if ball_position is None or rim is None:
+            return None
+        if int(frame_id) <= bridge.first_post_frame:
+            return None
+
+        post_rate = self._relative_fall_per_frame(
+            first_frame=bridge.first_post_frame,
+            first_ball=bridge.first_post_ball,
+            first_rim=bridge.first_post_rim,
+            second_frame=frame_id,
+            second_ball=ball_position,
+            second_rim=rim,
+        )
+        pre_rate = bridge.pre_gap_relative_fall_px_per_frame
+        ratio = None
+        if pre_rate is not None and pre_rate > 1e-6 and post_rate is not None:
+            ratio = post_rate / pre_rate
+
+        candidate.post_gap_relative_fall_px_per_frame = post_rate
+        candidate.post_gap_fall_ratio = ratio
+        candidate.evidence.add("post_gap_fall_ratio_measured")
+        return [
+            self._resolve(
+                frame_id=frame_id,
+                timestamp_sec=timestamp_sec,
+                outcome=ShotOutcome.UNKNOWN,
+                confidence=0.50,
+                reason="pending_bridge_post_gap_ratio_unvalidated",
+                ball_state=ball_state,
+            )
+        ]
 
     def update(
         self,
@@ -420,7 +613,6 @@ class ShotEventTrackerV1:
                     trajectory_start=trajectory_start,
                 )
                 return []
-
             if self._can_start(frame_id) and start_signal:
                 self._start(
                     frame_id=frame_id,
@@ -436,7 +628,7 @@ class ShotEventTrackerV1:
         if candidate.rim_bbox is None and rim is not None:
             candidate.rim_bbox = rim
 
-        rim_gap_before_current = candidate.current_rim_gap_frames > 0
+        rim_gap_before_current = candidate.current_rim_gap_frames
         if rim is None:
             if candidate.had_above_rim or candidate.had_rim_band:
                 candidate.outcome_geometry_tainted = True
@@ -461,8 +653,6 @@ class ShotEventTrackerV1:
                 ball_gap_frames,
             )
 
-        # Geometric evidence is direct-observation-only. predicted_hold may preserve the
-        # trajectory but must not manufacture above/rim-band evidence used for outcomes.
         if direct_observed and rim is not None:
             candidate.direct_ball_observations += 1
             if relative["above"]:
@@ -496,6 +686,17 @@ class ShotEventTrackerV1:
                 )
             ]
 
+        settled = self._settle_pending_bridge(
+            candidate,
+            frame_id=frame_id,
+            timestamp_sec=timestamp_sec,
+            ball_state=ball_state,
+            ball_position=ball_position,
+            rim=rim,
+        )
+        if settled is not None:
+            return settled
+
         if (
             direct_observed
             and ball_position is not None
@@ -504,29 +705,54 @@ class ShotEventTrackerV1:
             and previous_observed_rim is not None
             and previous_observed_frame is not None
         ):
-            bracketed_crossing = self._crosses_rim_between_observations(
+            crossing = self._crossing_at_rim_plane(
                 previous_ball=previous_observed_ball,
                 previous_rim=previous_observed_rim,
                 current_ball=ball_position,
                 current_rim=rim,
             )
-            if candidate.had_above_rim and bracketed_crossing and not rim_gap_before_current:
-                reason = (
-                    "observed_downward_rim_crossing"
-                    if ball_gap_frames == 0
-                    else "observed_bracketed_rim_crossing_after_gap"
-                )
-                candidate.evidence.add(reason)
-                return [
-                    self._resolve(
-                        frame_id=frame_id,
-                        timestamp_sec=timestamp_sec,
-                        outcome=ShotOutcome.MADE,
-                        confidence=0.80 if reason == "observed_downward_rim_crossing" else 0.72,
-                        reason=reason,
-                        ball_state=ball_state,
+            crossed_inside = bool(
+                crossing["crossed_downward"] and crossing["inside_mouth"]
+            )
+
+            if candidate.had_above_rim and crossed_inside:
+                candidate.last_crossing_x_px = float(crossing["x_px"])
+                candidate.last_crossing_fraction = float(crossing["fraction"])
+                geometry_coherent = self._rim_boxes_overlap(previous_observed_rim, rim)
+
+                if ball_gap_frames == 0 and rim_gap_before_current == 0:
+                    candidate.evidence.add("observed_downward_rim_plane_crossing")
+                    return [
+                        self._resolve(
+                            frame_id=frame_id,
+                            timestamp_sec=timestamp_sec,
+                            outcome=ShotOutcome.MADE,
+                            confidence=0.80,
+                            reason="observed_downward_rim_plane_crossing",
+                            ball_state=ball_state,
+                        )
+                    ]
+
+                if geometry_coherent:
+                    self._start_pending_bridge(
+                        candidate,
+                        previous_ball=previous_observed_ball,
+                        previous_rim=previous_observed_rim,
+                        previous_frame=previous_observed_frame,
+                        current_ball=ball_position,
+                        current_rim=rim,
+                        current_frame=frame_id,
+                        crossing=crossing,
+                        ball_gap_frames=ball_gap_frames,
+                        rim_gap_frames=rim_gap_before_current,
                     )
-                ]
+                    self._record_direct_observation(
+                        candidate,
+                        frame_id=frame_id,
+                        ball_position=ball_position,
+                        rim=rim,
+                    )
+                    return []
 
             if (
                 candidate.had_above_rim
@@ -536,18 +762,17 @@ class ShotEventTrackerV1:
             ):
                 if (
                     ball_gap_frames > 0
-                    or rim_gap_before_current
+                    or rim_gap_before_current > 0
                     or candidate.outcome_geometry_tainted
                 ):
-                    reason = "rim_exit_after_observation_gap_insufficient_for_miss"
-                    candidate.evidence.add(reason)
+                    candidate.evidence.add("rim_exit_after_observation_gap_insufficient_for_miss")
                     return [
                         self._resolve(
                             frame_id=frame_id,
                             timestamp_sec=timestamp_sec,
                             outcome=ShotOutcome.UNKNOWN,
                             confidence=0.48,
-                            reason=reason,
+                            reason="rim_exit_after_observation_gap_insufficient_for_miss",
                             ball_state=ball_state,
                         )
                     ]
@@ -563,10 +788,13 @@ class ShotEventTrackerV1:
                     )
                 ]
 
-        if direct_observed:
-            candidate.last_observed_ball_position = ball_position
-            candidate.last_observed_rim_bbox = rim
-            candidate.last_observed_frame = int(frame_id)
+        if direct_observed and ball_position is not None:
+            self._record_direct_observation(
+                candidate,
+                frame_id=frame_id,
+                ball_position=ball_position,
+                rim=rim,
+            )
 
         if frame_id - candidate.frame_start >= self.reset_frames:
             return [
@@ -582,8 +810,6 @@ class ShotEventTrackerV1:
         return []
 
     def reset(self, *, reason: str = "external_reset") -> None:
-        """Drop temporal shot state at a segment/camera boundary without inventing an event."""
-
         self._active = None
         self._last_start_frame = -10**9
         self._last_resolved_frame = -10**9
@@ -595,30 +821,24 @@ class ShotEventTrackerV1:
 
     def diagnostics(self) -> dict[str, Any]:
         candidate = self._active
+        bridge = None if candidate is None else candidate.pending_bridge
         return {
             "version": "shot_event_tracker_v1",
             "active": candidate is not None,
             "active_start_frame": None if candidate is None else candidate.frame_start,
             "had_above_rim": False if candidate is None else candidate.had_above_rim,
             "had_rim_band": False if candidate is None else candidate.had_rim_band,
-            "direct_ball_observations": (
-                0 if candidate is None else candidate.direct_ball_observations
-            ),
-            "last_direct_observed_frame": (
-                None if candidate is None else candidate.last_observed_frame
-            ),
-            "current_rim_gap_frames": (
-                0 if candidate is None else candidate.current_rim_gap_frames
-            ),
-            "max_ball_observation_gap_frames": (
-                0 if candidate is None else candidate.max_ball_gap_frames
-            ),
-            "max_rim_evidence_gap_frames": (
-                0 if candidate is None else candidate.max_rim_gap_frames
-            ),
-            "outcome_geometry_tainted": (
-                False if candidate is None else candidate.outcome_geometry_tainted
-            ),
+            "direct_ball_observations": 0 if candidate is None else candidate.direct_ball_observations,
+            "last_direct_observed_frame": None if candidate is None else candidate.last_observed_frame,
+            "current_rim_gap_frames": 0 if candidate is None else candidate.current_rim_gap_frames,
+            "max_ball_observation_gap_frames": 0 if candidate is None else candidate.max_ball_gap_frames,
+            "max_rim_evidence_gap_frames": 0 if candidate is None else candidate.max_rim_gap_frames,
+            "outcome_geometry_tainted": False if candidate is None else candidate.outcome_geometry_tainted,
+            "pending_bridge": bridge is not None,
+            "pending_bridge_created_frame": None if bridge is None else bridge.first_post_frame,
+            "pending_bridge_crossing_x_px": None if bridge is None else bridge.crossing_x_px,
+            "post_gap_fall_ratio": None if candidate is None else candidate.post_gap_fall_ratio,
+            "post_gap_fall_ratio_validated_for_outcome": False,
             "last_start_frame": self._last_start_frame,
             "last_resolved_frame": self._last_resolved_frame,
             "cooldown_until_frame": self._cooldown_until_frame,
