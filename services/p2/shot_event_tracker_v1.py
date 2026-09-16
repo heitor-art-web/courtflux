@@ -73,10 +73,13 @@ class ShotEventTrackerV1:
 
     Direct consecutive observations may resolve MADE/MISSED immediately. If a downward
     rim-plane crossing is bracketed across an observation or rim-evidence gap, the tracker
-    creates a pending bridge and waits for one more direct geometric sample. The post-gap
-    fall ratio is exported as diagnostic evidence only; it is not yet calibrated to
-    classify MADE. Therefore a settled pending bridge resolves UNKNOWN unless independent
-    semantic ball-in-basket evidence confirms MADE.
+    creates a pending bridge and waits for one more direct geometric sample. A post-gap
+    direct reacquisition must remain horizontally near the rim before it can seed that
+    bridge; a far reacquisition is treated as ambiguous rather than letting its long line
+    segment manufacture a rim crossing. The post-gap fall ratio is exported as diagnostic
+    evidence only; it is not yet calibrated to classify MADE. Therefore a settled pending
+    bridge resolves UNKNOWN unless independent semantic ball-in-basket evidence confirms
+    MADE.
     """
 
     def __init__(
@@ -723,11 +726,11 @@ class ShotEventTrackerV1:
             )
 
             if candidate.had_above_rim and crossed_inside:
-                candidate.last_crossing_x_px = float(crossing["x_px"])
-                candidate.last_crossing_fraction = float(crossing["fraction"])
                 geometry_coherent = self._rim_boxes_overlap(previous_observed_rim, rim)
 
                 if ball_gap_frames == 0 and geometry_gap_frames == 0 and rim_gap_before_current == 0:
+                    candidate.last_crossing_x_px = float(crossing["x_px"])
+                    candidate.last_crossing_fraction = float(crossing["fraction"])
                     candidate.evidence.add("observed_downward_rim_plane_crossing")
                     return [
                         self._resolve(
@@ -740,7 +743,7 @@ class ShotEventTrackerV1:
                         )
                     ]
 
-                if geometry_coherent:
+                if geometry_coherent and relative["near_x"]:
                     self._start_pending_bridge(
                         candidate,
                         previous_ball=previous_observed_ball,
@@ -760,6 +763,11 @@ class ShotEventTrackerV1:
                         rim=rim,
                     )
                     return []
+
+                if geometry_coherent and not relative["near_x"]:
+                    candidate.evidence.add(
+                        "pending_bridge_rejected_reacquisition_not_near_rim"
+                    )
 
             if (
                 candidate.had_above_rim
