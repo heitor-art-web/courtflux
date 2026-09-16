@@ -40,7 +40,9 @@ For events, a reviewer may use either a precise point when it is genuinely obvio
 }
 ```
 
-The evaluator treats a prediction anywhere inside the human event window as a temporal match with zero temporal error. `--tolerance-frames` applies only beyond the window edges. This preserves precision/recall/F1 without pretending a human can label an exact release frame.
+The evaluator compares the full P2 prediction interval (`frame_start`–`frame_end`) with the human event window. Overlapping windows have zero temporal distance. `--tolerance-frames` applies only to the gap between non-overlapping interval edges. This preserves precision/recall/F1 without pretending either the human label or the P2 event is a single exact frame.
+
+Event existence/type and event outcome are scored separately. A shot detected in the correct human window but classified `missed` instead of `made` counts as a detected shot and as an outcome error; it is not erased from event-detection recall.
 
 Control evaluation reports both frame-level accuracy/confusion as a diagnostic and interval-continuity metrics. The interval view is the primary interpretation for coarse human GT: it reports the dominant predicted state and matching fraction inside each human-labelled interval.
 
@@ -77,7 +79,7 @@ Human-only fields such as `human_note`, source timecodes and annotation precisio
 
 See `manifest.json` for V1–V5 plus `PORTO_OVARENSE_60S`.
 
-The real-video probe defaults to the neutral/unknown config. A frozen V1 command is:
+The real-video probe defaults to the neutral/unknown config. A frozen V1 command is therefore:
 
 ```bash
 python evaluation/p2_real_video_probe.py \
@@ -116,6 +118,6 @@ python evaluation/p2_ground_truth.py \
   --output evaluation/runs/<RUN_ID>/p2_gt_eval.json
 ```
 
-The evaluator reports per-event TP / FP / FN, precision / recall / F1, distance to the nearest human-window edge, and control-state frame diagnostics plus interval-continuity metrics.
+The evaluator reports event-detection TP / FP / FN, precision / recall / F1, distance between prediction and human windows, outcome accuracy on matched events, and control-state frame diagnostics plus interval-continuity metrics.
 
 Threshold changes are allowed only after these metrics are reviewed across the frozen set. Any calibration must be re-evaluated against the full set, not only the clip that motivated the change.
