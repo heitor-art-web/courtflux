@@ -7,6 +7,8 @@ from typing import Any
 class P2MetricsCollector:
     """Aggregate P2 runtime metrics without changing basketball decisions."""
 
+    UNATTRIBUTED_TEAM = "unattributed"
+
     def __init__(self) -> None:
         self.frames_seen = 0
         self.p2_processed_frames = 0
@@ -25,6 +27,7 @@ class P2MetricsCollector:
         self.control_state_counts: Counter[str] = Counter()
         self.reset_reasons: Counter[str] = Counter()
         self.loose_terminal_reasons: Counter[str] = Counter()
+        self.team_stats: dict[str, Counter[str]] = {}
         self.events_with_actor = 0
         self.events_with_team = 0
         self.event_actor_counts: Counter[str] = Counter()
@@ -38,6 +41,21 @@ class P2MetricsCollector:
     @staticmethod
     def _rate(numerator: int, denominator: int) -> float:
         return round(100.0 * numerator / max(denominator, 1), 2)
+
+    @classmethod
+    def _team_key(cls, raw_team_id: Any) -> str:
+        if raw_team_id is None:
+            return cls.UNATTRIBUTED_TEAM
+        value = str(raw_team_id).strip()
+        if not value or value.lower() in {"unknown", "none", "null"}:
+            return cls.UNATTRIBUTED_TEAM
+        return value
+
+    def _team_counter(self, raw_team_id: Any) -> Counter[str]:
+        team_key = self._team_key(raw_team_id)
+        if team_key not in self.team_stats:
+            self.team_stats[team_key] = Counter()
+        return self.team_stats[team_key]
 
     def observe(self, frame_state: Any) -> None:
         self.frames_seen += 1
@@ -74,6 +92,7 @@ class P2MetricsCollector:
 
         if metric_eligible and engine_eligible and control_state == "possessed":
             self.possessed_frames += 1
+            self._team_counter(possession.get("current_team_id"))["possessed_frames"] += 1
             try:
                 confidence = float(possession.get("current_confidence", 0.0) or 0.0)
             except (TypeError, ValueError):
@@ -141,8 +160,30 @@ class P2MetricsCollector:
                 self.event_team_counts[event_type] += 1
 
             attributes = dict(row.get("attributes", {}) or {})
-            if event_type == "shot_attempt":
-                self.shot_outcomes[str(attributes.get("outcome") or "unknown")] += 1
+            team = self._team_counter(row.get("team_id"))
+            team["events"] += 1
+
+            if event_type == "possession_acquired":
+                team["possession_acquisitions"] += 1
+            elif event_type == "possession_change":
+                team["possession_changes"] += 1
+            elif event_type == "pass_candidate":
+                team["passes"] += 1
+                if bool(attributes.get("flight_supported", False)):
+                    team["passes_with_flight_evidence"] += 1
+            elif event_type == "turnover_candidate":
+                team["turnovers"] += 1
+                if bool(attributes.get("flight_supported", False)):
+                    team["turnovers_with_flight_evidence"] += 1
+                else:
+                    team["direct_turnovers"] += 1
+            elif event_type == "rebound_candidate":
+                team["rebounds"] += 1
+            elif event_type == "shot_attempt":
+                outcome = str(attributes.get("outcome") or "unknown")
+                self.shot_outcomes[outcome] += 1
+                team["shot_attempts"] += 1
+                team[f"shot_{outcome}"] += 1
             elif event_type == "loose_ball_ended":
                 self.loose_terminal_reasons[
                     str(attributes.get("terminal_reason") or "unknown")
@@ -174,6 +215,43 @@ class P2MetricsCollector:
             "rapid_unknown_retrigger_count": rapid_unknown_retriggers,
             "minimum_inter_shot_gap_frames": min_gap_frames,
         }
+
+    def _team_summary(self) -> dict[str, Any]:
+        result: dict[str, Any] = {}
+        for team_id in sorted(
+            self.team_stats,
+            key=lambda value: (value == self.UNATTRIBUTED_TEAM, value.lower()),
+        ):
+            stats = self.team_stats[team_id]
+            result[team_id] = {
+                "possessed_frames": int(stats.get("possessed_frames", 0)),
+                "possession_share_rate": self._rate(
+                    int(stats.get("possessed_frames", 0)),
+                    self.possessed_frames,
+                ),
+                "events": int(stats.get("events", 0)),
+                "possession_acquisitions": int(stats.get("possession_acquisitions", 0)),
+                "possession_changes": int(stats.get("possession_changes", 0)),
+                "passes": int(stats.get("passes", 0)),
+                "passes_with_flight_evidence": int(
+                    stats.get("passes_with_flight_evidence", 0)
+                ),
+                "turnovers": int(stats.get("turnovers", 0)),
+                "turnovers_with_flight_evidence": int(
+                    stats.get("turnovers_with_flight_evidence", 0)
+                ),
+                "direct_turnovers": int(stats.get("direct_turnovers", 0)),
+                "rebounds": int(stats.get("rebounds", 0)),
+                "shots": {
+                    "attempts": int(stats.get("shot_attempts", 0)),
+                    "outcomes": {
+                        "made": int(stats.get("shot_made", 0)),
+                        "missed": int(stats.get("shot_missed", 0)),
+                        "unknown": int(stats.get("shot_unknown", 0)),
+                    },
+                },
+            }
+        return result
 
     def summary(self) -> dict[str, Any]:
         avg_possession_confidence = (
@@ -234,7 +312,7 @@ class P2MetricsCollector:
         loose_open = max(0, loose_started - loose_closed)
 
         return {
-            "version": "p2_metrics_v3",
+            "version": "p2_metrics_v4",
             "frames_seen": self.frames_seen,
             "p2_processed_frames": self.p2_processed_frames,
             "metric_eligible_frames": self.metric_eligible_frames,
@@ -277,6 +355,7 @@ class P2MetricsCollector:
                 ),
                 "attribution_by_event_type": attribution_by_type,
             },
+            "teams": self._team_summary(),
             "shots": {
                 "attempts": shot_attempts,
                 "outcomes": dict(sorted(self.shot_outcomes.items())),
