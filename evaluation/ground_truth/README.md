@@ -9,8 +9,8 @@ This directory is the frozen human-GT surface for the P2 exit gate.
 - Run all basketball GT/baseline probes with Jersey OFF.
 - Prefer `unknown`/null to guessed actor, team or outcome labels.
 - Do not copy event times, event types or control states from `p2_events.jsonl` or `p2_states.jsonl` into GT.
-- The V1–V5 clips use neutral team context and therefore do not measure team attribution, pass-vs-turnover classification or team-aware rebound semantics.
-- `PORTO_OVARENSE_60S` is the known-team control and uses `data/match_config.json`.
+- The V1–V5 clips use `evaluation/match_configs/unknown.json` and therefore do not measure team attribution, pass-vs-turnover classification or team-aware rebound semantics.
+- `PORTO_OVARENSE_60S` is the known-team control and uses `data/match_config.json` explicitly.
 
 ## Two-pass annotation workflow
 
@@ -31,7 +31,7 @@ Do not inspect P2 predictions during Pass A.
 
 After basketball truth is frozen, use a tracking-only diagnostic/preview to map visually identified actors to stable `track_id` values. Do not display P2 event labels while doing this alignment. If the actor cannot be mapped reliably, leave `actor_track_id` or `secondary_track_id` null.
 
-For V1–V5, team fields stay null unless the clip has independently reviewed team truth. For Porto/Ovarense, team truth may be annotated as `FC Porto` or `Ovarense` when visually clear.
+For V1–V5, team fields stay null. For Porto/Ovarense, team truth may be annotated as `FC Porto` or `Ovarense` when visually clear.
 
 ## GT file format
 
@@ -70,7 +70,20 @@ Extra human-only fields such as `human_note` are allowed and ignored by the eval
 
 See `manifest.json` for V1–V5 plus `PORTO_OVARENSE_60S`.
 
-The known-team control command is:
+The real-video probe now defaults to the neutral/unknown config. A frozen V1 command is therefore:
+
+```bash
+python evaluation/p2_real_video_probe.py \
+  --video "https://www.youtube.com/watch?v=hILf-ySowIo" \
+  --start 10 \
+  --end 40 \
+  --model weights/model_v1.1.0.pt \
+  --device mps \
+  --match-config evaluation/match_configs/unknown.json \
+  --no-jersey
+```
+
+The known-team control must override that default explicitly:
 
 ```bash
 python evaluation/p2_real_video_probe.py \
@@ -82,6 +95,8 @@ python evaluation/p2_real_video_probe.py \
   --match-config data/match_config.json \
   --no-jersey
 ```
+
+Before accepting a V1–V5 run for GT, verify its summary reports `home_team = null`, `away_team = null` (or equivalent unknown team metadata) and no team-attributed P2 events. A known-team label in a V1–V5 summary invalidates that run for the frozen neutral battery.
 
 ## Evaluator
 
