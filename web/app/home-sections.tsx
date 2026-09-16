@@ -13,6 +13,7 @@ import type {
   ValueStripSection,
 } from "@/lib/home-content";
 import styles from "./home.module.css";
+import pricingStyles from "./pricing-v2.module.css";
 
 function SectionHeading({ eyebrow, title, highlight, copy }: { eyebrow: string; title: string; highlight: string; copy?: string }) {
   return (
@@ -182,13 +183,25 @@ function Pricing({ section }: { section: PricingSection }) {
   return (
     <section id={section.id} className={styles.section}>
       <SectionHeading eyebrow={section.eyebrow} title={section.title} highlight={section.highlight} copy={section.copy} />
-      <div className={styles.pricingGrid}>
+
+      <div className={pricingStyles.trialBanner}>
+        <div>
+          <span className={styles.kicker}>{section.trial.kicker}</span>
+          <strong>{section.trial.title}</strong>
+          <p>{section.trial.copy}</p>
+          <small>{section.trial.meta}</small>
+        </div>
+        <Link className={styles.primaryButton} href={section.trial.cta.href}>{section.trial.cta.label}</Link>
+      </div>
+
+      <div className={`${styles.pricingGrid} ${pricingStyles.pricingGrid}`}>
         {section.plans.map((plan) => (
-          <article className={`${styles.priceCard} ${plan.featured ? styles.priceCardFeatured : ""}`} key={plan.name}>
+          <article className={`${styles.priceCard} ${pricingStyles.priceCard} ${plan.featured ? styles.priceCardFeatured : ""}`} key={plan.name}>
             {plan.tag ? <span className={styles.priceTag}>{plan.tag}</span> : null}
             <div className={styles.kicker}>{plan.kicker}</div>
             <h3>{plan.name}</h3>
             <div className={styles.price}>{plan.price} <small>{plan.suffix}</small></div>
+            <div className={pricingStyles.annualPrice}>{plan.annualPrice} <span>{plan.annualSuffix}</span></div>
             <p className={styles.priceDescription}>{plan.description}</p>
             <div className={styles.usage}><strong>{plan.allowance}</strong><span>{plan.allowanceCopy}</span></div>
             <ul className={styles.featureList}>{plan.features.map((feature) => <li key={feature}>{feature}</li>)}</ul>
@@ -196,6 +209,15 @@ function Pricing({ section }: { section: PricingSection }) {
           </article>
         ))}
       </div>
+
+      <div className={pricingStyles.organisationRow}>
+        <div>
+          <strong>{section.organisation.title}</strong>
+          <p>{section.organisation.copy}</p>
+        </div>
+        <Link className={styles.secondaryButton} href={section.organisation.cta.href}>{section.organisation.cta.label}</Link>
+      </div>
+
       <p className={styles.pricingNote}>{section.note}</p>
     </section>
   );
