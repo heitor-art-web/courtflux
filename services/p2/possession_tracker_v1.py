@@ -499,26 +499,6 @@ class PossessionTrackerV1:
         threshold = self.acquire_threshold if self.current_track_id is None else self.switch_threshold
         usable = best if best is not None and best.score >= threshold else None
 
-        # Acquisition/switch thresholds are intentionally stricter than continuity. If
-        # the already-locked handler is still the best-ranked player but temporarily
-        # dips below the switch threshold, preserve POSSESSED for the existing grace
-        # window instead of immediately manufacturing release/flight evidence. This uses
-        # the existing lost_grace_frames contract and introduces no new numeric threshold.
-        same_handler_below_threshold = bool(
-            self.current_track_id is not None
-            and best is not None
-            and best.track_id == self.current_track_id
-            and usable is None
-        )
-        if same_handler_below_threshold and self._lost_frames < self.lost_grace_frames:
-            self._advance_candidate(best)
-            self._lost_frames += 1
-            self.current_confidence = max(self.current_confidence * 0.92, float(best.score))
-            if best.team_confidence >= self.team_evidence_threshold:
-                self.current_team_id = best.team_id
-            self.control_state = BallControlState.POSSESSED
-            return events
-
         if usable is None:
             self._advance_candidate(None)
             self._lost_frames += 1
@@ -762,7 +742,6 @@ class PossessionTrackerV1:
             "current_confidence": round(float(self.current_confidence), 6),
             "candidate_track_id": self._candidate_track_id,
             "candidate_frames": self._candidate_frames,
-            "candidate_score": round(float(self._candidate_score), 6),
             "lost_frames": self._lost_frames,
             "loose_start_frame": self._loose_start_frame,
             "flight": {
