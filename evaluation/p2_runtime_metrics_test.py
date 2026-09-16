@@ -121,7 +121,7 @@ class P2RuntimeMetricsTest(unittest.TestCase):
                         "flight": {},
                     },
                     "shot": {},
-                    "temporal_reset": {"count": 1, "last_reason": "analysis_ineligible_gap"},
+                    "temporal_reset": {"count": 1, "last_reason": "gameplay_absent_gap"},
                     "events": [
                         {
                             "event_type": "loose_ball_recovered",
@@ -196,7 +196,7 @@ class P2RuntimeMetricsTest(unittest.TestCase):
                         "flight": {},
                     },
                     "shot": {},
-                    "temporal_reset": {"count": 1, "last_reason": "analysis_ineligible_gap"},
+                    "temporal_reset": {"count": 1, "last_reason": "gameplay_absent_gap"},
                     "events": [],
                 },
             )
@@ -224,7 +224,7 @@ class P2RuntimeMetricsTest(unittest.TestCase):
             summary["events"]["attribution_by_event_type"]["shot_attempt"]["team_rate"],
             100.0,
         )
-        self.assertEqual(summary["resets"]["reasons"], {"analysis_ineligible_gap": 1})
+        self.assertEqual(summary["resets"]["reasons"], {"gameplay_absent_gap": 1})
         self.assertEqual(summary["p1_state_not_mutated_rate"], 100.0)
 
         home = summary["teams"]["home"]
