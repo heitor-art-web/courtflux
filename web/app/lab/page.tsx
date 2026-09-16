@@ -36,6 +36,24 @@ type AttributionRow = {
   team_rate?: number;
 };
 
+type TeamBreakdownRow = {
+  possessed_frames?: number;
+  possession_share_rate?: number;
+  events?: number;
+  possession_acquisitions?: number;
+  possession_changes?: number;
+  passes?: number;
+  passes_with_flight_evidence?: number;
+  turnovers?: number;
+  turnovers_with_flight_evidence?: number;
+  direct_turnovers?: number;
+  rebounds?: number;
+  shots?: {
+    attempts?: number;
+    outcomes?: Record<string, number>;
+  };
+};
+
 type P2Summary = {
   version?: string;
   frames_seen?: number;
@@ -64,6 +82,7 @@ type P2Summary = {
     team_attribution_rate?: number;
     attribution_by_event_type?: Record<string, AttributionRow>;
   };
+  teams?: Record<string, TeamBreakdownRow>;
   shots?: {
     attempts?: number;
     outcomes?: Record<string, number>;
@@ -162,6 +181,25 @@ function metric(value: number | undefined | null, digits = 2) {
 
 function labelize(value: string) {
   return value.replaceAll("_", " ");
+}
+
+function teamLabel(
+  teamId: string,
+  metadata?: { home_team?: string; away_team?: string },
+) {
+  const normalized = teamId.trim().toLowerCase();
+  if (normalized === "home") return metadata?.home_team || "Home";
+  if (normalized === "away") return metadata?.away_team || "Away";
+  if (normalized === "unattributed") return "Unattributed";
+  return teamId;
+}
+
+function teamSortRank(teamId: string) {
+  const normalized = teamId.trim().toLowerCase();
+  if (normalized === "home") return 0;
+  if (normalized === "away") return 1;
+  if (normalized === "unattributed") return 3;
+  return 2;
 }
 
 export default function LabPage() {
@@ -337,6 +375,15 @@ export default function LabPage() {
   const videoUrl = job?.job_id ? `/api/lab/jobs/${job.job_id}/preview-video` : "";
   const shotOutcomes = p2?.shots?.outcomes ?? {};
   const attributionRows = Object.entries(p2?.events?.attribution_by_event_type ?? {});
+  const matchMetadata = (
+    parsedMatchConfig.value as {
+      metadata?: { home_team?: string; away_team?: string };
+    } | null
+  )?.metadata;
+  const teamRows = Object.entries(p2?.teams ?? {}).sort(([left], [right]) => {
+    const rankDelta = teamSortRank(left) - teamSortRank(right);
+    return rankDelta || left.localeCompare(right);
+  });
 
   return (
     <main>
@@ -436,6 +483,48 @@ export default function LabPage() {
               </div>
 
               <details style={{ marginTop: 18 }} open>
+                <summary>Team comparison — who did what?</summary>
+                <p className="muted">
+                  Team counts use P2 team evidence, not jersey identity. Unattributed keeps events where the team was not reliable enough to assign.
+                </p>
+                {teamRows.length ? <div style={{ overflowX: "auto", marginTop: 12 }}>
+                  <table style={{ width: "100%", borderCollapse: "collapse", textAlign: "left" }}>
+                    <thead>
+                      <tr>
+                        <th>Team</th>
+                        <th>Possession share</th>
+                        <th>Passes</th>
+                        <th>Flight passes</th>
+                        <th>Shots</th>
+                        <th>Made</th>
+                        <th>Missed</th>
+                        <th>Unknown</th>
+                        <th>Turnovers</th>
+                        <th>Rebounds</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {teamRows.map(([teamId, row]) => {
+                        const outcomes = row.shots?.outcomes ?? {};
+                        return <tr key={teamId}>
+                          <td><strong>{teamLabel(teamId, matchMetadata)}</strong>{teamId !== teamLabel(teamId, matchMetadata) && teamId !== "unattributed" ? <div className="muted">{teamId}</div> : null}</td>
+                          <td>{pct(row.possession_share_rate)}</td>
+                          <td>{row.passes ?? 0}</td>
+                          <td>{row.passes_with_flight_evidence ?? 0}</td>
+                          <td>{row.shots?.attempts ?? 0}</td>
+                          <td>{outcomes.made ?? 0}</td>
+                          <td>{outcomes.missed ?? 0}</td>
+                          <td>{outcomes.unknown ?? 0}</td>
+                          <td>{row.turnovers ?? 0}</td>
+                          <td>{row.rebounds ?? 0}</td>
+                        </tr>;
+                      })}
+                    </tbody>
+                  </table>
+                </div> : <p className="muted">This run predates per-team P2 metrics. Run the analysis again after updating the worker.</p>}
+              </details>
+
+              <details style={{ marginTop: 18 }} open>
                 <summary>Control-state distribution</summary>
                 <div className="metrics" style={{ marginTop: 12 }}>
                   {Object.entries(p2.control_state?.rates ?? {}).map(([state, rate]) => <div className="metric" key={state}><div className="label">{labelize(state)}</div><div className="value">{pct(rate)}</div></div>)}
@@ -458,6 +547,7 @@ export default function LabPage() {
                   loose: p2.transitions,
                   resets: p2.resets,
                   event_counts: p2.events?.counts,
+                  teams: p2.teams,
                 }, null, 2)}</pre>
               </details>
             </> : <p className="muted" style={{ marginTop: 18 }}>P2 metrics are unavailable for this older run.</p>}
