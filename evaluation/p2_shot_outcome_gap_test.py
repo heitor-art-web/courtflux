@@ -28,7 +28,12 @@ def ball(
     )
 
 
-def court(frame_id: int, *, rim_visible: bool = True) -> CourtState:
+def court(
+    frame_id: int,
+    *,
+    rim_visible: bool = True,
+    rim_bbox: tuple[float, float, float, float] = (90.0, 90.0, 110.0, 100.0),
+) -> CourtState:
     return CourtState(
         frame_id=frame_id,
         timestamp_sec=frame_id / 10.0,
@@ -39,8 +44,11 @@ def court(frame_id: int, *, rim_visible: bool = True) -> CourtState:
             [
                 {
                     "kind": "rim",
-                    "bbox_px": [90.0, 90.0, 110.0, 100.0],
-                    "center_px": [100.0, 95.0],
+                    "bbox_px": list(rim_bbox),
+                    "center_px": [
+                        (rim_bbox[0] + rim_bbox[2]) / 2.0,
+                        (rim_bbox[1] + rim_bbox[3]) / 2.0,
+                    ],
                     "confidence": 0.95,
                     "event_truth": False,
                 }
@@ -52,59 +60,145 @@ def court(frame_id: int, *, rim_visible: bool = True) -> CourtState:
 
 
 class ShotOutcomeGapRegressionTest(unittest.TestCase):
-    def test_bracketed_direct_observations_can_resolve_made_across_predicted_hold(self) -> None:
+    def test_rim_plane_intersection_accepts_diagonal_crossing_with_outside_endpoints(self) -> None:
         tracker = ShotEventTrackerV1(fps=10.0)
         tracker.update(
             frame_id=0,
             timestamp_sec=0.0,
-            ball_state=ball(0, 100, 70),
+            ball_state=ball(0, 70, 70),
             court_state=court(0),
         )
-        tracker.update(
+        events = tracker.update(
             frame_id=1,
             timestamp_sec=0.1,
-            ball_state=ball(1, 100, 100, status=BallStateStatus.PREDICTED),
+            ball_state=ball(1, 120, 105),
             court_state=court(1),
-        )
-        events = tracker.update(
-            frame_id=2,
-            timestamp_sec=0.2,
-            ball_state=ball(2, 100, 102),
-            court_state=court(2),
         )
 
         self.assertEqual(len(events), 1)
         self.assertEqual(events[0].attributes["outcome"], ShotOutcome.MADE.value)
         self.assertEqual(
             events[0].attributes["resolution_reason"],
-            "observed_bracketed_rim_crossing_after_gap",
+            "observed_downward_rim_plane_crossing",
         )
-        self.assertEqual(events[0].attributes["max_ball_observation_gap_frames"], 1)
+        self.assertIsNotNone(events[0].attributes["crossing_x_px"])
+        self.assertIsNotNone(events[0].attributes["crossing_fraction"])
 
-    def test_rim_gap_cannot_bracket_made_with_stale_pre_gap_geometry(self) -> None:
+    def test_gap_crossing_creates_pending_bridge_and_ratio_stays_diagnostic(self) -> None:
         tracker = ShotEventTrackerV1(fps=10.0)
         tracker.update(
             frame_id=0,
             timestamp_sec=0.0,
-            ball_state=ball(0, 100, 70),
+            ball_state=ball(0, 95, 75),
             court_state=court(0),
         )
         tracker.update(
             frame_id=1,
             timestamp_sec=0.1,
-            ball_state=ball(1, 100, 92, status=BallStateStatus.PREDICTED),
-            court_state=court(1, rim_visible=False),
+            ball_state=ball(1, 98, 88),
+            court_state=court(1),
         )
-        events = tracker.update(
+        tracker.update(
             frame_id=2,
             timestamp_sec=0.2,
-            ball_state=ball(2, 100, 102),
+            ball_state=ball(2, 100, 96, status=BallStateStatus.PREDICTED),
             court_state=court(2),
         )
 
-        self.assertEqual(events, [])
-        self.assertTrue(tracker.diagnostics()["active"])
-        self.assertTrue(tracker.diagnostics()["outcome_geometry_tainted"])
+        bridge_frame = tracker.update(
+            frame_id=3,
+            timestamp_sec=0.3,
+            ball_state=ball(3, 102, 102),
+            court_state=court(3),
+        )
+        self.assertEqual(bridge_frame, [])
+        self.assertTrue(tracker.diagnostics()["pending_bridge"])
+
+        events = tracker.update(
+            frame_id=4,
+            timestamp_sec=0.4,
+            ball_state=ball(4, 103, 107),
+            court_state=court(4),
+        )
+        self.assertEqual(len(events), 1)
+        event = events[0]
+        self.assertEqual(event.attributes["outcome"], ShotOutcome.UNKNOWN.value)
+        self.assertEqual(
+            event.attributes["resolution_reason"],
+            "pending_bridge_post_gap_ratio_unvalidated",
+        )
+        self.assertTrue(event.attributes["pending_bridge_used"])
+        self.assertIsNotNone(event.attributes["post_gap_fall_ratio"])
+        self.assertFalse(event.attributes["post_gap_fall_ratio_validated_for_outcome"])
+
+    def test_short_rim_gap_can_bridge_only_with_reappearing_coherent_geometry(self) -> None:
+        tracker = ShotEventTrackerV1(fps=10.0)
+        tracker.update(
+            frame_id=0,
+            timestamp_sec=0.0,
+            ball_state=ball(0, 95, 75),
+            court_state=court(0),
+        )
+        tracker.update(
+            frame_id=1,
+            timestamp_sec=0.1,
+            ball_state=ball(1, 98, 88),
+            court_state=court(1),
+        )
+        tracker.update(
+            frame_id=2,
+            timestamp_sec=0.2,
+            ball_state=ball(2, 100, 96, status=BallStateStatus.PREDICTED),
+            court_state=court(2, rim_visible=False),
+        )
+        self.assertEqual(
+            tracker.update(
+                frame_id=3,
+                timestamp_sec=0.3,
+                ball_state=ball(3, 102, 102),
+                court_state=court(3),
+            ),
+            [],
+        )
+        self.assertTrue(tracker.diagnostics()["pending_bridge"])
+
+        events = tracker.update(
+            frame_id=4,
+            timestamp_sec=0.4,
+            ball_state=ball(4, 103, 107),
+            court_state=court(4),
+        )
+        self.assertEqual(len(events), 1)
+        self.assertEqual(events[0].attributes["outcome"], ShotOutcome.UNKNOWN.value)
+        self.assertGreaterEqual(events[0].attributes["bridge_rim_gap_frames"], 1)
+
+    def test_camera_jump_does_not_bridge_non_overlapping_rim_geometry(self) -> None:
+        tracker = ShotEventTrackerV1(fps=10.0, reset_time_sec=0.5)
+        tracker.update(
+            frame_id=0,
+            timestamp_sec=0.0,
+            ball_state=ball(0, 95, 75),
+            court_state=court(0),
+        )
+        tracker.update(
+            frame_id=1,
+            timestamp_sec=0.1,
+            ball_state=ball(1, 98, 88),
+            court_state=court(1),
+        )
+        tracker.update(
+            frame_id=2,
+            timestamp_sec=0.2,
+            ball_state=ball(2, 100, 96, status=BallStateStatus.PREDICTED),
+            court_state=court(2, rim_visible=False),
+        )
+        tracker.update(
+            frame_id=3,
+            timestamp_sec=0.3,
+            ball_state=ball(3, 302, 302),
+            court_state=court(3, rim_bbox=(290.0, 290.0, 310.0, 300.0)),
+        )
+        self.assertFalse(tracker.diagnostics()["pending_bridge"])
 
     def test_outside_reappearance_after_ball_gap_abstains_instead_of_missed(self) -> None:
         tracker = ShotEventTrackerV1(fps=10.0)
@@ -139,48 +233,6 @@ class ShotOutcomeGapRegressionTest(unittest.TestCase):
             events[0].attributes["resolution_reason"],
             "rim_exit_after_observation_gap_insufficient_for_miss",
         )
-        self.assertTrue(events[0].attributes["outcome_geometry_tainted"])
-
-    def test_rim_gap_taints_later_outside_exit_even_after_direct_ball_recovery(self) -> None:
-        tracker = ShotEventTrackerV1(fps=10.0)
-        tracker.update(
-            frame_id=0,
-            timestamp_sec=0.0,
-            ball_state=ball(0, 100, 70),
-            court_state=court(0),
-        )
-        tracker.update(
-            frame_id=1,
-            timestamp_sec=0.1,
-            ball_state=ball(1, 100, 90),
-            court_state=court(1),
-        )
-        tracker.update(
-            frame_id=2,
-            timestamp_sec=0.2,
-            ball_state=ball(2, 100, 100),
-            court_state=court(2, rim_visible=False),
-        )
-        tracker.update(
-            frame_id=3,
-            timestamp_sec=0.3,
-            ball_state=ball(3, 105, 103),
-            court_state=court(3),
-        )
-        events = tracker.update(
-            frame_id=4,
-            timestamp_sec=0.4,
-            ball_state=ball(4, 140, 104),
-            court_state=court(4),
-        )
-
-        self.assertEqual(len(events), 1)
-        self.assertEqual(events[0].attributes["outcome"], ShotOutcome.UNKNOWN.value)
-        self.assertEqual(
-            events[0].attributes["resolution_reason"],
-            "rim_exit_after_observation_gap_insufficient_for_miss",
-        )
-        self.assertGreaterEqual(events[0].attributes["max_rim_evidence_gap_frames"], 1)
 
     def test_missing_rim_never_reuses_stale_bbox_to_resolve_missed(self) -> None:
         tracker = ShotEventTrackerV1(fps=10.0, reset_time_sec=0.3)
@@ -211,7 +263,6 @@ class ShotOutcomeGapRegressionTest(unittest.TestCase):
             ball_state=ball(3, 140, 106),
             court_state=court(3, rim_visible=False),
         )
-
         self.assertEqual(len(events), 1)
         self.assertEqual(events[0].attributes["outcome"], ShotOutcome.UNKNOWN.value)
         self.assertEqual(
