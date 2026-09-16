@@ -24,16 +24,28 @@ class _ShotCandidate:
     direct_ball_observations: int = 0
     semantic_start: bool = False
     evidence: set[str] = field(default_factory=set)
-    last_ball_position: tuple[float, float] | None = None
+    last_observed_ball_position: tuple[float, float] | None = None
+    last_observed_rim_bbox: tuple[float, float, float, float] | None = None
+    last_observed_frame: int | None = None
+    current_rim_gap_frames: int = 0
+    max_ball_gap_frames: int = 0
+    max_rim_gap_frames: int = 0
+    outcome_geometry_tainted: bool = False
 
 
 class ShotEventTrackerV1:
     """Conservative temporal shot candidate/resolution state machine.
 
     Semantic detections are supporting evidence only. Missing trajectory evidence resolves
-    to UNKNOWN. After any resolution, a new candidate requires direct observed evidence
-    that the ball left the previous start/rim zone before the tracker is re-armed. This
-    prevents one physical flight from becoming UNKNOWN -> immediate duplicate shot.
+    to UNKNOWN. Geometric outcomes use direct ball observations only: predicted holds may
+    preserve temporal continuity, but cannot independently prove MADE or MISSED. A direct
+    observation after a short ball gap can bracket a MADE crossing when both observed
+    endpoints are consistent with the rim. An outside-rim reappearance after any ball/rim
+    evidence gap abstains to UNKNOWN instead of manufacturing a miss.
+
+    After any resolution, a new candidate requires direct observed evidence that the ball
+    left the previous start/rim zone before the tracker is re-armed. This prevents one
+    physical flight from becoming UNKNOWN -> immediate duplicate shot.
     """
 
     def __init__(
@@ -179,6 +191,39 @@ class ShotEventTrackerV1:
         )
         return result
 
+    @staticmethod
+    def _direct_observed(ball_state: BallState | None) -> bool:
+        return bool(
+            ball_state is not None
+            and ball_state.status is BallStateStatus.OBSERVED
+            and ball_state.position() is not None
+        )
+
+    @staticmethod
+    def _crosses_rim_between_observations(
+        *,
+        previous_ball: tuple[float, float],
+        previous_rim: tuple[float, float, float, float],
+        current_ball: tuple[float, float],
+        current_rim: tuple[float, float, float, float],
+    ) -> bool:
+        prev_x, prev_y = previous_ball
+        cur_x, cur_y = current_ball
+        prev_x1, prev_y1, prev_x2, prev_y2 = previous_rim
+        cur_x1, cur_y1, cur_x2, cur_y2 = current_rim
+        prev_width = max(1.0, prev_x2 - prev_x1)
+        cur_width = max(1.0, cur_x2 - cur_x1)
+        prev_rim_y = (prev_y1 + prev_y2) / 2.0
+        cur_rim_y = (cur_y1 + cur_y2) / 2.0
+        crossed_downward = prev_y <= prev_rim_y and cur_y > cur_rim_y
+        previous_inside = (
+            (prev_x1 - 0.20 * prev_width) <= prev_x <= (prev_x2 + 0.20 * prev_width)
+        )
+        current_inside = (
+            (cur_x1 - 0.20 * cur_width) <= cur_x <= (cur_x2 + 0.20 * cur_width)
+        )
+        return bool(crossed_downward and previous_inside and current_inside)
+
     def _can_start(self, frame_id: int) -> bool:
         return bool(
             frame_id >= self._cooldown_until_frame
@@ -217,10 +262,19 @@ class ShotEventTrackerV1:
         )
         if semantic_start:
             candidate.evidence.add("semantic_shot_action")
-        if ball_state is not None and ball_state.available:
-            candidate.last_ball_position = ball_state.position()
-            if ball_state.status is BallStateStatus.OBSERVED:
-                candidate.direct_ball_observations += 1
+        if self._direct_observed(ball_state):
+            position = ball_state.position()
+            candidate.direct_ball_observations = 1
+            candidate.last_observed_ball_position = position
+            candidate.last_observed_rim_bbox = rim
+            candidate.last_observed_frame = int(frame_id)
+            relative = self._relative_to_rim(position, rim)
+            if relative["above"]:
+                candidate.had_above_rim = True
+                candidate.evidence.add("ball_above_rim")
+            if relative["rim_band"]:
+                candidate.had_rim_band = True
+                candidate.evidence.add("ball_near_rim")
         self._active = candidate
         self._last_start_frame = int(frame_id)
 
@@ -264,6 +318,7 @@ class ShotEventTrackerV1:
                 "version": "shot_event_tracker_v1",
                 "semantic_classes_are_supporting_evidence_only": True,
                 "missing_evidence_policy": "unknown_not_missed",
+                "outcome_geometry_policy": "direct_observation_endpoints_only",
                 "rearm_policy": "direct_observed_clearance_plus_min_separation",
             },
             attributes={
@@ -277,6 +332,9 @@ class ShotEventTrackerV1:
                 "had_above_rim": candidate.had_above_rim,
                 "had_rim_band": candidate.had_rim_band,
                 "direct_ball_observations": candidate.direct_ball_observations,
+                "max_ball_observation_gap_frames": candidate.max_ball_gap_frames,
+                "max_rim_evidence_gap_frames": candidate.max_rim_gap_frames,
+                "outcome_geometry_tainted": candidate.outcome_geometry_tainted,
                 "semantic_start": candidate.semantic_start,
             },
         )
@@ -303,11 +361,7 @@ class ShotEventTrackerV1:
         if not self._awaiting_rearm:
             return False
 
-        direct_observed = bool(
-            ball_state is not None
-            and ball_state.status is BallStateStatus.OBSERVED
-            and ball_state.position() is not None
-        )
+        direct_observed = self._direct_observed(ball_state)
         clear_of_previous_shot_zone = bool(
             direct_observed
             and not semantic_start
@@ -318,11 +372,7 @@ class ShotEventTrackerV1:
         if clear_of_previous_shot_zone:
             self._rearm_clear_frames += 1
         elif semantic_start or trajectory_start or relative.get("rim_band", False):
-            # A renewed start/rim signal before enough direct clearance is exactly the
-            # pattern that caused duplicate UNKNOWN -> shot events in the real-video run.
             self._rearm_clear_frames = 0
-        # Missing/predicted frames neither prove clearance nor erase already observed
-        # clearance. They are uncertainty, not evidence for either direction.
 
         separated = (
             int(frame_id) - self._last_resolved_frame
@@ -350,6 +400,7 @@ class ShotEventTrackerV1:
         rims = self._rim_candidates(court_state)
         rim = self._nearest_rim(ball_position, rims)
         relative = self._relative_to_rim(ball_position, rim)
+        direct_observed = self._direct_observed(ball_state)
         semantic_start = bool(flags["jump_shot"] or flags["layup_dunk"])
         trajectory_start = bool(
             ball_position is not None
@@ -368,8 +419,6 @@ class ShotEventTrackerV1:
                     semantic_start=semantic_start,
                     trajectory_start=trajectory_start,
                 )
-                # Never re-arm and start on the same frame. One subsequent fresh start
-                # signal is required, which makes the new candidate temporally explicit.
                 return []
 
             if self._can_start(frame_id) and start_signal:
@@ -380,28 +429,49 @@ class ShotEventTrackerV1:
                     ball_state=ball_state,
                     semantic_start=semantic_start,
                 )
-            # Crucial abstention: ball-in-basket by itself cannot manufacture a shot.
             return []
 
         candidate = self._active
         candidate.last_frame = int(frame_id)
         if candidate.rim_bbox is None and rim is not None:
             candidate.rim_bbox = rim
-        elif rim is None:
-            rim = candidate.rim_bbox
-        relative = self._relative_to_rim(ball_position, rim)
 
-        previous_ball = candidate.last_ball_position
-        if ball_position is not None:
-            candidate.last_ball_position = ball_position
-        if ball_state is not None and ball_state.status is BallStateStatus.OBSERVED:
+        rim_gap_before_current = candidate.current_rim_gap_frames > 0
+        if rim is None:
+            if candidate.had_above_rim or candidate.had_rim_band:
+                candidate.outcome_geometry_tainted = True
+            candidate.current_rim_gap_frames += 1
+            candidate.max_rim_gap_frames = max(
+                candidate.max_rim_gap_frames,
+                candidate.current_rim_gap_frames,
+            )
+        else:
+            candidate.current_rim_gap_frames = 0
+
+        previous_observed_ball = candidate.last_observed_ball_position
+        previous_observed_rim = candidate.last_observed_rim_bbox
+        previous_observed_frame = candidate.last_observed_frame
+        ball_gap_frames = 0
+        if direct_observed and previous_observed_frame is not None:
+            ball_gap_frames = max(0, int(frame_id) - int(previous_observed_frame) - 1)
+            if ball_gap_frames > 0 and (candidate.had_above_rim or candidate.had_rim_band):
+                candidate.outcome_geometry_tainted = True
+            candidate.max_ball_gap_frames = max(
+                candidate.max_ball_gap_frames,
+                ball_gap_frames,
+            )
+
+        # Geometric evidence is direct-observation-only. predicted_hold may preserve the
+        # trajectory but must not manufacture above/rim-band evidence used for outcomes.
+        if direct_observed and rim is not None:
             candidate.direct_ball_observations += 1
-        if relative["above"]:
-            candidate.had_above_rim = True
-            candidate.evidence.add("ball_above_rim")
-        if relative["rim_band"]:
-            candidate.had_rim_band = True
-            candidate.evidence.add("ball_near_rim")
+            if relative["above"]:
+                candidate.had_above_rim = True
+                candidate.evidence.add("ball_above_rim")
+            if relative["rim_band"]:
+                candidate.had_rim_band = True
+                candidate.evidence.add("ball_near_rim")
+
         if flags["jump_shot"]:
             candidate.evidence.add("player_jump_shot_semantic")
         if flags["layup_dunk"]:
@@ -427,31 +497,33 @@ class ShotEventTrackerV1:
             ]
 
         if (
-            previous_ball is not None
+            direct_observed
             and ball_position is not None
             and rim is not None
-            and ball_state is not None
-            and ball_state.status is BallStateStatus.OBSERVED
+            and previous_observed_ball is not None
+            and previous_observed_rim is not None
+            and previous_observed_frame is not None
         ):
-            x1, y1, x2, y2 = rim
-            width = max(1.0, x2 - x1)
-            rim_y = (y1 + y2) / 2.0
-            prev_x, prev_y = previous_ball
-            cur_x, cur_y = ball_position
-            crossed_downward = prev_y <= rim_y < cur_y
-            crossed_inside = (
-                (x1 - 0.20 * width) <= prev_x <= (x2 + 0.20 * width)
-                and (x1 - 0.20 * width) <= cur_x <= (x2 + 0.20 * width)
+            bracketed_crossing = self._crosses_rim_between_observations(
+                previous_ball=previous_observed_ball,
+                previous_rim=previous_observed_rim,
+                current_ball=ball_position,
+                current_rim=rim,
             )
-            if candidate.had_above_rim and crossed_downward and crossed_inside:
-                candidate.evidence.add("observed_downward_rim_crossing")
+            if candidate.had_above_rim and bracketed_crossing:
+                reason = (
+                    "observed_downward_rim_crossing"
+                    if ball_gap_frames == 0 and not rim_gap_before_current
+                    else "observed_bracketed_rim_crossing_after_gap"
+                )
+                candidate.evidence.add(reason)
                 return [
                     self._resolve(
                         frame_id=frame_id,
                         timestamp_sec=timestamp_sec,
                         outcome=ShotOutcome.MADE,
-                        confidence=0.80,
-                        reason="observed_downward_rim_crossing",
+                        confidence=0.80 if reason == "observed_downward_rim_crossing" else 0.72,
+                        reason=reason,
                         ball_state=ball_state,
                     )
                 ]
@@ -462,6 +534,23 @@ class ShotEventTrackerV1:
                 and relative["below"]
                 and not relative["inside_mouth"]
             ):
+                if (
+                    ball_gap_frames > 0
+                    or rim_gap_before_current
+                    or candidate.outcome_geometry_tainted
+                ):
+                    reason = "rim_exit_after_observation_gap_insufficient_for_miss"
+                    candidate.evidence.add(reason)
+                    return [
+                        self._resolve(
+                            frame_id=frame_id,
+                            timestamp_sec=timestamp_sec,
+                            outcome=ShotOutcome.UNKNOWN,
+                            confidence=0.48,
+                            reason=reason,
+                            ball_state=ball_state,
+                        )
+                    ]
                 candidate.evidence.add("observed_rim_exit_outside_mouth")
                 return [
                     self._resolve(
@@ -473,6 +562,11 @@ class ShotEventTrackerV1:
                         ball_state=ball_state,
                     )
                 ]
+
+        if direct_observed:
+            candidate.last_observed_ball_position = ball_position
+            candidate.last_observed_rim_bbox = rim
+            candidate.last_observed_frame = int(frame_id)
 
         if frame_id - candidate.frame_start >= self.reset_frames:
             return [
@@ -509,6 +603,21 @@ class ShotEventTrackerV1:
             "had_rim_band": False if candidate is None else candidate.had_rim_band,
             "direct_ball_observations": (
                 0 if candidate is None else candidate.direct_ball_observations
+            ),
+            "last_direct_observed_frame": (
+                None if candidate is None else candidate.last_observed_frame
+            ),
+            "current_rim_gap_frames": (
+                0 if candidate is None else candidate.current_rim_gap_frames
+            ),
+            "max_ball_observation_gap_frames": (
+                0 if candidate is None else candidate.max_ball_gap_frames
+            ),
+            "max_rim_evidence_gap_frames": (
+                0 if candidate is None else candidate.max_rim_gap_frames
+            ),
+            "outcome_geometry_tainted": (
+                False if candidate is None else candidate.outcome_geometry_tainted
             ),
             "last_start_frame": self._last_start_frame,
             "last_resolved_frame": self._last_resolved_frame,
