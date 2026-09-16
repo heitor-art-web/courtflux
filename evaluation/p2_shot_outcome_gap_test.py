@@ -81,6 +81,31 @@ class ShotOutcomeGapRegressionTest(unittest.TestCase):
         )
         self.assertEqual(events[0].attributes["max_ball_observation_gap_frames"], 1)
 
+    def test_rim_gap_cannot_bracket_made_with_stale_pre_gap_geometry(self) -> None:
+        tracker = ShotEventTrackerV1(fps=10.0)
+        tracker.update(
+            frame_id=0,
+            timestamp_sec=0.0,
+            ball_state=ball(0, 100, 70),
+            court_state=court(0),
+        )
+        tracker.update(
+            frame_id=1,
+            timestamp_sec=0.1,
+            ball_state=ball(1, 100, 92, status=BallStateStatus.PREDICTED),
+            court_state=court(1, rim_visible=False),
+        )
+        events = tracker.update(
+            frame_id=2,
+            timestamp_sec=0.2,
+            ball_state=ball(2, 100, 102),
+            court_state=court(2),
+        )
+
+        self.assertEqual(events, [])
+        self.assertTrue(tracker.diagnostics()["active"])
+        self.assertTrue(tracker.diagnostics()["outcome_geometry_tainted"])
+
     def test_outside_reappearance_after_ball_gap_abstains_instead_of_missed(self) -> None:
         tracker = ShotEventTrackerV1(fps=10.0)
         tracker.update(
