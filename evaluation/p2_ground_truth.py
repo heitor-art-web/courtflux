@@ -94,11 +94,22 @@ def evaluate_events(
 ) -> dict[str, Any]:
     """Match P2 event intervals against human event windows.
 
+    Only event types explicitly labeled in human GT are scored. Predictions of
+    types absent from GT are reported as NOT_EVALUATED rather than false positives.
     Primary event metrics measure event existence/type. Outcome correctness is
     reported separately on matched events. Tolerance extends beyond the closest
     interval edges; overlap has temporal distance zero.
     """
     tolerance = max(0, int(tolerance_frames))
+
+    truth_event_types = sorted(
+        {
+            str(row.get("event_type") or "unknown")
+            for row in truth
+            if isinstance(row, dict)
+        }
+    )
+    evaluated_type_set = set(truth_event_types)
 
     candidate_pairs: list[tuple[int, int, int]] = []
     for truth_index, truth_row in enumerate(truth):
@@ -146,21 +157,16 @@ def evaluate_events(
             }
         )
 
-    event_types = sorted(
-        {
-            str(row.get("event_type") or "unknown")
-            for row in predicted + truth
-            if isinstance(row, dict)
-        }
-    )
     by_type: dict[str, Any] = {}
-    for event_type in event_types:
+    evaluated_prediction_indices: set[int] = set()
+    for event_type in truth_event_types:
         pred_indices = {
             i
             for i, row in enumerate(predicted)
             if isinstance(row, dict)
             and str(row.get("event_type") or "unknown") == event_type
         }
+        evaluated_prediction_indices.update(pred_indices)
         truth_indices = {
             i
             for i, row in enumerate(truth)
@@ -187,6 +193,7 @@ def evaluate_events(
         outcome_correct = sum(1 for row in outcome_rows if row["outcome_correct"])
 
         by_type[event_type] = {
+            "evaluation_status": "evaluated",
             "tp": tp,
             "fp": fp,
             "fn": fn,
@@ -203,8 +210,21 @@ def evaluate_events(
             ),
         }
 
+    not_evaluated_by_type = Counter(
+        str(row.get("event_type") or "unknown")
+        for row in predicted
+        if isinstance(row, dict)
+        and str(row.get("event_type") or "unknown") not in evaluated_type_set
+    )
+    not_evaluated_prediction_indices = {
+        i
+        for i, row in enumerate(predicted)
+        if isinstance(row, dict)
+        and str(row.get("event_type") or "unknown") not in evaluated_type_set
+    }
+
     total_tp = len(match_rows)
-    total_fp = len(predicted) - len(used_predictions)
+    total_fp = len(evaluated_prediction_indices - used_predictions)
     total_fn = len(truth) - len(used_truth)
     overall_precision = total_tp / max(total_tp + total_fp, 1)
     overall_recall = total_tp / max(total_tp + total_fn, 1)
@@ -214,13 +234,22 @@ def evaluate_events(
 
     return {
         "matching_contract": "prediction_window_to_human_event_window",
+        "prediction_scope_contract": (
+            "only_ground_truth_labeled_event_types_are_scored; "
+            "other_prediction_types_are_not_evaluated"
+        ),
         "outcome_contract": "event_existence_first; outcome_scored_separately_on_matched_events",
         "tolerance_frames_beyond_window": tolerance,
         "tolerance_frames": tolerance,
         "predicted_events": len(predicted),
+        "evaluated_predicted_events": len(evaluated_prediction_indices),
+        "not_evaluated_predicted_events": len(not_evaluated_prediction_indices),
         "ground_truth_events": len(truth),
         "matched_events": len(match_rows),
+        "evaluated_event_types": truth_event_types,
+        "not_evaluated_prediction_types": dict(sorted(not_evaluated_by_type.items())),
         "overall": {
+            "scope": "ground_truth_labeled_event_types_only",
             "tp": total_tp,
             "fp": total_fp,
             "fn": total_fn,
