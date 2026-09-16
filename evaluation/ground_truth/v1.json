@@ -1,0 +1,36 @@
+{
+  "version": "courtflux_p2_gt_v1",
+  "video": {
+    "source": "https://www.youtube.com/watch?v=hILf-ySowIo",
+    "start_time_sec": 10.0,
+    "end_time_sec": 40.0,
+    "fps": 25.0
+  },
+  "annotation_policy": {
+    "identity": "stable_track_id_when_visible; null_when_not_reliably_identifiable",
+    "team": "neutral_clip; leave team_id null",
+    "unknown_preferred_over_guess": true,
+    "control_states": [
+      "unknown",
+      "possessed",
+      "loose",
+      "pass_flight",
+      "shot_flight"
+    ]
+  },
+  "baseline": {
+    "run_id": "20260916_142505_666541",
+    "jersey_enabled": false,
+    "match_config": "evaluation/match_configs/unknown.json",
+    "frames_seen": 751,
+    "engine_eligible_frames": 720,
+    "note": "Metadata only. Human GT below must be authored blind from video and must not be bootstrapped from P2 predictions."
+  },
+  "control_intervals": [],
+  "events": [],
+  "notes": [
+    "Pass A: annotate basketball truth from video only; do not inspect p2_events.jsonl or p2_states.jsonl.",
+    "Pass B: after Pass A is frozen, use tracking-only diagnostics to map visible actors to track_id values.",
+    "For this neutral V1 clip, team_id remains null."
+  ]
+}
