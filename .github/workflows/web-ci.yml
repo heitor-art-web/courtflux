@@ -10,12 +10,7 @@ on:
       - "vercel.json"
       - ".github/workflows/web-ci.yml"
   pull_request:
-    paths:
-      - "web/**"
-      - "package.json"
-      - "package-lock.json"
-      - "vercel.json"
-      - ".github/workflows/web-ci.yml"
+    branches: [main]
 
 permissions:
   contents: read
