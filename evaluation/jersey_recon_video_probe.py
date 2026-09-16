@@ -37,6 +37,21 @@ def _read_json(path: Path) -> dict[str, Any]:
     return payload
 
 
+def _read_jsonl(path: Path) -> list[dict[str, Any]]:
+    rows: list[dict[str, Any]] = []
+    if not path.exists():
+        return rows
+    with path.open("r", encoding="utf-8") as handle:
+        for line in handle:
+            text = line.strip()
+            if not text:
+                continue
+            row = json.loads(text)
+            if isinstance(row, dict):
+                rows.append(row)
+    return rows
+
+
 def _rate(numerator: int, denominator: int) -> float:
     if denominator <= 0:
         return 0.0
@@ -51,13 +66,21 @@ def _build_probe_summary(run_dir: Path, backend: str) -> Path:
     summary = _read_json(summary_path)
     players = dict(summary.get("players") or {})
     identity = dict(players.get("identity_diagnostics") or {})
-    debug_path = run_dir / "identity_debug" / "identity_debug_summary.json"
+    debug_root = run_dir / "identity_debug"
+    debug_path = debug_root / "identity_debug_summary.json"
     debug = _read_json(debug_path) if debug_path.exists() else {}
+    debug_rows = _read_jsonl(debug_root / "identity_debug.jsonl")
 
     attempts_all = int(identity.get("jersey_attempts_all_inferred_frames") or 0)
     successes_all = int(identity.get("jersey_successes_all_inferred_frames") or 0)
-    debug_attempts = int(debug.get("attempts") or 0)
+    debug_attempts = int(debug.get("attempts") or len(debug_rows))
     debug_accepted = int(debug.get("accepted") or 0)
+    raw_numeric_rows = [row for row in debug_rows if row.get("raw_canonical") is not None]
+    raw_numeric_tracks = {
+        int(row.get("track_id"))
+        for row in raw_numeric_rows
+        if isinstance(row.get("track_id"), int) and int(row.get("track_id")) >= 0
+    }
 
     payload = {
         "version": "courtflux_jersey_recon_probe_v1",
@@ -75,6 +98,9 @@ def _build_probe_summary(run_dir: Path, backend: str) -> Path:
         "debug_attempts": debug_attempts,
         "debug_accepted": debug_accepted,
         "debug_acceptance_rate": _rate(debug_accepted, debug_attempts),
+        "raw_numeric_outputs": len(raw_numeric_rows),
+        "raw_numeric_yield": _rate(len(raw_numeric_rows), debug_attempts),
+        "tracks_with_raw_numeric_output": len(raw_numeric_tracks),
         "high_quality_abstentions": debug.get("high_quality_abstentions"),
         "rejection_reasons": debug.get("rejection_reasons") or identity.get("rejection_reasons") or {},
         "candidate_counts": debug.get("candidate_counts") or identity.get("roster_candidate_counts") or {},
@@ -82,7 +108,8 @@ def _build_probe_summary(run_dir: Path, backend: str) -> Path:
         "checkpoint": identity.get("checkpoint") or {},
         "contact_sheets": debug.get("contact_sheets"),
         "analysis_note": (
-            "These are automatic diagnostic/yield metrics, not accuracy. "
+            "raw_numeric_yield is roster-independent recognizer output yield, not accuracy. "
+            "accepted/identification metrics can be suppressed by unknown-team match configs. "
             "Upload the generated bundle for visual and failure-mode analysis."
         ),
     }
