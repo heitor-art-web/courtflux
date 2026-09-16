@@ -167,6 +167,67 @@ class P2ControlStateDiagnoseTest(unittest.TestCase):
         self.assertEqual(candidate["candidate_below_threshold_frames"], 1)
         self.assertEqual(candidate["candidate_lock_pending_frames"], 1)
 
+    def test_correlates_optional_frame_input_signals(self) -> None:
+        states = [
+            {
+                "frame_id": 20,
+                "control_state": "unknown",
+                "engine_eligible": True,
+                "current_track_id": None,
+                "lost_frames": 1,
+                "flight_active": False,
+                "flight_supported": False,
+                "shot_active": False,
+                "reset_count": 0,
+            },
+            {
+                "frame_id": 21,
+                "control_state": "possessed",
+                "engine_eligible": True,
+                "current_track_id": 9,
+                "lost_frames": 0,
+                "flight_active": False,
+                "flight_supported": False,
+                "shot_active": False,
+                "reset_count": 0,
+            },
+        ]
+        frames = [
+            {
+                "frame_id": 20,
+                "selected_ball": False,
+                "selected_ball_conf": None,
+                "ball_source": "predicted_hold",
+                "players_final": 0,
+                "court_state": {"gameplay_status": "gameplay_limited"},
+            },
+            {
+                "frame_id": 21,
+                "selected_ball": True,
+                "selected_ball_conf": 0.8,
+                "ball_source": "detector_associated",
+                "players_final": 8,
+                "court_state": {"gameplay_status": "gameplay_analysis"},
+            },
+        ]
+        ground_truth = {
+            "control_intervals": [
+                {"state": "possessed", "frame_start": 20, "frame_end": 21},
+            ]
+        }
+
+        report = diagnose(states, ground_truth, frames)
+        signals = report["intervals"][0]["p1_input_signals"]
+        self.assertEqual(report["frame_rows"], 2)
+        self.assertEqual(signals["selected_ball_frames"], 1)
+        self.assertEqual(signals["predicted_hold_frames"], 1)
+        self.assertEqual(signals["player_zero_frames"], 1)
+        self.assertEqual(signals["mean_selected_ball_confidence"], 0.8)
+        self.assertEqual(
+            signals["gameplay_status_counts"],
+            {"gameplay_analysis": 1, "gameplay_limited": 1},
+        )
+
 
 if __name__ == "__main__":
     unittest.main()
