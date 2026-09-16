@@ -9,6 +9,10 @@ import { workerFetch } from "@/lib/worker";
 
 export const dynamic = "force-dynamic";
 
+const WORKER_DISPATCH_TIMEOUT_MS = 10_000;
+const WORKER_RECONCILE_TIMEOUT_MS = 5_000;
+const WORKER_DISPATCH_ATTEMPTS = 2;
+
 type GameContext = {
   home_team?: unknown;
   away_team?: unknown;
@@ -88,6 +92,74 @@ async function ensureTeam(
     .single();
   if (error) throw error;
   return data.id as string;
+}
+
+async function reconcileWorkerDispatch(jobId: string, runId: string) {
+  try {
+    const response = await workerFetch(`/jobs/${jobId}`, {
+      signal: AbortSignal.timeout(WORKER_RECONCILE_TIMEOUT_MS),
+    });
+    if (!response.ok) return null;
+
+    const state = (await response.json()) as Record<string, unknown>;
+    if (state.platform_run_id !== runId) return null;
+
+    return Response.json({
+      job_id: jobId,
+      status: typeof state.status === "string" ? state.status : "queued",
+      dispatch_reconciled: true,
+    });
+  } catch {
+    return null;
+  }
+}
+
+async function dispatchWorkerJob(
+  body: string,
+  jobId: string,
+  runId: string,
+) {
+  let lastError: unknown = null;
+
+  for (let attempt = 1; attempt <= WORKER_DISPATCH_ATTEMPTS; attempt += 1) {
+    try {
+      const response = await workerFetch("/jobs", {
+        method: "POST",
+        body,
+        signal: AbortSignal.timeout(WORKER_DISPATCH_TIMEOUT_MS),
+      });
+
+      if (response.ok) return response;
+
+      // A retry can race with a first request that the worker accepted before the
+      // caller timed out. The worker then returns 409 because the durable job
+      // directory already exists. Reconcile that exact platform job before
+      // deciding that dispatch failed.
+      if (response.status === 409) {
+        const existing = await reconcileWorkerDispatch(jobId, runId);
+        if (existing) return existing;
+      }
+
+      if (![502, 503, 504].includes(response.status) || attempt === WORKER_DISPATCH_ATTEMPTS) {
+        return response;
+      }
+      lastError = new Error(`Worker HTTP ${response.status}`);
+    } catch (error) {
+      lastError = error;
+
+      // Network timeouts are ambiguous: the worker may already have accepted the
+      // job. Check the durable worker state before retrying with the same job id.
+      const existing = await reconcileWorkerDispatch(jobId, runId);
+      if (existing) return existing;
+      if (attempt === WORKER_DISPATCH_ATTEMPTS) throw error;
+    }
+
+    await new Promise((resolve) => setTimeout(resolve, 250));
+  }
+
+  throw lastError instanceof Error
+    ? lastError
+    : new Error("CourtFlux analysis worker dispatch failed");
 }
 
 export async function POST(request: Request) {
@@ -324,19 +396,17 @@ export async function POST(request: Request) {
     }
     usageReservationActive = true;
 
-    const upstream = await workerFetch("/jobs", {
-      method: "POST",
-      body: JSON.stringify({
-        ...payload,
-        start_time_sec: startTimeSec,
-        end_time_sec: endTimeSec,
-        platform_run_id: runId,
-        platform_job_id: jobId,
-        workspace_id: workspaceId,
-        user_id: user.id,
-        subscription_plan: planCode,
-      }),
+    const workerBody = JSON.stringify({
+      ...payload,
+      start_time_sec: startTimeSec,
+      end_time_sec: endTimeSec,
+      platform_run_id: runId,
+      platform_job_id: jobId,
+      workspace_id: workspaceId,
+      user_id: user.id,
+      subscription_plan: planCode,
     });
+    const upstream = await dispatchWorkerJob(workerBody, jobId, runId);
 
     const text = await upstream.text();
     let data: Record<string, unknown> = {};
