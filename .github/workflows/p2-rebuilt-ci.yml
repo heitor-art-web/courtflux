@@ -19,10 +19,11 @@ jobs:
       - name: Compile P2-facing Python sources
         run: >-
           python -m compileall -q
-          core services/p2
+          core services/p2 services/analytics/analyzer.py
           evaluation/p2_event_engine_test.py
           evaluation/p2_real_video_probe.py
           evaluation/p2_real_video_probe_test.py
+          evaluation/p2_runtime_metrics_test.py
           evaluation/p2_ground_truth.py
           evaluation/p2_ground_truth_test.py
           evaluation/p2_frozen_fixture_test.py
@@ -41,6 +42,7 @@ jobs:
           python -m unittest
           evaluation.p2_event_engine_test
           evaluation.p2_real_video_probe_test
+          evaluation.p2_runtime_metrics_test
           evaluation.p2_ground_truth_test
           evaluation.p2_frozen_fixture_test
           evaluation.p2_closure_test
