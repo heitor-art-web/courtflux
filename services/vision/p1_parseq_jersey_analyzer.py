@@ -3,6 +3,7 @@ from __future__ import annotations
 import os
 import re
 import time
+from collections import defaultdict
 from pathlib import Path
 from typing import Any
 
@@ -21,14 +22,7 @@ DEFAULT_TORCH_HUB_DIR = PROJECT_ROOT / "weights" / "torch_hub"
 
 
 class SoccerNetPARSeqJerseyAnalyzer(ExternalJerseyBase):
-    """SoccerNet-finetuned PARSeq challenger for P1 jersey recognition.
-
-    The checkpoint is the SoccerNet fine-tune released with Koshkina & Elder's
-    CVPRW 2024 jersey-number pipeline. This adapter intentionally tests only the
-    STR recognizer on CourtFlux's existing best torso crop; pose-guided number
-    localization and the separate legibility classifier are not enabled in this
-    first comparison. Raw OCR stays visual-only and the roster remains a validator.
-    """
+    """SoccerNet-finetuned PARSeq challenger for P1 jersey recognition."""
 
     BACKEND_NAME = "parseq_soccernet"
     INPUT_HEIGHT = 32
@@ -63,9 +57,19 @@ class SoccerNetPARSeqJerseyAnalyzer(ExternalJerseyBase):
         self.parseq_min_confidence = self._env_float(
             "BASKETBALL_JERSEY_PARSEQ_MIN_CONFIDENCE", 0.50, 0.0, 1.0
         )
-        # The backend-specific confidence floor is deliberately conservative and
-        # may be raised globally through BASKETBALL_JERSEY_CHALLENGER_MIN_CONFIDENCE.
         self.min_confidence = max(self.min_confidence, self.parseq_min_confidence)
+        self.research_multiframe = self._env_bool(
+            "BASKETBALL_JERSEY_RESEARCH_MULTIFRAME", False
+        )
+        self.research_top_k = int(
+            self._env_float("BASKETBALL_JERSEY_RESEARCH_TOP_K", 5.0, 2.0, 8.0)
+        )
+        self.research_min_support = int(
+            self._env_float("BASKETBALL_JERSEY_RESEARCH_MIN_SUPPORT", 2.0, 2.0, 5.0)
+        )
+        self.research_min_share = self._env_float(
+            "BASKETBALL_JERSEY_RESEARCH_MIN_SHARE", 0.60, 0.50, 0.95
+        )
 
         self._ensure_checkpoint()
 
@@ -97,26 +101,19 @@ class SoccerNetPARSeqJerseyAnalyzer(ExternalJerseyBase):
             )
         except Exception as exc:
             raise RuntimeError(
-                "SoccerNet PARSeq architecture load failed. Ensure the root "
-                "requirements are installed and network access is available for "
-                f"the first Torch Hub checkout: {type(exc).__name__}: {exc}"
+                "SoccerNet PARSeq architecture load failed. Ensure the root requirements "
+                f"are installed: {type(exc).__name__}: {exc}"
             ) from exc
 
         print(f"[PARSeq] loading SoccerNet checkpoint={self.checkpoint_path}...", flush=True)
         checkpoint = torch.load(
-            str(self.checkpoint_path),
-            map_location="cpu",
-            weights_only=False,
+            str(self.checkpoint_path), map_location="cpu", weights_only=False
         )
         state_dict = checkpoint.get("state_dict") if isinstance(checkpoint, dict) else None
         if not isinstance(state_dict, dict) or not state_dict:
             raise RuntimeError(
                 f"Invalid SoccerNet PARSeq checkpoint: missing state_dict in {self.checkpoint_path}"
             )
-
-        # The released Lightning checkpoint stores PARSeq keys without the Torch
-        # Hub wrapper's `model.` prefix. This is the compatibility mapping used by
-        # recent Python 3.12/MPS consumers of the official checkpoint.
         mapped_state = {
             (key if str(key).startswith("model.") else f"model.{key}"): value
             for key, value in state_dict.items()
@@ -144,22 +141,28 @@ class SoccerNetPARSeqJerseyAnalyzer(ExternalJerseyBase):
                 "parseq_code_ref": hub_repo,
                 "provider": "local_torch_hub",
                 "device": self.device.type,
-                "preprocessing": (
-                    f"courtflux_{self.crop_mode}_crop_resize_32x128_rgb_minus1_plus1"
+                "preprocessing": f"courtflux_{self.crop_mode}_crop_resize_32x128_rgb_minus1_plus1",
+                "temporal_aggregation": (
+                    "research_multiframe_then_identity_v2"
+                    if self.research_multiframe
+                    else "identity_v2_downstream"
                 ),
-                "temporal_aggregation": "identity_v2_downstream",
                 "roster_policy": "validator_only",
-                "max_images_per_attempt": 1,
+                "max_images_per_attempt": self.research_top_k if self.research_multiframe else 1,
                 "strict_output": "exact_1_or_2_digits_else_unknown",
                 "min_read_confidence": self.parseq_min_confidence,
                 "license_note": "CC-BY-NC-3.0 research challenger",
-                "legibility_gate": False,
+                "legibility_gate": self.research_multiframe,
                 "pose_guided_roi": False,
+                "research_multiframe": self.research_multiframe,
+                "research_min_support": self.research_min_support,
+                "research_min_share": self.research_min_share,
             }
         )
         print(
             f"🪪 Jersey challenger: {self.BACKEND_NAME} device={self.device.type} "
             f"crop={self.crop_mode} min_conf={self.parseq_min_confidence:.2f} "
+            f"multiframe={self.research_multiframe} top_k={self.research_top_k} "
             f"loaded_in={time.perf_counter() - started:.2f}s",
             flush=True,
         )
@@ -176,27 +179,18 @@ class SoccerNetPARSeqJerseyAnalyzer(ExternalJerseyBase):
             return
         if not self._env_bool("BASKETBALL_JERSEY_PARSEQ_AUTO_DOWNLOAD", True):
             raise FileNotFoundError(
-                "SoccerNet PARSeq checkpoint is missing: "
-                f"{self.checkpoint_path}. Download Google Drive file "
-                f"{PARSEQ_SOCCERNET_GDRIVE_ID} there or enable "
-                "BASKETBALL_JERSEY_PARSEQ_AUTO_DOWNLOAD."
+                f"SoccerNet PARSeq checkpoint is missing: {self.checkpoint_path}"
             )
         try:
             import gdown
         except ImportError as exc:
             raise RuntimeError(
-                "SoccerNet PARSeq auto-download requires gdown. Install the root requirements."
+                "SoccerNet PARSeq auto-download requires gdown. Install root requirements."
             ) from exc
-
         self.checkpoint_path.parent.mkdir(parents=True, exist_ok=True)
         partial = self.checkpoint_path.with_suffix(self.checkpoint_path.suffix + ".part")
         if partial.exists():
             partial.unlink()
-        print(
-            "[PARSeq] downloading official SoccerNet checkpoint to "
-            f"{self.checkpoint_path}...",
-            flush=True,
-        )
         downloaded = gdown.download(
             id=PARSEQ_SOCCERNET_GDRIVE_ID,
             output=str(partial),
@@ -205,14 +199,8 @@ class SoccerNetPARSeqJerseyAnalyzer(ExternalJerseyBase):
         if not downloaded or not partial.exists() or partial.stat().st_size <= 0:
             if partial.exists():
                 partial.unlink()
-            raise RuntimeError(
-                "Could not download the official SoccerNet PARSeq checkpoint from Google Drive."
-            )
+            raise RuntimeError("Could not download the official SoccerNet PARSeq checkpoint")
         partial.replace(self.checkpoint_path)
-        print(
-            f"[PARSeq] checkpoint downloaded bytes={self.checkpoint_path.stat().st_size}",
-            flush=True,
-        )
 
     @staticmethod
     def parse_ocr_number(value: Any) -> tuple[str | None, str]:
@@ -245,7 +233,6 @@ class SoccerNetPARSeqJerseyAnalyzer(ExternalJerseyBase):
             logits = self.model(image)
             probabilities = logits.softmax(-1)
             predictions, confidences = self.model.tokenizer.decode(probabilities)
-
         raw_output = str(predictions[0]).strip() if predictions else ""
         confidence = 0.0
         if confidences:
@@ -261,10 +248,161 @@ class SoccerNetPARSeqJerseyAnalyzer(ExternalJerseyBase):
                     confidence = 0.0
         return raw_output, max(0.0, min(1.0, confidence))
 
+    @staticmethod
+    def _research_legibility_score(crop: np.ndarray, base_quality: float) -> float:
+        """Rank crops for likely number visibility without consulting OCR output."""
+        if crop is None or crop.size == 0:
+            return 0.0
+        gray = cv2.cvtColor(crop, cv2.COLOR_BGR2GRAY)
+        height, width = gray.shape[:2]
+        if height < 24 or width < 16:
+            return 0.0
+        y1, y2 = int(height * 0.18), int(height * 0.88)
+        x1, x2 = int(width * 0.16), int(width * 0.84)
+        center = gray[y1:y2, x1:x2]
+        if center.size == 0:
+            return 0.0
+        contrast = min(float(np.std(center)) / 62.0, 1.0)
+        exposure = float(np.mean((center >= 28) & (center <= 230)))
+        edges = cv2.Canny(center, 60, 150)
+        edge_density = float(np.mean(edges > 0))
+        edge_score = min(edge_density / 0.14, 1.0)
+        resolution = min(float(center.size) / float(88 * 44), 1.0)
+        score = (
+            0.30 * max(0.0, min(1.0, float(base_quality)))
+            + 0.25 * edge_score
+            + 0.20 * contrast
+            + 0.15 * exposure
+            + 0.10 * resolution
+        )
+        return max(0.0, min(1.0, float(score)))
+
+    def _research_select_observations(self, track_id: int) -> list[dict[str, Any]]:
+        history = list(self.track_crop_buffers.get(int(track_id), []))
+        if not history:
+            return []
+        last_used = int(self.track_last_inference_ordinal.get(int(track_id), 0))
+        fresh = [item for item in history if int(item.get("ordinal", 0)) > last_used]
+        pool = fresh if len(fresh) >= self.research_min_support else history
+        ranked: list[dict[str, Any]] = []
+        for item in pool:
+            copy = dict(item)
+            copy["legibility_score"] = self._research_legibility_score(
+                copy["crop"], float(copy.get("quality", 0.0))
+            )
+            ranked.append(copy)
+        selected = sorted(
+            ranked,
+            key=lambda item: (
+                float(item.get("legibility_score", 0.0)),
+                float(item.get("quality", 0.0)),
+                int(item.get("ordinal", 0)),
+            ),
+            reverse=True,
+        )[: self.research_top_k]
+        selected.sort(key=lambda item: int(item.get("ordinal", 0)))
+        if selected:
+            newest = max(int(item.get("ordinal", 0)) for item in selected)
+            self.track_last_inference_ordinal[int(track_id)] = max(last_used, newest)
+        return selected
+
+    @staticmethod
+    def _multi_frame_consensus(
+        rows: list[dict[str, Any]], *, min_support: int, min_share: float
+    ) -> dict[str, Any]:
+        weights: dict[str, float] = defaultdict(float)
+        counts: dict[str, int] = defaultdict(int)
+        confidence_sums: dict[str, float] = defaultdict(float)
+        valid_weight = 0.0
+        for row in rows:
+            number = row.get("number")
+            confidence = max(0.0, min(1.0, float(row.get("confidence", 0.0) or 0.0)))
+            legibility = max(0.0, min(1.0, float(row.get("legibility_score", 0.0) or 0.0)))
+            if number is None:
+                continue
+            weight = max(0.05, confidence * max(0.20, legibility))
+            key = str(number)
+            weights[key] += weight
+            counts[key] += 1
+            confidence_sums[key] += confidence
+            valid_weight += weight
+        if not weights or valid_weight <= 0.0:
+            return {
+                "number": None,
+                "reason": "no_valid_number",
+                "support": 0,
+                "share": 0.0,
+                "margin": 0.0,
+                "top_candidates": [],
+            }
+        ordered = sorted(weights.items(), key=lambda item: item[1], reverse=True)
+        top_number, top_weight = ordered[0]
+        second_weight = ordered[1][1] if len(ordered) > 1 else 0.0
+        share = top_weight / valid_weight
+        margin = (top_weight - second_weight) / valid_weight
+        support = counts[top_number]
+        top_candidates = [
+            {
+                "number": number,
+                "posterior": round(weight / valid_weight, 6),
+                "support": counts[number],
+            }
+            for number, weight in ordered[:5]
+        ]
+        if support < int(min_support) or share < float(min_share):
+            return {
+                "number": None,
+                "reason": "low_multiframe_consensus",
+                "support": support,
+                "share": share,
+                "margin": margin,
+                "top_candidates": top_candidates,
+                "best_candidate": top_number,
+            }
+        return {
+            "number": top_number,
+            "reason": "parsed",
+            "support": support,
+            "share": share,
+            "margin": margin,
+            "mean_confidence": confidence_sums[top_number] / max(counts[top_number], 1),
+            "top_candidates": top_candidates,
+        }
+
     def predict_jersey(
         self, track_id: int, team_name: str | None = None
     ) -> dict[str, Any]:
-        selected = self._select_observations(int(track_id), max_images=1)
+        if not self.research_multiframe:
+            selected = self._select_observations(int(track_id), max_images=1)
+            if not selected:
+                return {
+                    "accepted": False,
+                    "rejection_reason": "crop_not_ready",
+                    "roster_policy": "validator_only",
+                }
+            started = time.perf_counter()
+            try:
+                raw_output, confidence = self._generate(selected[0]["crop"])
+            except Exception as exc:
+                raise RuntimeError(
+                    f"SoccerNet PARSeq jersey inference failed: {type(exc).__name__}: {exc}"
+                ) from exc
+            latency_ms = (time.perf_counter() - started) * 1000.0
+            number, parse_reason = self.parse_ocr_number(raw_output)
+            return self._finalize_prediction(
+                track_id=int(track_id),
+                team_name=team_name,
+                selected=selected,
+                number=number,
+                parse_reason=parse_reason,
+                confidence=confidence,
+                margin=0.0,
+                latency_ms=latency_ms,
+                raw_output=raw_output,
+                evidence_source="parseq_mean_token_confidence",
+            )
+
+        selected = self._research_select_observations(int(track_id))
         if not selected:
             return {
                 "accepted": False,
@@ -273,24 +411,61 @@ class SoccerNetPARSeqJerseyAnalyzer(ExternalJerseyBase):
             }
 
         started = time.perf_counter()
+        per_crop: list[dict[str, Any]] = []
         try:
-            raw_output, confidence = self._generate(selected[0]["crop"])
+            for item in selected:
+                raw_output, confidence = self._generate(item["crop"])
+                number, parse_reason = self.parse_ocr_number(raw_output)
+                per_crop.append(
+                    {
+                        "frame_id": item.get("frame_id"),
+                        "crop_quality": round(float(item.get("quality", 0.0)), 6),
+                        "legibility_score": round(float(item.get("legibility_score", 0.0)), 6),
+                        "raw_model_output": raw_output,
+                        "raw_canonical": number,
+                        "parse_reason": parse_reason,
+                        "confidence": round(float(confidence), 6),
+                        "number": number,
+                    }
+                )
         except Exception as exc:
             raise RuntimeError(
                 f"SoccerNet PARSeq jersey inference failed: {type(exc).__name__}: {exc}"
             ) from exc
         latency_ms = (time.perf_counter() - started) * 1000.0
-        number, parse_reason = self.parse_ocr_number(raw_output)
-
-        return self._finalize_prediction(
+        consensus = self._multi_frame_consensus(
+            per_crop,
+            min_support=self.research_min_support,
+            min_share=self.research_min_share,
+        )
+        number = consensus.get("number")
+        confidence = float(consensus.get("share", 0.0) or 0.0)
+        margin = float(consensus.get("margin", 0.0) or 0.0)
+        prediction = self._finalize_prediction(
             track_id=int(track_id),
             team_name=team_name,
             selected=selected,
-            number=number,
-            parse_reason=parse_reason,
+            number=str(number) if number is not None else None,
+            parse_reason=str(consensus.get("reason") or "no_valid_number"),
             confidence=confidence,
-            margin=0.0,
+            margin=margin,
+            top_candidates=list(consensus.get("top_candidates") or []),
             latency_ms=latency_ms,
-            raw_output=raw_output,
-            evidence_source="parseq_mean_token_confidence",
+            raw_output="|".join(str(row.get("raw_model_output") or "") for row in per_crop),
+            evidence_source="parseq_multiframe_legibility_weighted_consensus",
         )
+        prediction["candidate_count"] = int(consensus.get("support", 0) or 0)
+        prediction["per_crop_predictions"] = per_crop
+        prediction["multiframe_consensus"] = {
+            "support": int(consensus.get("support", 0) or 0),
+            "share": round(confidence, 6),
+            "margin": round(margin, 6),
+            "min_support": self.research_min_support,
+            "min_share": self.research_min_share,
+            "selected_images": len(selected),
+        }
+        prediction["mean_legibility_score"] = round(
+            float(np.mean([row["legibility_score"] for row in per_crop])) if per_crop else 0.0,
+            6,
+        )
+        return prediction
