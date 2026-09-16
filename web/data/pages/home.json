@@ -52,10 +52,10 @@
       "secondary": { "label": "See how it works", "href": "#how" },
       "pills": ["Use ordinary game film", "No proprietary camera", "Evidence-first analysis"],
       "media": {
-        "src": "/brand/CourtFlux_Full_Analyst_Workspace.png",
-        "alt": "CourtFlux workspace showing basketball video, tracked players and structured game analysis",
-        "width": 1672,
-        "height": 941
+        "src": "https://images.pexels.com/photos/31760120/pexels-photo-31760120.jpeg?auto=compress&cs=tinysrgb&w=1800",
+        "alt": "Basketball game photography used as a CourtFlux analysis example",
+        "width": 1800,
+        "height": 1200
       },
       "overlay": {
         "kicker": "Game intelligence",
@@ -88,10 +88,10 @@
       ],
       "note": "Event and attribution correctness is still being calibrated against reviewed human ground truth; the beta does not present candidate events as perfect truth.",
       "media": {
-        "src": "/brand/CourtFlux_Video_Tracking_Tactical_Insight.png",
-        "alt": "Basketball video progressing from tracking toward structured game understanding in CourtFlux",
-        "width": 768,
-        "height": 1024
+        "src": "https://images.pexels.com/photos/14317217/pexels-photo-14317217.jpeg?auto=compress&cs=tinysrgb&w=1400",
+        "alt": "Real indoor basketball game photography",
+        "width": 1200,
+        "height": 1800
       }
     },
     {
@@ -108,10 +108,10 @@
         "action": "Review the possession"
       },
       "media": {
-        "src": "/brand/CourtFlux_AI_Coach_Insight_Card.png",
-        "alt": "CourtFlux basketball insight card connected to game film",
-        "width": 1024,
-        "height": 1024
+        "src": "https://images.pexels.com/photos/33281028/pexels-photo-33281028.jpeg?auto=compress&cs=tinysrgb&w=1600",
+        "alt": "Basketball game sequence used as visual evidence",
+        "width": 1600,
+        "height": 1100
       }
     },
     {
