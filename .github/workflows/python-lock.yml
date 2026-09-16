@@ -39,8 +39,12 @@ jobs:
       - name: Seed existing lock preferences
         shell: bash
         run: |
-          [[ -f requirements.lock ]] && cp requirements.lock /tmp/requirements.lock
-          [[ -f requirements-tracking.lock ]] && cp requirements-tracking.lock /tmp/requirements-tracking.lock
+          if [[ -f requirements.lock ]]; then
+            cp requirements.lock /tmp/requirements.lock
+          fi
+          if [[ -f requirements-tracking.lock ]]; then
+            cp requirements-tracking.lock /tmp/requirements-tracking.lock
+          fi
 
       - name: Resolve base Python/ML lock
         run: >-
