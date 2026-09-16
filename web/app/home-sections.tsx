@@ -35,7 +35,7 @@ function Hero({ section }: { section: HeroSection }) {
           <Link className={styles.primaryButton} href={section.primary.href}>{section.primary.label}</Link>
           <Link className={styles.secondaryButton} href={section.secondary.href}>{section.secondary.label}</Link>
         </div>
-        <div className={styles.pills} aria-label="CourtFlux product principles">
+        <div className={styles.pills} aria-label={section.eyebrow}>
           {section.pills.map((pill) => <span className={styles.pill} key={pill}>{pill}</span>)}
         </div>
       </div>
@@ -66,7 +66,7 @@ function Hero({ section }: { section: HeroSection }) {
 
 function ValueStrip({ section }: { section: ValueStripSection }) {
   return (
-    <section id={section.id} className={styles.valueStrip} aria-label="Why CourtFlux">
+    <section id={section.id} className={styles.valueStrip}>
       {section.items.map((item, index) => (
         <article className={styles.valueItem} key={item.title}>
           <span>0{index + 1}</span>
@@ -153,7 +153,7 @@ function Audiences({ section }: { section: AudienceSection }) {
             <span>{item.audience}</span>
             <strong>{item.title}</strong>
             <p>{item.copy}</p>
-            <em>Explore <span aria-hidden="true">→</span></em>
+            <em>{section.actionLabel} <span aria-hidden="true">→</span></em>
           </Link>
         ))}
       </div>
