@@ -53,7 +53,7 @@ function Hero({ section }: { section: HeroSection }) {
         </div>
       </div>
 
-      <aside className={styles.heroInsight} aria-label={section.overlay.kicker}>
+      <aside className={styles.heroInsight} aria-label={section.overlay.kicker} style={{ pointerEvents: "none" }}>
         <div className={styles.heroInsightTopline}>
           <span>{section.overlay.kicker}</span>
           <i aria-hidden="true" />
