@@ -23,6 +23,8 @@ test("Homepage → primary beta CTA opens signup with keyboard focus preserved",
 test("language selector switches public route to Portuguese and Spanish", async ({ page }) => {
   await page.goto("/");
   const language = page.getByRole("combobox", { name: /language|língua|idioma/i });
+  // Wait for language selector to be visible and stable
+  await language.waitFor({ state: "visible", timeout: 5000 });
   await expect(language).toBeVisible();
 
   await language.selectOption("pt-PT");
