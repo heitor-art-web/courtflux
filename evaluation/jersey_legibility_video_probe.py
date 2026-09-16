@@ -1,0 +1,340 @@
+from __future__ import annotations
+
+import argparse
+import json
+import os
+import sys
+from collections import Counter
+from pathlib import Path
+from typing import Any
+
+PROJECT_ROOT = Path(__file__).resolve().parent.parent
+if str(PROJECT_ROOT) not in sys.path:
+    sys.path.insert(0, str(PROJECT_ROOT))
+
+from evaluation.jersey_recon_video_probe import (  # noqa: E402
+    _build_bundle,
+    _latest_run_dir,
+    _rate,
+    _read_json,
+    _read_jsonl,
+    _run_dirs,
+)
+
+
+def _frame_jersey_predictions(run_dir: Path) -> list[dict[str, Any]]:
+    rows = _read_jsonl(run_dir / "frames.jsonl")
+    predictions: list[dict[str, Any]] = []
+    for row in rows:
+        for prediction in list(row.get("jersey_predictions") or []):
+            if isinstance(prediction, dict):
+                predictions.append(prediction)
+    return predictions
+
+
+def _build_probe_summary(run_dir: Path, backend: str) -> Path:
+    summary_path = run_dir / "summary.json"
+    if not summary_path.exists():
+        raise FileNotFoundError(f"Missing analyzer summary: {summary_path}")
+
+    summary = _read_json(summary_path)
+    players = dict(summary.get("players") or {})
+    identity = dict(players.get("identity_diagnostics") or {})
+    debug_root = run_dir / "identity_debug"
+    debug_summary_path = debug_root / "identity_debug_summary.json"
+    debug = _read_json(debug_summary_path) if debug_summary_path.exists() else {}
+    debug_rows = _read_jsonl(debug_root / "identity_debug.jsonl")
+    frame_predictions = _frame_jersey_predictions(run_dir)
+
+    attempts_all = int(identity.get("jersey_attempts_all_inferred_frames") or 0)
+    successes_all = int(identity.get("jersey_successes_all_inferred_frames") or 0)
+    debug_attempts = int(debug.get("attempts") or len(debug_rows))
+    debug_accepted = int(debug.get("accepted") or 0)
+    consensus_numeric_rows = [row for row in debug_rows if row.get("raw_canonical") is not None]
+    consensus_numeric_tracks = {
+        int(row.get("track_id"))
+        for row in consensus_numeric_rows
+        if isinstance(row.get("track_id"), int) and int(row.get("track_id")) >= 0
+    }
+
+    region_total = 0
+    region_numeric = 0
+    attempts_with_agreement = 0
+    attempts_with_conflict = 0
+    attempts_without_regions = 0
+    region_rank_stats: dict[str, Counter[str]] = {}
+    region_scores: list[float] = []
+    support_counts: Counter[int] = Counter()
+
+    for row in debug_rows:
+        per_crop = [
+            item
+            for item in list(row.get("per_crop_predictions") or [])
+            if isinstance(item, dict)
+        ]
+        if not per_crop:
+            attempts_without_regions += 1
+        else:
+            region_total += len(per_crop)
+            region_numeric += sum(
+                1 for item in per_crop if item.get("raw_canonical") is not None
+            )
+            numbers = [
+                str(item.get("raw_canonical"))
+                for item in per_crop
+                if item.get("raw_canonical") is not None
+            ]
+            unique = set(numbers)
+            if numbers and len(unique) == 1:
+                attempts_with_agreement += 1
+            elif len(unique) > 1:
+                attempts_with_conflict += 1
+
+            final_number = row.get("raw_canonical")
+            for item in per_crop:
+                name = str(item.get("roi_name") or "unknown")
+                stats = region_rank_stats.setdefault(name, Counter())
+                stats["outputs"] += 1
+                if item.get("raw_canonical") is not None:
+                    stats["numeric_outputs"] += 1
+                if final_number is not None and str(item.get("raw_canonical")) == str(final_number):
+                    stats["votes_for_final_consensus"] += 1
+                score = item.get("roi_prior")
+                if isinstance(score, (int, float)):
+                    region_scores.append(float(score))
+        support = row.get("candidate_count")
+        if isinstance(support, int):
+            support_counts[int(support)] += 1
+
+    region_payload: dict[str, Any] = {}
+    for name, stats in sorted(region_rank_stats.items()):
+        outputs = int(stats.get("outputs", 0))
+        numeric = int(stats.get("numeric_outputs", 0))
+        votes = int(stats.get("votes_for_final_consensus", 0))
+        region_payload[name] = {
+            "outputs": outputs,
+            "numeric_outputs": numeric,
+            "numeric_yield": _rate(numeric, outputs),
+            "votes_for_final_consensus": votes,
+            "consensus_vote_rate": _rate(votes, numeric),
+        }
+
+    legibility_attempts = 0
+    legibility_frames_scored = 0
+    legibility_frames_passed = 0
+    legibility_frames_rejected = 0
+    attempts_without_legible_frames = 0
+    legibility_scores: list[float] = []
+    selected_images: Counter[int] = Counter()
+
+    for prediction in frame_predictions:
+        gate = prediction.get("legibility_gate")
+        if isinstance(gate, dict):
+            legibility_attempts += 1
+            scored = int(gate.get("scored_count") or 0)
+            passed = int(gate.get("passed_count") or 0)
+            rejected = int(gate.get("rejected_count") or 0)
+            legibility_frames_scored += scored
+            legibility_frames_passed += passed
+            legibility_frames_rejected += rejected
+            if passed == 0:
+                attempts_without_legible_frames += 1
+            for item in list(gate.get("scores") or []):
+                if isinstance(item, dict) and isinstance(item.get("score"), (int, float)):
+                    legibility_scores.append(float(item["score"]))
+        consensus = prediction.get("multiframe_consensus")
+        if isinstance(consensus, dict) and isinstance(consensus.get("selected_images"), int):
+            selected_images[int(consensus["selected_images"])] += 1
+
+    checkpoint = dict(identity.get("checkpoint") or {})
+    threshold = checkpoint.get("legibility_threshold")
+    payload = {
+        "version": "courtflux_jersey_recon_probe_v5_soccernet_legibility",
+        "run_id": summary.get("run_id") or run_dir.name,
+        "video_source": summary.get("video_source"),
+        "start_time_sec": summary.get("start_time_sec"),
+        "end_time_sec": summary.get("end_time_sec"),
+        "backend": backend,
+        "jersey_interval_frames": summary.get("jersey_interval_frames"),
+        "identified_tracks": identity.get("identified_tracks"),
+        "jersey_identification_rate_metric_frames": players.get("jersey_identification_rate"),
+        "attempts_all_inferred_frames": attempts_all,
+        "successes_all_inferred_frames": successes_all,
+        "acceptance_rate_all_inferred_attempts": _rate(successes_all, attempts_all),
+        "debug_attempts": debug_attempts,
+        "debug_accepted": debug_accepted,
+        "debug_acceptance_rate": _rate(debug_accepted, debug_attempts),
+        "consensus_numeric_outputs": len(consensus_numeric_rows),
+        "consensus_numeric_yield": _rate(len(consensus_numeric_rows), debug_attempts),
+        "tracks_with_consensus_numeric_output": len(consensus_numeric_tracks),
+        "legibility_threshold": threshold,
+        "legibility_attempts": legibility_attempts,
+        "legibility_frames_scored": legibility_frames_scored,
+        "legibility_frames_passed": legibility_frames_passed,
+        "legibility_frames_rejected": legibility_frames_rejected,
+        "legibility_pass_rate": _rate(legibility_frames_passed, legibility_frames_scored),
+        "attempts_without_legible_frames": attempts_without_legible_frames,
+        "mean_legibility_score": (
+            round(sum(legibility_scores) / len(legibility_scores), 6)
+            if legibility_scores
+            else 0.0
+        ),
+        "region_proposal_outputs": region_total,
+        "region_numeric_outputs": region_numeric,
+        "region_numeric_yield": _rate(region_numeric, region_total),
+        "attempts_without_region_proposals": attempts_without_regions,
+        "region_proposals_per_attempt": round(region_total / max(debug_attempts, 1), 4),
+        "mean_region_score": (
+            round(sum(region_scores) / len(region_scores), 6) if region_scores else 0.0
+        ),
+        "attempts_all_region_outputs_agree": attempts_with_agreement,
+        "attempts_region_outputs_conflict": attempts_with_conflict,
+        "support_histogram": {
+            str(key): value for key, value in sorted(support_counts.items())
+        },
+        "selected_images_histogram": {
+            str(key): value for key, value in sorted(selected_images.items())
+        },
+        "region_rank_stats": region_payload,
+        "high_quality_abstentions": debug.get("high_quality_abstentions"),
+        "rejection_reasons": debug.get("rejection_reasons")
+        or identity.get("rejection_reasons")
+        or {},
+        "candidate_counts": debug.get("candidate_counts")
+        or identity.get("roster_candidate_counts")
+        or {},
+        "raw_prediction_counts": identity.get("raw_prediction_counts") or {},
+        "checkpoint": checkpoint,
+        "contact_sheets": debug.get("contact_sheets"),
+        "analysis_note": (
+            "v5 adds the official SoccerNet ResNet34 legibility classifier as a roster-blind, "
+            "OCR-blind frame gate before the unchanged v4 number-region scorer and PARSeq. "
+            "Metrics are diagnostic consistency/yield measurements, not ground-truth accuracy."
+        ),
+    }
+    output = run_dir / "jersey_recon_probe_summary.json"
+    output.write_text(
+        json.dumps(payload, indent=2, ensure_ascii=False) + "\n",
+        encoding="utf-8",
+    )
+    return output
+
+
+def run_probe(args: argparse.Namespace) -> None:
+    os.environ["BASKETBALL_JERSEY_BACKEND"] = args.jersey_backend
+    os.environ["BASKETBALL_IDENTITY_DEBUG"] = "1"
+    os.environ["BASKETBALL_SMART_BALL_MODE"] = "off"
+    os.environ["BASKETBALL_SMART_BALL_PIPELINE"] = "0"
+    os.environ["BASKETBALL_JERSEY_RESEARCH_MULTIFRAME"] = "1"
+    os.environ["BASKETBALL_JERSEY_RESEARCH_ROI"] = "1"
+    os.environ["BASKETBALL_JERSEY_RESEARCH_TOP_K"] = str(args.top_k)
+    os.environ["BASKETBALL_JERSEY_RESEARCH_MIN_SUPPORT"] = str(args.min_support)
+    os.environ["BASKETBALL_JERSEY_RESEARCH_MIN_SHARE"] = str(args.min_share)
+    os.environ["BASKETBALL_JERSEY_RESEARCH_LEGIBILITY_THRESHOLD"] = str(
+        args.legibility_threshold
+    )
+
+    from services.analytics import analyzer
+    from services.vision.research_jersey_legibility_analyzer import (
+        ResearchLegibilityRegionPARSeqAnalyzer,
+    )
+
+    def _research_build_jersey_visual(
+        *, profiling_path: str, device: str, project_root: Path
+    ) -> Any:
+        del project_root
+        if args.jersey_backend != "parseq_soccernet":
+            raise ValueError(
+                "The v5 legibility probe currently supports only parseq_soccernet"
+            )
+        visual = ResearchLegibilityRegionPARSeqAnalyzer(
+            profiling_path=profiling_path,
+            device=device,
+        )
+        checkpoint = dict(getattr(visual, "checkpoint_diagnostics", {}) or {})
+        checkpoint["requested_backend"] = args.jersey_backend
+        checkpoint["backend_contract_verified"] = True
+        visual.checkpoint_diagnostics = checkpoint
+        print(
+            "[JERSEY_RESEARCH_V5] "
+            f"legibility_threshold={visual.legibility_threshold:.2f} "
+            f"region_min_score={visual.REGION_MIN_SCORE:.2f} "
+            f"max_regions={visual.REGION_MAX_PROPOSALS}",
+            flush=True,
+        )
+        return visual
+
+    analyzer.build_jersey_visual = _research_build_jersey_visual
+
+    before = _run_dirs()
+    analyzer.main(
+        video_source=args.video,
+        start_time=args.start,
+        end_time=args.end,
+        model_path=args.model,
+        detector_conf=args.conf,
+        imgsz=args.imgsz,
+        device=args.device,
+        tracker=args.tracker,
+        match_config_path=args.match_config,
+        enable_jersey=True,
+        jersey_interval_frames=args.jersey_interval,
+        diagnostics_batch_size=args.diagnostics_batch_size,
+        persist_results=False,
+    )
+
+    run_dir = _latest_run_dir(before)
+    probe_summary_path = _build_probe_summary(run_dir, args.jersey_backend)
+    bundle_path = _build_bundle(run_dir)
+    payload = _read_json(probe_summary_path)
+
+    print("\n[JERSEY_RECON_PROBE_V5]", flush=True)
+    print(json.dumps(payload, indent=2, ensure_ascii=False), flush=True)
+    print(f"[JERSEY_RECON_RUN_DIR] {run_dir}", flush=True)
+    print(f"[JERSEY_RECON_SUMMARY] {probe_summary_path}", flush=True)
+    print(f"[JERSEY_RECON_BUNDLE] {bundle_path}", flush=True)
+
+
+def parse_args() -> argparse.Namespace:
+    parser = argparse.ArgumentParser(
+        description=(
+            "Run CourtFlux v5 Jersey probe: official SoccerNet legibility gate followed "
+            "by the unchanged v4 number-region scorer and PARSeq."
+        )
+    )
+    parser.add_argument("--video", required=True, help="YouTube URL or local video path")
+    parser.add_argument("--start", type=float, default=0.0)
+    parser.add_argument("--end", type=float, default=30.0)
+    parser.add_argument("--model", default="weights/model_v1.1.0.pt")
+    parser.add_argument("--conf", type=float, default=0.40)
+    parser.add_argument("--imgsz", type=int, default=960)
+    parser.add_argument("--device", choices=("mps", "cpu", "cuda"), default="mps")
+    parser.add_argument(
+        "--tracker", choices=("botsort.yaml", "bytetrack.yaml"), default="botsort.yaml"
+    )
+    parser.add_argument("--match-config", default="data/match_config.json")
+    parser.add_argument("--jersey-backend", default="parseq_soccernet")
+    parser.add_argument("--jersey-interval", type=int, default=24)
+    parser.add_argument("--top-k", type=int, default=5)
+    parser.add_argument("--min-support", type=int, default=2)
+    parser.add_argument("--min-share", type=float, default=0.60)
+    parser.add_argument("--legibility-threshold", type=float, default=0.50)
+    parser.add_argument("--diagnostics-batch-size", type=int, default=100)
+    args = parser.parse_args()
+    if args.end <= args.start:
+        parser.error("--end must be greater than --start")
+    if args.jersey_interval <= 0:
+        parser.error("--jersey-interval must be greater than zero")
+    if not 2 <= args.top_k <= 8:
+        parser.error("--top-k must be between 2 and 8")
+    if not 2 <= args.min_support <= args.top_k:
+        parser.error("--min-support must be between 2 and --top-k")
+    if not 0.50 <= args.min_share <= 0.95:
+        parser.error("--min-share must be between 0.50 and 0.95")
+    if not 0.05 <= args.legibility_threshold <= 0.95:
+        parser.error("--legibility-threshold must be between 0.05 and 0.95")
+    return args
+
+
+if __name__ == "__main__":
+    run_probe(parse_args())
