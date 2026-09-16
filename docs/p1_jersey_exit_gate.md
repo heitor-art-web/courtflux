@@ -1,5 +1,13 @@
 # P1 Jersey / Identity Exit Gate
 
+> [!IMPORTANT]
+> ## HISTORICAL / SUPERSEDED
+> This document is retained as the technical history of the pre-merge P1 Jersey/Identity gate. It is **not** an active release gate or current operational instruction set.
+>
+> PR #43 was merged on 2026-09-15. That merge closed P1 while explicitly deferring final Jersey/Identity correctness to the end of P2. The current sources of truth are `README.md` and `docs/p2_roadmap.md`.
+>
+> In particular, the historical instruction near the end of this file saying **“Do not merge PR #43” is superseded and no longer applies**. The validation sequence below is preserved only to document the reasoning and experiments that led to the P1 closure decision.
+
 This is the remaining P1 exit gate for CourtFlux identity quality.
 
 P1 does **not** require a formal human-ground-truth dataset to close this gate. The release decision is based on disciplined visual QA of the integrated Porto/Ovarense reference window, with conservative abstention and explicit diagnostics. Human GT tooling remains available for deeper investigation, model comparison, or later accuracy measurement, but it is not a blocking P1 dependency.
