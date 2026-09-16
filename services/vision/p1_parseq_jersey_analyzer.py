@@ -22,11 +22,17 @@ DEFAULT_TORCH_HUB_DIR = PROJECT_ROOT / "weights" / "torch_hub"
 
 
 class SoccerNetPARSeqJerseyAnalyzer(ExternalJerseyBase):
-    """SoccerNet-finetuned PARSeq challenger for P1 jersey recognition."""
+    """SoccerNet-finetuned PARSeq challenger for jersey-number research."""
 
     BACKEND_NAME = "parseq_soccernet"
     INPUT_HEIGHT = 32
     INPUT_WIDTH = 128
+    RESEARCH_ROIS = (
+        ("upper_center", 0.16, 0.04, 0.84, 0.48, 1.00),
+        ("center", 0.12, 0.16, 0.88, 0.68, 1.00),
+        ("lower_center", 0.16, 0.30, 0.84, 0.82, 0.92),
+        ("full_torso", 0.00, 0.00, 1.00, 1.00, 0.62),
+    )
 
     def __init__(self, profiling_path: str, device: str = "mps") -> None:
         super().__init__(profiling_path=profiling_path)
@@ -60,6 +66,9 @@ class SoccerNetPARSeqJerseyAnalyzer(ExternalJerseyBase):
         self.min_confidence = max(self.min_confidence, self.parseq_min_confidence)
         self.research_multiframe = self._env_bool(
             "BASKETBALL_JERSEY_RESEARCH_MULTIFRAME", False
+        )
+        self.research_roi = self._env_bool(
+            "BASKETBALL_JERSEY_RESEARCH_ROI", False
         )
         self.research_top_k = int(
             self._env_float("BASKETBALL_JERSEY_RESEARCH_TOP_K", 5.0, 2.0, 8.0)
@@ -130,6 +139,13 @@ class SoccerNetPARSeqJerseyAnalyzer(ExternalJerseyBase):
         self.model = model.to(self.device).eval()
         print("[PARSeq] model ready", flush=True)
 
+        temporal = "identity_v2_downstream"
+        if self.research_multiframe:
+            temporal = (
+                "research_multiframe_roi_then_identity_v2"
+                if self.research_roi
+                else "research_multiframe_then_identity_v2"
+            )
         self.checkpoint_diagnostics.update(
             {
                 "backend": self.BACKEND_NAME,
@@ -142,11 +158,7 @@ class SoccerNetPARSeqJerseyAnalyzer(ExternalJerseyBase):
                 "provider": "local_torch_hub",
                 "device": self.device.type,
                 "preprocessing": f"courtflux_{self.crop_mode}_crop_resize_32x128_rgb_minus1_plus1",
-                "temporal_aggregation": (
-                    "research_multiframe_then_identity_v2"
-                    if self.research_multiframe
-                    else "identity_v2_downstream"
-                ),
+                "temporal_aggregation": temporal,
                 "roster_policy": "validator_only",
                 "max_images_per_attempt": self.research_top_k if self.research_multiframe else 1,
                 "strict_output": "exact_1_or_2_digits_else_unknown",
@@ -154,6 +166,8 @@ class SoccerNetPARSeqJerseyAnalyzer(ExternalJerseyBase):
                 "license_note": "CC-BY-NC-3.0 research challenger",
                 "legibility_gate": self.research_multiframe,
                 "pose_guided_roi": False,
+                "localized_roi_proposals": self.research_roi,
+                "research_roi_names": [row[0] for row in self.RESEARCH_ROIS] if self.research_roi else [],
                 "research_multiframe": self.research_multiframe,
                 "research_min_support": self.research_min_support,
                 "research_min_share": self.research_min_share,
@@ -162,8 +176,8 @@ class SoccerNetPARSeqJerseyAnalyzer(ExternalJerseyBase):
         print(
             f"🪪 Jersey challenger: {self.BACKEND_NAME} device={self.device.type} "
             f"crop={self.crop_mode} min_conf={self.parseq_min_confidence:.2f} "
-            f"multiframe={self.research_multiframe} top_k={self.research_top_k} "
-            f"loaded_in={time.perf_counter() - started:.2f}s",
+            f"multiframe={self.research_multiframe} roi={self.research_roi} "
+            f"top_k={self.research_top_k} loaded_in={time.perf_counter() - started:.2f}s",
             flush=True,
         )
 
@@ -250,7 +264,6 @@ class SoccerNetPARSeqJerseyAnalyzer(ExternalJerseyBase):
 
     @staticmethod
     def _research_legibility_score(crop: np.ndarray, base_quality: float) -> float:
-        """Rank crops for likely number visibility without consulting OCR output."""
         if crop is None or crop.size == 0:
             return 0.0
         gray = cv2.cvtColor(crop, cv2.COLOR_BGR2GRAY)
@@ -276,6 +289,48 @@ class SoccerNetPARSeqJerseyAnalyzer(ExternalJerseyBase):
             + 0.10 * resolution
         )
         return max(0.0, min(1.0, float(score)))
+
+    @staticmethod
+    def _roi_crop(
+        crop: np.ndarray,
+        x1f: float,
+        y1f: float,
+        x2f: float,
+        y2f: float,
+    ) -> np.ndarray | None:
+        if crop is None or crop.size == 0:
+            return None
+        height, width = crop.shape[:2]
+        x1 = max(0, min(width - 1, int(round(width * x1f))))
+        x2 = max(1, min(width, int(round(width * x2f))))
+        y1 = max(0, min(height - 1, int(round(height * y1f))))
+        y2 = max(1, min(height, int(round(height * y2f))))
+        if x2 - x1 < 12 or y2 - y1 < 12:
+            return None
+        result = crop[y1:y2, x1:x2]
+        return result if result.size else None
+
+    def _research_roi_proposals(self, item: dict[str, Any]) -> list[dict[str, Any]]:
+        crop = item.get("crop")
+        if crop is None or crop.size == 0:
+            return []
+        proposals: list[dict[str, Any]] = []
+        for name, x1, y1, x2, y2, prior in self.RESEARCH_ROIS:
+            roi = self._roi_crop(crop, x1, y1, x2, y2)
+            if roi is None:
+                continue
+            roi_quality = self._research_legibility_score(
+                roi, float(item.get("quality", 0.0))
+            )
+            proposals.append(
+                {
+                    "roi_name": name,
+                    "roi": roi,
+                    "roi_prior": float(prior),
+                    "roi_legibility_score": roi_quality,
+                }
+            )
+        return proposals
 
     def _research_select_observations(self, track_id: int) -> list[dict[str, Any]]:
         history = list(self.track_crop_buffers.get(int(track_id), []))
@@ -311,20 +366,25 @@ class SoccerNetPARSeqJerseyAnalyzer(ExternalJerseyBase):
         rows: list[dict[str, Any]], *, min_support: int, min_share: float
     ) -> dict[str, Any]:
         weights: dict[str, float] = defaultdict(float)
-        counts: dict[str, int] = defaultdict(int)
+        frame_support: dict[str, set[int]] = defaultdict(set)
         confidence_sums: dict[str, float] = defaultdict(float)
+        confidence_counts: dict[str, int] = defaultdict(int)
         valid_weight = 0.0
         for row in rows:
             number = row.get("number")
             confidence = max(0.0, min(1.0, float(row.get("confidence", 0.0) or 0.0)))
             legibility = max(0.0, min(1.0, float(row.get("legibility_score", 0.0) or 0.0)))
+            roi_prior = max(0.0, min(1.0, float(row.get("roi_prior", 1.0) or 1.0)))
             if number is None:
                 continue
-            weight = max(0.05, confidence * max(0.20, legibility))
+            weight = max(0.02, confidence * max(0.20, legibility) * roi_prior)
             key = str(number)
             weights[key] += weight
-            counts[key] += 1
+            frame_id = row.get("frame_id")
+            if isinstance(frame_id, int):
+                frame_support[key].add(frame_id)
             confidence_sums[key] += confidence
+            confidence_counts[key] += 1
             valid_weight += weight
         if not weights or valid_weight <= 0.0:
             return {
@@ -340,12 +400,12 @@ class SoccerNetPARSeqJerseyAnalyzer(ExternalJerseyBase):
         second_weight = ordered[1][1] if len(ordered) > 1 else 0.0
         share = top_weight / valid_weight
         margin = (top_weight - second_weight) / valid_weight
-        support = counts[top_number]
+        support = len(frame_support[top_number])
         top_candidates = [
             {
                 "number": number,
                 "posterior": round(weight / valid_weight, 6),
-                "support": counts[number],
+                "support": len(frame_support[number]),
             }
             for number, weight in ordered[:5]
         ]
@@ -365,7 +425,8 @@ class SoccerNetPARSeqJerseyAnalyzer(ExternalJerseyBase):
             "support": support,
             "share": share,
             "margin": margin,
-            "mean_confidence": confidence_sums[top_number] / max(counts[top_number], 1),
+            "mean_confidence": confidence_sums[top_number]
+            / max(confidence_counts[top_number], 1),
             "top_candidates": top_candidates,
         }
 
@@ -414,20 +475,36 @@ class SoccerNetPARSeqJerseyAnalyzer(ExternalJerseyBase):
         per_crop: list[dict[str, Any]] = []
         try:
             for item in selected:
-                raw_output, confidence = self._generate(item["crop"])
-                number, parse_reason = self.parse_ocr_number(raw_output)
-                per_crop.append(
-                    {
-                        "frame_id": item.get("frame_id"),
-                        "crop_quality": round(float(item.get("quality", 0.0)), 6),
-                        "legibility_score": round(float(item.get("legibility_score", 0.0)), 6),
-                        "raw_model_output": raw_output,
-                        "raw_canonical": number,
-                        "parse_reason": parse_reason,
-                        "confidence": round(float(confidence), 6),
-                        "number": number,
-                    }
-                )
+                if self.research_roi:
+                    proposals = self._research_roi_proposals(item)
+                else:
+                    proposals = [
+                        {
+                            "roi_name": "full_torso",
+                            "roi": item["crop"],
+                            "roi_prior": 1.0,
+                            "roi_legibility_score": float(item.get("legibility_score", 0.0)),
+                        }
+                    ]
+                for proposal in proposals:
+                    raw_output, confidence = self._generate(proposal["roi"])
+                    number, parse_reason = self.parse_ocr_number(raw_output)
+                    per_crop.append(
+                        {
+                            "frame_id": item.get("frame_id"),
+                            "crop_quality": round(float(item.get("quality", 0.0)), 6),
+                            "legibility_score": round(
+                                float(proposal.get("roi_legibility_score", 0.0)), 6
+                            ),
+                            "roi_name": proposal.get("roi_name"),
+                            "roi_prior": round(float(proposal.get("roi_prior", 1.0)), 6),
+                            "raw_model_output": raw_output,
+                            "raw_canonical": number,
+                            "parse_reason": parse_reason,
+                            "confidence": round(float(confidence), 6),
+                            "number": number,
+                        }
+                    )
         except Exception as exc:
             raise RuntimeError(
                 f"SoccerNet PARSeq jersey inference failed: {type(exc).__name__}: {exc}"
@@ -452,7 +529,11 @@ class SoccerNetPARSeqJerseyAnalyzer(ExternalJerseyBase):
             top_candidates=list(consensus.get("top_candidates") or []),
             latency_ms=latency_ms,
             raw_output="|".join(str(row.get("raw_model_output") or "") for row in per_crop),
-            evidence_source="parseq_multiframe_legibility_weighted_consensus",
+            evidence_source=(
+                "parseq_multiframe_roi_consensus"
+                if self.research_roi
+                else "parseq_multiframe_legibility_weighted_consensus"
+            ),
         )
         prediction["candidate_count"] = int(consensus.get("support", 0) or 0)
         prediction["per_crop_predictions"] = per_crop
@@ -463,6 +544,8 @@ class SoccerNetPARSeqJerseyAnalyzer(ExternalJerseyBase):
             "min_support": self.research_min_support,
             "min_share": self.research_min_share,
             "selected_images": len(selected),
+            "roi_proposals_per_image": len(self.RESEARCH_ROIS) if self.research_roi else 1,
+            "roi_enabled": self.research_roi,
         }
         prediction["mean_legibility_score"] = round(
             float(np.mean([row["legibility_score"] for row in per_crop])) if per_crop else 0.0,
