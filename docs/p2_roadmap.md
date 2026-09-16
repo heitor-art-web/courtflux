@@ -7,119 +7,91 @@ PlayerState[] + BallState + CourtState
                 ↓
           P2 evidence fusion
                 ↓
-control state + possession / pass / turnover / shot / rebound primitives
+control state + possession / pass / turnover / loose / shot / rebound primitives
                 ↓
           P3 aggregation later
 ```
 
+## Current status
+
+**P2 implementation/reconstruction is closed; P2 validation/calibration is active.**
+
+The reconstructed P2 runtime was merged into `main` through PR #48. The `p2-rebuilt` branch remains active for continued P2 validation and contract hardening.
+
+P2 is not yet promoted as complete. The current gate is basketball correctness on frozen real-video evaluation with Jersey OFF, followed by human GT and controlled calibration.
+
+The basketball motor is frozen against intuition-driven tuning: possession/shot state-machine thresholds should not be changed because of one visually surprising clip. Contract fixes, observability fixes and boundary corrections are allowed when they repair a demonstrated architectural problem; motor calibration must be driven by the frozen evaluation set and GT.
+
 ## Baseline and phase boundary
 
-P2 is built on the P1 baseline merged by PR #43. P1 perception/state is authoritative and P2 must not mutate it.
+P2 is built on the P1 baseline merged by PR #43. P1 perception/state remains authoritative and P2 must not mutate it.
 
-During P2, stable track/entity IDs are the operational identity source. `shirt_num` and `player_name` are optional, confidence-aware labels and may remain unknown. Jersey recognition is evidence/diagnostics only and its correctness gate is deferred to the end of P2.
+During P2:
+
+- stable track/entity IDs are the operational identity source;
+- `shirt_num` and `player_name` are optional, confidence-aware labels and may remain `UNKNOWN`;
+- Jersey recognition is evidence/diagnostics only and final correctness is deferred to the end of P2;
+- Smart Ball remains OFF by default;
+- the current basketball-validation battery runs with Jersey OFF.
 
 Missing or contradictory evidence must remain unknown or a candidate rather than being forced into a basketball event.
 
-## Reconstruction status — CLOSED
+## Canonical runtime architecture
 
-The implementation/reconstruction phase of `p2-rebuilt` is closed. The branch now reconstructs both the basketball motor and the intended P2 product/runtime architecture on top of the current PR #43 / Identity-v2 baseline.
-
-From this point until human ground truth is evaluated, the basketball motor is frozen: do not tune thresholds or state-machine behavior by intuition from a single video. The immediate next gate is the frozen Jersey-OFF Porto–Ovarense 0–60 s run, followed directly by human GT if the closure invariants remain clean.
-
-Implemented basketball capabilities:
-
-```text
-robust shot re-arm / de-dup
-explicit ball-control state
-loose-ball start + recovery, including same-handler recovery
-pass-flight evidence
-pass / turnover transition attribution
-shot-flight isolation from possession
-camera/segment-boundary temporal reset
-frame/timestamp discontinuity reset
-rebound candidate chaining
-real-video control/event metrics v3
-per-event-type actor/team attribution
-human-GT evaluator + annotation template
-```
-
-Implemented reconstruction/retirement work:
-
-```text
-single canonical P1 -> P2 runtime
-legacy analytics Engine/metrics removed
-Lab/worker detection-only runtime split removed
-canonical analyzer/probe detection_only contract removed
-legacy Streamlit UI removed
-legacy renderer/session/P0-context surfaces removed
-GameContext/P0 experiment surface removed
-Smart Ball benchmark removed; Smart Ball OFF by default
-legacy duplicate branding/runtime artifacts removed
-frozen real-video regression fixture restored
-repo-wide Python Ruff/compileall gate restored
-Supabase migration replay/lint + deterministic empty seed restored
-web typecheck/lint/build/Playwright quality gate enabled for p2-rebuilt
-```
-
-The supported frontend remains the current `web/` Next.js application. Current web branding and PR #43 Identity/Jersey capabilities are retained; only obsolete duplicate/Streamlit-era surfaces were retired.
-
-## Runtime architecture
-
-The old alternate analytics runtime is gone. `services/analytics/engine.py` and `services/analytics/metrics.py` are retired, and `services/pipeline.py` is the single canonical state path.
-
-The analyzer always builds Identity-v2/P1 canonical state and then runs P2 when `BASKETBALL_P2_ENABLED=1`:
+The old alternate analytics runtime and detection-only runtime split are retired. `services/pipeline.py` is the canonical state path.
 
 ```text
 video
   ↓
-Identity-v2 detector / team evidence
+GameplayFilter
+  └── high-recall prefilter evidence; fail-open by default
+  ↓
+Identity-v2 detector / tracker / team evidence
+  ↓
+CourtState
+  ├── gameplay_present       → continuity / P2 scope
+  └── analysis_eligible      → strict metric-analysis scope
   ↓
 PlayerState[] + BallState + CourtState
   ↓
-P2EngineV1 (when enabled)
+P2EngineV1
   ↓
 frame_state.p2_events + diagnostics["p2"]
 ```
 
-`services.p2.P2Pipeline` is a compatibility wrapper that enables this canonical P2 stage; it must not run a second P2 engine.
+`services.p2.P2Pipeline` is a compatibility wrapper that enables the canonical P2 stage; it must not run a second event engine.
 
-The Lab contract, worker request, current Lab UI, canonical analyzer and real-video probe no longer expose or pass a `detection_only` mode. Canonical run metadata must describe the runtime as `canonical_p1_p2` and must not emit a stale `detection_only` key.
+The Lab contract, worker request, canonical analyzer and real-video probe no longer expose or pass the retired `detection_only` mode. Canonical run metadata must describe the runtime as `canonical_p1_p2` and must not emit a stale top-level `detection_only` field.
 
-Smart Ball is OFF by default. Jersey remains optional evidence and does not become required operational identity before the deferred end-of-P2 Jersey gate.
+## Gameplay presence vs analysis quality
 
-## Retired legacy surfaces
+The runtime now separates gameplay continuity from strict analysis quality.
 
-The following old-P2 cleanup is part of `p2-rebuilt` and protected by CI invariants:
+The historical image-only `GameplayFilter` decision remains available as diagnostics (`likely_gameplay`), but by default it does not veto valid frames before detector/tracker/Identity inference. This prevents weak HSV/court-colour evidence, painted areas, tight broadcast views or camera composition changes from creating artificial temporal gaps.
 
-- legacy analytics Engine/metrics;
-- legacy Streamlit app/UI and Streamlit-only dependencies;
-- old renderer/session configuration surface;
-- old P0 context pipeline and `GameContext`;
-- old ball-context feature experiment surface;
-- Smart Ball benchmark;
-- obsolete local event-image/runtime artifacts;
-- duplicate legacy root branding assets;
-- obsolete Jersey ground-truth Streamlit tool.
+Post-detector `CourtState` exposes three practical scopes:
 
-These removals do not remove the current `web/` frontend, current Identity v2, current Jersey challenger stack, canonical P1 state, or P2 event engine.
+```text
+NON_GAMEPLAY
+GAMEPLAY_LIMITED
+GAMEPLAY_ANALYSIS
+```
 
-## Infrastructure and quality gates
+Semantics:
 
-### Frozen fixture
+```text
+GAMEPLAY_LIMITED
+tracking / Identity / BallState / P2 continuity   ✅
+strict metric analysis                            ❌ / abstain
 
-`evaluation/fixtures/g4UROqJoYBM.mp4` is restored byte-for-byte from the legacy P2 branch. `evaluation/p2_frozen_fixture_test.py` locks its size and Git blob identity so the fixture cannot silently drift.
+GAMEPLAY_ANALYSIS
+tracking / Identity / BallState / P2 continuity   ✅
+strict metric analysis                            ✅
+```
 
-### Python quality
+`CourtState.gameplay_present` controls continuity eligibility. `CourtState.analysis_eligible` remains conservative and controls strict metric-scoped analysis.
 
-`.github/workflows/repo-python-lint.yml` runs Ruff correctness rules plus `compileall` and asserts that retired legacy surfaces are not reintroduced.
-
-### Supabase
-
-`.github/workflows/supabase-lint.yml` starts local Supabase, replays migrations from scratch, runs database lint, verifies local migration history and then tears the local stack down. `supabase/seed.sql` is intentionally empty so CI does not depend on production data.
-
-### Web
-
-`.github/workflows/web-ci.yml` runs on `p2-rebuilt` web changes and executes Node 24 install, TypeScript typecheck, ESLint, Next build, Playwright public-flow tests and accessibility/auth/onboarding smoke suites. Browser/E2E failures remain a separate web-quality gate and do not change the basketball-motor freeze unless they are caused by a P2 runtime contract regression.
+This distinction is part of the P1/P2 boundary contract. P2 should not reset simply because a real basketball frame is too tight or visually weak for wide-view analysis.
 
 ## P2 event contract
 
@@ -134,6 +106,7 @@ PASS_CANDIDATE
 TURNOVER_CANDIDATE
 LOOSE_BALL_STARTED
 LOOSE_BALL_RECOVERED
+LOOSE_BALL_ENDED
 SHOT_ATTEMPT
 REBOUND_CANDIDATE
 ```
@@ -150,37 +123,103 @@ SHOT_FLIGHT
 
 `SHOT_ATTEMPT` carries `outcome = made | missed | unknown`. P2 does not turn these primitives into P3 statistics.
 
-## Possession, loose ball and pass-flight
+## Implemented basketball capabilities
 
-`PossessionTrackerV1` ranks ball/player evidence over canonical P1 state. Acquisition and switches use temporal hysteresis, predicted-ball positions are discounted, short evidence gaps have a grace window and weak evidence abstains.
+```text
+explicit ball-control state
+possession acquisition/change
+robust loose-ball lifecycle
+same-handler loose recovery
+explicit loose-ball terminal closure
+pass-flight evidence
+pass / turnover transition attribution
+shot-flight isolation from possession
+robust shot re-arm / de-dup
+made / missed / unknown shot outcome evidence
+rebound candidate chaining
+frame/timestamp discontinuity reset
+per-event-type actor/team attribution
+human-GT evaluator + annotation template
+```
 
-The tracker distinguishes controlled possession from loose/pass-flight/shot-flight intervals. Same-team handler transitions become `PASS_CANDIDATE` only when direct ball-flight evidence supports the transition. Cross-team transitions may become `TURNOVER_CANDIDATE` with either flight evidence or a direct control change. Unknown team evidence cannot force pass/turnover classification.
+### Possession / pass / turnover
+
+`PossessionTrackerV1` ranks canonical player/ball evidence with temporal hysteresis. Predicted ball evidence is discounted, short evidence gaps have grace behavior and weak evidence may abstain.
+
+Same-team handler transitions become `PASS_CANDIDATE` only when direct ball-flight evidence supports the transition. Cross-team transitions may become `TURNOVER_CANDIDATE` with either flight evidence or a direct control change. Unknown team evidence cannot force pass/turnover classification.
 
 Pass/turnover actor semantics are origin-first: the passer or player losing control is `actor_track_id`; the receiver/new handler is `secondary_track_id`. `POSSESSION_CHANGE` remains new-handler-first because it describes the resulting possession state.
 
-Loose-ball intervals emit `LOOSE_BALL_STARTED` and `LOOSE_BALL_RECOVERED`. A `LOOSE -> POSSESSED` transition now closes the interval even when the same handler recovers the ball; that recovery must not create a fake possession change, pass or turnover.
+### Loose ball
 
-## Shot and rebound
+Loose intervals emit `LOOSE_BALL_STARTED` and close with either `LOOSE_BALL_RECOVERED` or `LOOSE_BALL_ENDED`.
 
-`ShotEventTrackerV1` uses a temporal state machine. Semantic detections are supporting evidence only; they do not become event truth by themselves. Missing outcome evidence resolves to `unknown`, not `missed`.
+A `LOOSE -> POSSESSED` transition closes the interval even when the same handler recovers the ball. Same-handler recovery must not create a fake possession change, pass or turnover.
 
-After a shot resolution, re-arm requires multiple directly observed frames that spatially clear the previous rim/start zone plus a minimum temporal separation. Predicted or missing ball frames do not count as proof of clearance, and re-arm/start cannot happen on the same frame.
+Terminal closure is explicit when a loose interval ends because of another state transition or temporal reset.
 
-When a supported shot becomes active, possession moves into `SHOT_FLIGHT` and is not reinterpreted as pass/turnover. The stable handler immediately before release — or a recent handler within the configured attribution window — may be retained as shot attribution evidence. After a supported missed shot, a subsequent supported possession/recovery within the rebound window may emit `REBOUND_CANDIDATE`.
+### Shot and rebound
 
-## Temporal reset / camera boundary
+`ShotEventTrackerV1` uses a temporal state machine. Semantic detections are supporting evidence only and cannot create event truth by themselves.
 
-`P2EngineV1` resets possession, loose/pass flight, shot/re-arm state and pending rebound state when:
+Missing outcome evidence resolves to `unknown`, not `missed`.
 
-- an analysis-ineligible segment persists beyond the configured gap;
+After shot resolution, re-arm requires multiple directly observed frames that spatially clear the previous rim/start zone plus a minimum temporal separation. Predicted or missing ball frames do not count as direct clearance evidence.
+
+When a supported shot becomes active, possession moves into `SHOT_FLIGHT` and airborne ball evidence is not reinterpreted as pass/turnover. The stable handler immediately before release — or a recent handler inside the attribution window — may be retained as shot actor evidence.
+
+After a supported missed shot, a subsequent supported possession/recovery inside the rebound window may emit `REBOUND_CANDIDATE`.
+
+## Temporal reset / segment boundaries
+
+P2 resets possession, loose/pass flight, shot/re-arm state and pending rebound state when:
+
+- a persistent **non-gameplay** gap is established by the canonical post-detector gameplay-presence contract;
 - frame IDs become non-monotonic or jump beyond the accepted discontinuity;
 - timestamps regress or jump beyond the accepted temporal discontinuity.
 
-P2 intentionally consumes the canonical upstream eligibility boundary instead of adding a second pixel-level scene detector.
+A frame that is `GAMEPLAY_LIMITED` but still has `gameplay_present=True` remains eligible for P2 continuity even when `analysis_eligible=False`.
 
-## Real-video probe v3 and ground truth
+P2 intentionally consumes the canonical upstream gameplay boundary instead of implementing a second pixel-level scene detector.
 
-`evaluation/p2_real_video_probe.py` runs P2 through the canonical analyzer with Smart Ball explicitly OFF and Jersey optionally OFF. It emits:
+## Metrics and diagnostics
+
+`P2MetricsCollector` currently emits the v5 scope contract.
+
+The important denominator split is:
+
+```text
+metric_eligible_frames
+    strict CourtState.analysis_eligible scope
+
+engine_eligible_frames
+    P2 continuity / gameplay_present scope
+
+limited_gameplay_frames
+    gameplay retained for P2 but excluded from strict metric analysis
+```
+
+Possession/control rates use the P2 engine scope. Strict P1 metric counts remain tied to the conservative analysis scope.
+
+The collector also reports:
+
+- control-state counts/rates;
+- actual `POSSESSED` coverage separately from retained handler memory;
+- event counts and decision types;
+- per-event actor/team attribution;
+- pass-flight and turnover evidence splits;
+- shot outcomes and rapid-retrigger diagnostics;
+- loose-ball closure and terminal reasons;
+- temporal reset reasons;
+- P1 immutability rate.
+
+`p2_states.jsonl` records both analysis and gameplay-continuity scope so a future failure can be attributed to the correct gate rather than collapsed into one `valid_gameplay` boolean.
+
+## Real-video probe and ground truth
+
+`evaluation/p2_real_video_probe.py` runs P2 through the canonical analyzer with Smart Ball OFF and Jersey optionally disabled. Current P2 validation uses `--no-jersey`.
+
+The probe emits:
 
 ```text
 p2_metrics.json
@@ -188,49 +227,90 @@ p2_events.jsonl
 p2_states.jsonl
 ```
 
-Probe v3 deliberately separates two concepts that were previously conflated:
-
-- actual possession coverage is `control_state == POSSESSED`;
-- handler-memory coverage means `current_track_id` is retained while the control state may be `LOOSE`, `PASS_FLIGHT` or another non-possession state.
-
-It also reports actor/team attribution independently for every event type so global attribution cannot hide weak shot attribution or another event-specific failure.
-
 `evaluation/p2_ground_truth.py` evaluates predictions against manually authored `courtflux_p2_gt_v1` labels and reports per-event TP/FP/FN, precision, recall, F1 and temporal error, plus control-state frame accuracy/confusion.
 
 `evaluation/p2_ground_truth_template.json` is the annotation starting point. Predictions must never be copied back into GT; uncertain identity/team fields remain null.
 
 ## Validation gates before Jersey ON
 
-### P2.1 — Control / possession GT
+### P2.1 — Gameplay/continuity boundary
+
+Verify that true basketball frames survive tight views and weak court-colour evidence without artificially breaking tracker/Identity/P2 continuity. Measure:
+
+- inferred-frame coverage;
+- `GAMEPLAY_ANALYSIS` vs `GAMEPLAY_LIMITED` vs `NON_GAMEPLAY` counts;
+- P2 engine eligibility;
+- reset reasons;
+- false continuation into genuine replays/graphics/non-gameplay.
+
+### P2.2 — Control / possession GT
 
 Human-label stable possession, dribble gaps/occlusion, pass flight, loose balls, steals/deflections, shot flight and rebounds. Measure control-state accuracy/confusion, possession coverage, false-lock rate, time-to-lock, switch precision and unknown rate.
 
-### P2.2 — Pass / turnover GT
+### P2.3 — Pass / turnover GT
 
 Evaluate precision/recall and temporal tolerance against human labels. A pass requires supported flight evidence. Team-classification errors must not be counted as valid turnover inference.
 
-### P2.3 — Shot GT
+### P2.4 — Shot GT
 
 Label shot start, release/attempt window, rim interaction and outcome separately. Measure attempt precision/recall, duplicate-shot rate, made/missed precision and coverage, unknown rate and temporal error. Rapid UNKNOWN→new-shot retrigger should remain zero unless human GT confirms a genuine second attempt.
 
-### P2.4 — Rebound GT
+### P2.5 — Rebound GT
 
 Evaluate rebound candidates only after shot-event quality is acceptable. Offensive/defensive classification requires independently reliable team evidence.
 
-### P2.5 — Runtime / ablation
+### P2.6 — Runtime / ablation
 
 Ablate supporting signals independently: ball trajectory, rim geometry, semantic shot-action evidence, ball-in-basket evidence and team evidence. Promotion requires measurable quality gain versus runtime cost.
 
-## Closure gate and next sequence
+## Current validation sequence
 
-Implementation is frozen. The next sequence is validation, not further motor development:
+1. Run the frozen V1–V5 battery with the current gameplay-presence split and Jersey OFF.
+2. Re-run the exact Porto–Ovarense `0–60 s` canonical probe with Jersey OFF.
+3. Verify canonical metadata has no retired top-level `detection_only` field.
+4. Compare `metric_eligible_frames`, `engine_eligible_frames` and `limited_gameplay_frames`; do not collapse these scopes.
+5. Inspect continuity/reset reasons, possession/control states, loose-ball closure, pass/turnover evidence, shot de-duplication and per-event attribution.
+6. If contract invariants remain clean, human-label the frozen clips and run the GT evaluator.
+7. Do not tune the basketball motor by intuition before GT.
+8. Calibrate only against the frozen multi-video GT set.
+9. Freeze the validated Jersey-OFF P2 baseline.
+10. Run the deferred Jersey experiment: **soft-ranking + localized ROI + Identity-v2-only temporal consensus**.
+11. Promote P2 only after the basketball GT gates and end-of-P2 Jersey gate are acceptable.
 
-1. Re-run exactly Porto–Ovarense 0–60 s with Jersey OFF on the canonical runtime.
-2. Verify the summary has `mode = canonical_p1_p2` and no top-level `detection_only` key.
-3. Verify `p2_probe.version = p2_real_video_probe_v3`, actual possession vs handler-memory metrics, per-event attribution, same-handler loose recoveries, zero rapid shot-retrigger regression and 100% P1 immutability.
-4. If those closure invariants are clean, human-label this exact 0–60 s clip immediately and run the GT evaluator. Do not tune the motor by intuition before GT.
-5. Run the committed `g4UROqJoYBM.mp4` frozen fixture and the remaining v1–v5 videos through the same Jersey-OFF battery when available.
-6. Calibrate only against the frozen multi-video GT set.
-7. Freeze the validated Jersey-OFF P2 baseline.
-8. Run the deferred Jersey experiment (`soft-ranking + localized ROI + Identity-v2-only temporal consensus`) without adding a second consensus layer.
-9. Promote P2 only after the basketball GT gates and end-of-P2 Jersey gate pass.
+## Deferred Jersey gate
+
+The P1 decision merged in PR #43 remains authoritative: stable track/entity IDs own P2 attribution and Jersey correctness is deferred.
+
+The end-of-P2 Jersey experiment must preserve:
+
+```text
+soft frame ranking
+    ↓
+localized torso / number ROI
+    ↓
+specialized recognizer
+    ↓
+one raw visual observation or UNKNOWN
+    ↓
+roster validator-only
+    ↓
+Identity v2 as the single temporal consensus / locking layer
+```
+
+Do not add a second temporal consensus layer inside the recognizer adapter. `UNKNOWN` remains preferable to a false player identity.
+
+## Retired legacy surfaces
+
+The following remain intentionally retired:
+
+- legacy analytics Engine/metrics runtime;
+- legacy Streamlit app/UI and Streamlit-only dependencies;
+- old renderer/session configuration surface;
+- old P0 context pipeline and `GameContext`;
+- old ball-context feature experiment surface;
+- Smart Ball benchmark;
+- obsolete local event-image/runtime artifacts;
+- duplicate legacy root branding assets;
+- obsolete Jersey ground-truth Streamlit tool.
+
+The supported frontend remains the current `web/` Next.js application. Identity v2, the current Jersey challenger stack, canonical P1 state and the P2 event engine remain active components.
