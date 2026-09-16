@@ -1,11 +1,13 @@
 import { expect, test } from "@playwright/test";
 
-test("Homepage → Start free beta opens signup with keyboard focus preserved", async ({ page }) => {
+test("Homepage → primary beta CTA opens signup with keyboard focus preserved", async ({ page }) => {
   await page.goto("/");
   const main = page.locator("#main-content");
   await expect(main).toBeVisible();
 
-  const cta = page.getByRole("link", { name: "Start free beta" }).first();
+  const cta = page
+    .locator('section[aria-labelledby="hero-title"]')
+    .locator('a[href="/login?mode=signup"]');
   await expect(cta).toBeVisible();
   await cta.focus();
   await expect(cta).toBeFocused();

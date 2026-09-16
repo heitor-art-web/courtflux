@@ -88,6 +88,43 @@ class SupabaseRunStore:
         except Exception as exc:
             self._warn("run update", exc)
 
+    def release_usage_reservation(self, run_id: str | None, *, reason: str) -> None:
+        if not self.client or not run_id:
+            return
+        try:
+            self.client.rpc(
+                "release_analysis_minutes_reservation",
+                {"p_run_id": run_id, "p_reason": reason[:500]},
+            ).execute()
+        except Exception as exc:
+            self._warn("usage reservation release", exc)
+
+    def consume_usage_reservation(
+        self,
+        run_id: str | None,
+        *,
+        actual_minutes: float,
+        metadata: dict[str, Any],
+    ) -> bool | None:
+        """Consume a reserved allowance. False means legacy/no reservation; None means RPC failed."""
+        if not self.client or not run_id:
+            return False
+        try:
+            result = self.client.rpc(
+                "consume_analysis_minutes_reservation",
+                {
+                    "p_run_id": run_id,
+                    "p_actual_quantity": max(0.0, actual_minutes),
+                    "p_metadata": metadata,
+                },
+            ).execute()
+            return bool(result.data)
+        except Exception as exc:
+            # Do not fall back to a direct insert after an ambiguous RPC failure: the
+            # database may have committed the consumption before the response failed.
+            self._warn("usage reservation consume", exc)
+            return None
+
     def purge_expired_local_video_cache(self, retention_days: int = 60) -> int:
         """Remove old worker-local uploaded-video cache files."""
         cache_dir = Path(os.getenv("COURTFLUX_UPLOAD_CACHE_DIR", "data/uploads"))
@@ -187,6 +224,7 @@ class SupabaseRunStore:
             job_values["log_tail"] = log_tail[-12000:]
         self.update_job(job_id, job_values)
         self.update_run(run_id, {"status": "failed", "completed_at": completed_at})
+        self.release_usage_reservation(run_id, reason="analysis_failed")
 
     def mark_completed(
         self,
@@ -232,22 +270,34 @@ class SupabaseRunStore:
         user_id = request_data.get("user_id")
         start = request_data.get("start_time_sec")
         end = request_data.get("end_time_sec")
+        if not workspace_id or start is None or end is None:
+            return
+
+        duration_minutes = max(0.0, float(end) - float(start)) / 60.0
+        usage_metadata = {
+            "device": request_data.get("device"),
+            "imgsz": request_data.get("imgsz"),
+            "subscription_plan": request_data.get("subscription_plan"),
+        }
+        consumed = self.consume_usage_reservation(
+            run_id,
+            actual_minutes=duration_minutes,
+            metadata=usage_metadata,
+        )
+        if consumed is not False:
+            return
+
+        # Compatibility path for jobs created before allowance reservations existed.
         try:
-            if workspace_id and start is not None and end is not None:
-                duration_minutes = max(0.0, float(end) - float(start)) / 60.0
-                self.client.table("usage_events").insert(
-                    {
-                        "workspace_id": workspace_id,
-                        "user_id": user_id,
-                        "analysis_run_id": run_id,
-                        "metric_code": "analysis_minutes",
-                        "quantity": duration_minutes,
-                        "metadata": {
-                            "device": request_data.get("device"),
-                            "imgsz": request_data.get("imgsz"),
-                            "subscription_plan": request_data.get("subscription_plan"),
-                        },
-                    }
-                ).execute()
+            self.client.table("usage_events").insert(
+                {
+                    "workspace_id": workspace_id,
+                    "user_id": user_id,
+                    "analysis_run_id": run_id,
+                    "metric_code": "analysis_minutes",
+                    "quantity": duration_minutes,
+                    "metadata": usage_metadata,
+                }
+            ).execute()
         except Exception as exc:
-            self._warn("usage insert", exc)
+            self._warn("legacy usage insert", exc)

@@ -5,8 +5,8 @@
   --cf-text: #102336;
   --cf-muted: #617181;
   --cf-line: #dfe6ec;
-  --cf-orange: #ff681f;
-  --cf-orange-2: #ff8a45;
+  --cf-orange: #b94700;
+  --cf-orange-2: #993a00;
   --cf-blue: #2a8cff;
   max-width: none;
   margin: 0;
@@ -66,7 +66,7 @@
 .secondaryButton:hover { border-color: rgba(255,104,31,.45); background: #fff7f1; transform: translateY(-1px); }
 .home a:focus-visible,
 .home button:focus-visible,
-.home summary:focus-visible { outline: 3px solid rgba(255,104,31,.72); outline-offset: 3px; }
+.home summary:focus-visible { outline: 3px solid rgba(185,71,0,.78); outline-offset: 3px; }
 
 .hero {
   min-height: 760px;
@@ -94,7 +94,7 @@
 .signalGrid { display: grid; grid-template-columns: repeat(4,minmax(0,1fr)); gap: 10px; padding: 0 0 42px; }
 .signal { min-height: 108px; padding: 18px; border: 1px solid var(--cf-line); border-radius: 14px; background: #fff; box-shadow: 0 8px 24px rgba(18,40,60,.05); }
 .signal strong { display: block; margin-bottom: 6px; color: #183047; font-size: .92rem; }
-.signal span { color: #6c7c8c; font-size: .78rem; line-height: 1.5; }
+.signal span { color: #617181; font-size: .78rem; line-height: 1.5; }
 
 .section { padding: 96px 0 18px; scroll-margin-top: 110px; }
 .sectionHeader { max-width: 880px; margin-bottom: 30px; }
@@ -115,10 +115,10 @@
 .statusCard h3 { margin: 8px 0; color: #183047; font-size: 1.05rem; }
 .step p,
 .card p,
-.statusCard p { margin: 0; color: #68798a; font-size: .88rem; line-height: 1.62; }
+.statusCard p { margin: 0; color: #617181; font-size: .88rem; line-height: 1.62; }
 .contextBox { margin-top: 14px; padding: 16px 18px; border: 1px solid rgba(255,104,31,.28); border-radius: 13px; background: #fff7f1; }
 .contextBox strong { color: #183047; }
-.contextBox p { margin: 6px 0 0; color: #657687; font-size: .86rem; line-height: 1.58; }
+.contextBox p { margin: 6px 0 0; color: #617181; font-size: .86rem; line-height: 1.58; }
 .bulletList,
 .featureList { list-style: none; padding: 0; margin: 22px 0 0; }
 .bulletList li,
@@ -133,14 +133,14 @@
 .pricingGrid { display: grid; grid-template-columns: repeat(4,minmax(0,1fr)); gap: 12px; margin-top: 30px; }
 .priceCard { position: relative; min-height: 500px; padding: 22px; display: flex; flex-direction: column; }
 .priceCardFeatured { border-color: rgba(255,104,31,.5); box-shadow: 0 24px 60px rgba(255,104,31,.10); }
-.priceTag { position: absolute; top: 16px; right: 16px; padding: 5px 8px; border-radius: 999px; background: #fff0e7; color: #c95600; font-size: .64rem; font-weight: 850; letter-spacing: .07em; text-transform: uppercase; }
+.priceTag { position: absolute; top: 16px; right: 16px; padding: 5px 8px; border-radius: 999px; background: #fff0e7; color: var(--cf-orange); font-size: .64rem; font-weight: 850; letter-spacing: .07em; text-transform: uppercase; }
 .priceCard h3 { margin: 8px 0 4px; color: #183047; font-size: 1.24rem; }
 .price { margin: 18px 0 6px; color: #102336; font-size: 2.25rem; font-weight: 850; letter-spacing: -.045em; }
-.price small { color: #718090; font-size: .8rem; font-weight: 650; letter-spacing: 0; }
-.priceDescription { min-height: 76px; color: #68798a; font-size: .85rem; line-height: 1.55; }
+.price small { color: #617181; font-size: .8rem; font-weight: 650; letter-spacing: 0; }
+.priceDescription { min-height: 76px; color: #617181; font-size: .85rem; line-height: 1.55; }
 .usage { margin: 10px 0 4px; padding: 12px; border: 1px solid #d7e5f3; border-radius: 11px; background: #f5f9fd; }
 .usage strong { display: block; color: #183047; font-size: .87rem; }
-.usage span { display: block; margin-top: 4px; color: #6a7c8d; font-size: .72rem; line-height: 1.45; }
+.usage span { display: block; margin-top: 4px; color: #617181; font-size: .72rem; line-height: 1.45; }
 .featureList { margin: 14px 0 20px; }
 .featureList li { border-bottom: 0; padding: 6px 0; font-size: .81rem; }
 .featureList li::before { content: "✓"; color: var(--cf-orange); margin-right: 8px; font-weight: 850; }
@@ -148,24 +148,24 @@
 .priceCard .secondaryButton { width: 100%; margin-top: auto; }
 .usageExplainer { margin-top: 14px; padding: 20px; display: grid; grid-template-columns: 1.02fr .98fr; gap: 22px; border: 1px solid var(--cf-line); border-radius: 14px; background: #f8fafb; }
 .usageExplainer strong { color: #183047; }
-.usageExplainer p { margin: 6px 0 0; color: #68798a; font-size: .84rem; line-height: 1.58; }
+.usageExplainer p { margin: 6px 0 0; color: #617181; font-size: .84rem; line-height: 1.58; }
 .usageScale { display: flex; gap: 7px; flex-wrap: wrap; }
 .usageScale span { padding: 7px 9px; border: 1px solid #d7e0e8; border-radius: 999px; color: #52677a; background: #fff; font-size: .72rem; }
 .pricingNote,
-.smallNote { margin-top: 12px; color: #748495; font-size: .77rem; line-height: 1.5; }
+.smallNote { margin-top: 12px; color: #617181; font-size: .77rem; line-height: 1.5; }
 .statusCard ul { list-style: none; padding: 0; margin: 12px 0 0; }
 .statusCard li { padding: 5px 0; color: #52677a; font-size: .84rem; }
 .now { color: #24764b; }
 .doing { color: #b45a17; }
-.later { color: #738394; }
+.later { color: #617181; }
 
 .betaCta { margin-top: 16px; padding: clamp(24px,5vw,52px); border: 1px solid rgba(255,104,31,.30); border-radius: 18px; background: #fff7f1; }
 .betaCta h3 { margin: 10px 0; color: #102336; font-size: clamp(2rem,4vw,3.6rem); line-height: 1; letter-spacing: -.045em; }
-.betaCta p { max-width: 760px; color: #657687; line-height: 1.65; }
+.betaCta p { max-width: 760px; color: #617181; line-height: 1.65; }
 .faqGrid { display: grid; gap: 10px; margin-top: 26px; }
 .faqGrid details { border: 1px solid var(--cf-line); border-radius: 12px; background: #fff; padding: 0 18px; }
 .faqGrid summary { padding: 17px 0; cursor: pointer; color: #183047; font-weight: 700; }
-.faqGrid p { margin: 0; padding: 0 0 18px; color: #68798a; line-height: 1.65; font-size: .88rem; }
+.faqGrid p { margin: 0; padding: 0 0 18px; color: #617181; line-height: 1.65; font-size: .88rem; }
 .finalCta { padding: 112px 0 82px; text-align: center; }
 .finalCta .sectionTitle,
 .finalCta .sectionCopy { margin-left: auto; margin-right: auto; }
@@ -173,7 +173,7 @@
 .footer { padding: 28px 0 40px; border-top: 1px solid var(--cf-line); background: #fbfcfd; }
 .footerInner { display: flex; align-items: flex-end; justify-content: space-between; gap: 28px; }
 .footerLogo { width: 220px; height: auto; }
-.footerMeta { margin-top: 8px; color: #738394; font-size: .76rem; }
+.footerMeta { margin-top: 8px; color: #617181; font-size: .76rem; }
 .footerLinks { display: flex; justify-content: flex-end; gap: 16px; flex-wrap: wrap; }
 
 @media (max-width: 1120px) {

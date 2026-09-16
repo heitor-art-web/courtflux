@@ -9,6 +9,7 @@ import threading
 import time
 import uuid
 from concurrent.futures import Future, ThreadPoolExecutor
+from contextlib import asynccontextmanager
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any, Literal
@@ -35,10 +36,18 @@ _job_processes: dict[str, subprocess.Popen[str]] = {}
 _cancel_requested: set[str] = set()
 _supabase_store = SupabaseRunStore()
 
+
+@asynccontextmanager
+async def lifespan(_: FastAPI):
+    recover_incomplete_jobs()
+    yield
+
+
 app = FastAPI(
     title="CourtFlux Worker",
-    version="0.7.0",
+    version="0.8.0",
     description="CourtFlux analysis worker using the canonical Beta Lab analysis contract.",
+    lifespan=lifespan,
 )
 
 
@@ -212,6 +221,7 @@ def finalize_canceled(job_id: str, platform_run_id: str | None, reason: str = "C
         platform_run_id,
         {"status": "canceled", "completed_at": completed_at},
     )
+    _supabase_store.release_usage_reservation(platform_run_id, reason=reason)
     return updated
 
 
@@ -273,6 +283,104 @@ def _register_future(job_id: str, future: Future[Any]) -> None:
                 _job_futures.pop(job_id, None)
 
     future.add_done_callback(cleanup)
+
+
+def recover_incomplete_jobs() -> int:
+    """Reconcile durable local jobs after a worker restart and requeue safe work."""
+    recovered = 0
+    for directory in sorted(JOBS_ROOT.iterdir()):
+        if not directory.is_dir():
+            continue
+        job_id = directory.name
+        state_path = directory / "job.json"
+        request_path = directory / "request.json"
+        if not state_path.exists():
+            continue
+
+        try:
+            state = json.loads(state_path.read_text(encoding="utf-8"))
+        except Exception as exc:
+            print(f"⚠️ Worker recovery skipped {job_id}: unreadable job state ({exc})")
+            continue
+
+        status = str(state.get("status") or "")
+        if status not in {"queued", "running"}:
+            continue
+        platform_run_id = state.get("platform_run_id")
+
+        if state.get("cancel_requested"):
+            try:
+                finalize_canceled(
+                    job_id,
+                    platform_run_id,
+                    reason="Cancellation reconciled after worker restart",
+                )
+            except Exception as exc:
+                print(f"⚠️ Worker recovery could not finalize canceled job {job_id}: {exc}")
+            continue
+
+        try:
+            request_data = json.loads(request_path.read_text(encoding="utf-8"))
+            payload = JobRequest.model_validate(request_data)
+            if payload.end_time_sec <= payload.start_time_sec:
+                raise ValueError("end_time_sec must be greater than start_time_sec")
+            if payload.inference_conf > min(payload.detector_conf, payload.ball_conf):
+                raise ValueError("inference_conf must be <= both detector_conf and ball_conf")
+            validate_match_config(payload.match_config)
+            request_data = payload.model_dump()
+        except Exception as exc:
+            error_text = f"Worker restart recovery failed: invalid durable request ({type(exc).__name__}: {exc})"
+            try:
+                write_state(
+                    job_id,
+                    {
+                        "status": "failed",
+                        "completed_at": utc_now(),
+                        "error": error_text,
+                        "recovery_error": error_text,
+                    },
+                )
+            except Exception:
+                pass
+            _supabase_store.mark_failed(job_id, platform_run_id, error_text)
+            print(f"⚠️ {error_text}")
+            continue
+
+        with _control_lock:
+            if job_id in _job_futures:
+                continue
+
+        recovered_at = utc_now()
+        progress = dict(state.get("progress") or {})
+        progress.update(
+            {
+                "phase": "recovered_queued",
+                "eta_sec": None,
+                "estimated_completion_at": None,
+                "last_progress_at": recovered_at,
+            }
+        )
+        write_state(
+            job_id,
+            {
+                "status": "queued",
+                "recovered_at": recovered_at,
+                "recovery_count": int(state.get("recovery_count") or 0) + 1,
+                "cancel_requested": False,
+                "error": None,
+                "progress": progress,
+            },
+        )
+        worker_id = os.getenv("COURTFLUX_WORKER_ID", os.getenv("HOSTNAME", "local-worker"))
+        _supabase_store.update_job(job_id, {"status": "queued", "worker_id": worker_id, "error": None})
+        _supabase_store.update_run(platform_run_id, {"status": "queued", "completed_at": None})
+        future = _executor.submit(run_job, job_id, request_data)
+        _register_future(job_id, future)
+        recovered += 1
+
+    if recovered:
+        print(f"♻️ CourtFlux worker recovery: requeued {recovered} incomplete job(s)")
+    return recovered
 
 
 def run_job(job_id: str, request_data: dict[str, Any]) -> None:

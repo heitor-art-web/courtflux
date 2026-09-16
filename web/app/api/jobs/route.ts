@@ -20,6 +20,15 @@ type GameContext = {
   away_kit_colors?: unknown;
 };
 
+type UsageReservationResult = {
+  granted?: boolean;
+  used_minutes?: number;
+  reserved_minutes?: number;
+  remaining_minutes?: number | null;
+  status?: string;
+  reason?: string;
+};
+
 function numberFromUnknown(value: unknown): number | null {
   if (typeof value === "number" && Number.isFinite(value)) return value;
   if (typeof value === "string" && value.trim()) {
@@ -44,6 +53,26 @@ function colorList(value: unknown) {
     .slice(0, 8);
 }
 
+function reservationFromUnknown(value: unknown): UsageReservationResult {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return {};
+  return value as UsageReservationResult;
+}
+
+async function releaseUsageReservation(
+  admin: ReturnType<typeof createAdminClient>,
+  runId: string | null,
+  reason: string,
+) {
+  if (!runId) return;
+  const { error } = await admin.rpc("release_analysis_minutes_reservation", {
+    p_run_id: runId,
+    p_reason: reason.slice(0, 500),
+  });
+  if (error) {
+    console.error("Could not release analysis usage reservation", error);
+  }
+}
+
 async function ensureTeam(
   admin: ReturnType<typeof createAdminClient>,
   workspaceId: string,
@@ -64,6 +93,7 @@ async function ensureTeam(
 export async function POST(request: Request) {
   let runId: string | null = null;
   let jobId: string | null = null;
+  let usageReservationActive = false;
 
   try {
     const supabase = await createClient();
@@ -256,6 +286,44 @@ export async function POST(request: Request) {
     });
     if (jobError) throw jobError;
 
+    const { data: reservationData, error: reservationError } = await admin.rpc(
+      "reserve_analysis_minutes",
+      {
+        p_workspace_id: workspaceId,
+        p_run_id: runId,
+        p_user_id: user.id,
+        p_quantity: requestedMinutes,
+        p_allowance_minutes: monthlyAllowance,
+      },
+    );
+    if (reservationError) throw reservationError;
+
+    const reservation = reservationFromUnknown(reservationData);
+    if (!reservation.granted) {
+      const errorText = "Analysis allowance changed before the requested minutes could be reserved";
+      const completedAt = new Date().toISOString();
+      await Promise.all([
+        admin.from("analysis_jobs").update({ status: "failed", error: errorText, completed_at: completedAt }).eq("id", jobId),
+        admin.from("analysis_runs").update({ status: "failed", completed_at: completedAt }).eq("id", runId),
+      ]);
+      return Response.json(
+        {
+          error: "Not enough unreserved analysis minutes remaining for this video window",
+          code: "analysis_allowance_reserved_elsewhere",
+          plan_code: planCode,
+          analysis_minutes_requested: requestedMinutes,
+          analysis_minutes_used: reservation.used_minutes ?? usedMinutes,
+          analysis_minutes_reserved: reservation.reserved_minutes ?? null,
+          analysis_minutes_allowance: monthlyAllowance,
+          analysis_minutes_remaining: reservation.remaining_minutes ?? 0,
+          billing_active: false,
+          detail: "Another analysis may already be using the remaining allowance. Shorten the window or wait for an active analysis to finish or fail.",
+        },
+        { status: 429 },
+      );
+    }
+    usageReservationActive = true;
+
     const upstream = await workerFetch("/jobs", {
       method: "POST",
       body: JSON.stringify({
@@ -280,9 +348,12 @@ export async function POST(request: Request) {
 
     if (!upstream.ok) {
       const errorText = String(data.detail ?? data.error ?? `Worker HTTP ${upstream.status}`);
+      const completedAt = new Date().toISOString();
+      await releaseUsageReservation(admin, runId, "worker_dispatch_failed");
+      usageReservationActive = false;
       await Promise.all([
-        admin.from("analysis_jobs").update({ status: "failed", error: errorText, completed_at: new Date().toISOString() }).eq("id", jobId),
-        admin.from("analysis_runs").update({ status: "failed", completed_at: new Date().toISOString() }).eq("id", runId),
+        admin.from("analysis_jobs").update({ status: "failed", error: errorText, completed_at: completedAt }).eq("id", jobId),
+        admin.from("analysis_runs").update({ status: "failed", completed_at: completedAt }).eq("id", runId),
       ]);
       return Response.json({ ...data, run_id: runId, job_id: jobId, game_id: gameId }, { status: upstream.status });
     }
@@ -293,13 +364,19 @@ export async function POST(request: Request) {
       job_id: jobId,
       game_id: gameId,
       analysis_minutes_estimated: requestedMinutes,
+      analysis_minutes_reserved: requestedMinutes,
       analysis_minutes_remaining_before: remainingMinutes,
+      analysis_minutes_remaining_after_reservation: reservation.remaining_minutes ?? null,
     });
   } catch (error) {
     const errorText = error instanceof Error ? error.message : String(error);
     try {
       if (runId || jobId) {
         const admin = createAdminClient();
+        if (usageReservationActive) {
+          await releaseUsageReservation(admin, runId, "job_creation_or_dispatch_error");
+          usageReservationActive = false;
+        }
         const completedAt = new Date().toISOString();
         const writes = [];
         if (jobId) writes.push(admin.from("analysis_jobs").update({ status: "failed", error: errorText, completed_at: completedAt }).eq("id", jobId));
