@@ -22,6 +22,7 @@ from services.diagnostics import RunDiagnostics
 from services.frame_loader import FrameLoader
 from services.gameplay_filter import GameplayFilter
 from services.ingestion.youtube_downloader import YouTubeDownloader
+from services.p2.metrics import P2MetricsCollector
 from services.persistence import db_setup
 from services.pipeline import Pipeline
 from services.profiler import PipelineProfiler
@@ -67,6 +68,29 @@ def _generate_identity_debug(summary_path: Path, run_dir: Path) -> dict | None:
         return None
 
 
+def _attach_p2_metrics(
+    summary_path: Path,
+    run_dir: Path,
+    collector: P2MetricsCollector,
+) -> dict:
+    p2_summary = collector.summary()
+    metrics_path = run_dir / "p2_metrics.json"
+    metrics_path.write_text(
+        json.dumps(p2_summary, indent=2, ensure_ascii=False) + "\n",
+        encoding="utf-8",
+    )
+    payload = json.loads(summary_path.read_text(encoding="utf-8"))
+    payload["p2"] = p2_summary
+    payload["p2_metrics_file"] = str(metrics_path)
+    summary_path.write_text(
+        json.dumps(payload, indent=2, ensure_ascii=False) + "\n",
+        encoding="utf-8",
+    )
+    print(f"[P2_METRICS] {json.dumps(p2_summary, separators=(',', ':'))}", flush=True)
+    print(f"[P2_METRICS_FILE] {metrics_path.resolve()}", flush=True)
+    return p2_summary
+
+
 def resolve_device(requested: str | None) -> str:
     if requested:
         requested = requested.lower().strip()
@@ -101,7 +125,11 @@ def main(
     diagnostics_batch_size: int = 100,
     persist_results: bool = True,
 ):
-    """Run the single canonical CourtFlux P1 -> optional P2 analysis path."""
+    """Run the single canonical CourtFlux P1 -> P2 analysis path."""
+    # P2 is now part of the canonical rebuilt runtime. Keeping this explicit here makes
+    # worker/Lab runs and direct analyzer runs share the same execution contract.
+    os.environ["BASKETBALL_P2_ENABLED"] = "1"
+
     resolved_device = resolve_device(device)
     chosen_model = model_path or settings.model
     chosen_match_config = Path(match_config_path) if match_config_path else DEFAULT_MATCH_CONFIG_PATH
@@ -130,6 +158,7 @@ def main(
     diagnostics.capture_match_config(chosen_match_config)
     print(f"[RUN_DIR] {diagnostics.run_dir.resolve()}", flush=True)
 
+    p2_metrics = P2MetricsCollector()
     conn = None
     session = None
     pipeline = None
@@ -241,6 +270,7 @@ def main(
                 frame_state.court_polygon = court_polygon
             frame_state = pipeline.process(frame_state)
             diagnostics.log_frame(frame_state)
+            p2_metrics.observe(frame_state)
             frame_id += 1
 
             if total_window_sec and (frame_id == 1 or frame_id % 15 == 0):
@@ -274,7 +304,7 @@ def main(
             "status": "completed",
             "video_path": str(video_path),
             "mode": "canonical_p1_p2",
-            "p2_enabled": _env_bool("BASKETBALL_P2_ENABLED", False),
+            "p2_enabled": True,
             "persist_results": persist_results,
             "court_calibration_enabled": bool(camera_tracker is not None),
             "court_calibration_diagnostic_only": bool(camera_tracker is not None),
@@ -302,6 +332,7 @@ def main(
             extra["ball_detector_backend"] = detector.ball_candidate_backend_metadata()
 
         summary_path = diagnostics.finish(extra=extra, performance=performance)
+        _attach_p2_metrics(summary_path, diagnostics.run_dir, p2_metrics)
         if enable_jersey and _env_bool("BASKETBALL_IDENTITY_DEBUG", True):
             _generate_identity_debug(summary_path, diagnostics.run_dir)
         print(f"[SUMMARY] {summary_path.resolve()}", flush=True)
@@ -324,6 +355,7 @@ def main(
             extra={"status": "failed", "error": f"{type(exc).__name__}: {exc}"},
             performance=performance,
         )
+        _attach_p2_metrics(summary_path, diagnostics.run_dir, p2_metrics)
         print(f"[SUMMARY] {summary_path.resolve()}", flush=True)
         raise
     finally:
