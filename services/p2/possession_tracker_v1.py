@@ -21,6 +21,25 @@ class PossessionTrackerV1(_BasePossessionTrackerV1):
         "flight_supported_is_generic_airborne;pass_requires_distinct_receiver_candidate"
     )
 
+    def _rank(
+        self,
+        players: list[PlayerState],
+        ball_state: BallState | None,
+        *,
+        team_evidence: dict[int, tuple[str | None, float]] | None,
+        semantic_evidence: list[dict[str, Any]] | None,
+    ):
+        """Capture pre-threshold rank evidence without changing ranking or decisions."""
+        best = super()._rank(
+            players,
+            ball_state,
+            team_evidence=team_evidence,
+            semantic_evidence=semantic_evidence,
+        )
+        self._raw_best_track_id = None if best is None else int(best.track_id)
+        self._raw_best_score = 0.0 if best is None else float(best.score)
+        return best
+
     def _pass_receiver_evidence(self) -> bool:
         flight = self._flight
         if flight is None or self._candidate_track_id is None:
@@ -68,12 +87,26 @@ class PossessionTrackerV1(_BasePossessionTrackerV1):
             else self.switch_frames
         )
         candidate_score = round(float(self._candidate_score), 6)
+        raw_best_track_id = getattr(self, "_raw_best_track_id", None)
+        raw_best_score = round(float(getattr(self, "_raw_best_score", 0.0)), 6)
+        flight = self._flight
+        raw_best_distinct_from_flight_origin = bool(
+            flight is not None
+            and raw_best_track_id is not None
+            and int(raw_best_track_id) != int(flight.origin_track_id)
+        )
         diagnostics.update(
             {
                 "candidate_score": candidate_score,
                 "candidate_peak_score": candidate_score,
                 "candidate_threshold": round(float(threshold), 6),
                 "candidate_required_frames": int(required_frames),
+                "raw_best_track_id": raw_best_track_id,
+                "raw_best_score": raw_best_score,
+                "raw_best_above_threshold": bool(
+                    raw_best_track_id is not None and raw_best_score >= float(threshold)
+                ),
+                "raw_best_distinct_from_flight_origin": raw_best_distinct_from_flight_origin,
                 "pass_flight_receiver_evidence": self._pass_receiver_evidence(),
                 "flight_classification_policy": self.FLIGHT_CLASSIFICATION_POLICY,
             }
