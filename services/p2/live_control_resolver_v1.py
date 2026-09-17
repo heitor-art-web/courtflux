@@ -41,11 +41,11 @@ class LiveControlP2EngineV1(_BaseP2EngineV1):
         self._live_control_latch: BallControlState | None = None
         self._live_ineligible_frames = 0
         self._live_seen_reset_count = int(self._reset_count)
-        # Normal runtime reuses the existing recent-shot-actor continuity horizon; an
-        # explicitly configured reset_after_ineligible_frames remains an exact contract for
-        # tests/special callers rather than being silently lengthened by the resolver.
+        # Normal runtime reuses the existing recent-shot-actor continuity horizon. When
+        # reset_after_ineligible_frames is explicitly configured, preserve the legacy
+        # boundary: reset on frame N means only N-1 frames may be held as grace.
         self.gameplay_continuity_grace_frames = (
-            self.reset_after_ineligible_frames
+            max(0, self.reset_after_ineligible_frames - 1)
             if explicit_reset_contract
             else max(self.reset_after_ineligible_frames, self.recent_shot_actor_frames)
         )
