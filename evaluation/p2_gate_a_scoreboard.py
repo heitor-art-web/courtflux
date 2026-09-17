@@ -2,13 +2,17 @@ from __future__ import annotations
 
 import argparse
 import json
+import sys
 from collections import Counter, defaultdict
 from pathlib import Path
 from typing import Any
 
+PROJECT_ROOT = Path(__file__).resolve().parent.parent
+if str(PROJECT_ROOT) not in sys.path:
+    sys.path.insert(0, str(PROJECT_ROOT))
+
 from evaluation.p2_ground_truth import evaluate_payload, load_ground_truth, load_jsonl
 
-PROJECT_ROOT = Path(__file__).resolve().parent.parent
 DEFAULT_RUNS = {
     "V1": "20260917_133606_837768",
     "V2": "20260917_141201_062495",
