@@ -49,6 +49,7 @@ class P2ControlStateDiagnoseTest(unittest.TestCase):
                 "lost_frames": 2,
                 "flight_active": True,
                 "flight_supported": True,
+                "pass_flight_receiver_evidence": True,
                 "shot_active": False,
                 "reset_count": 0,
             },
@@ -98,8 +99,13 @@ class P2ControlStateDiagnoseTest(unittest.TestCase):
         pass_flight = report["intervals"][1]
         self.assertEqual(pass_flight["matching_rate"], 0.5)
         self.assertEqual(pass_flight["flight_supported_frames"], 1)
+        self.assertEqual(pass_flight["receiver_evidence_frames"], 1)
         self.assertEqual(
             pass_flight["diagnostic_signals"]["pass_truth_without_locked_origin_frames"],
+            1,
+        )
+        self.assertEqual(
+            pass_flight["diagnostic_signals"]["pass_truth_with_receiver_evidence_frames"],
             1,
         )
         self.assertEqual(
@@ -127,8 +133,10 @@ class P2ControlStateDiagnoseTest(unittest.TestCase):
                 "engine_eligible": True,
                 "current_track_id": None,
                 "lost_frames": 0,
-                "flight_active": False,
-                "flight_supported": False,
+                "flight_active": True,
+                "flight_supported": True,
+                "flight_origin_track_id": 7,
+                "pass_flight_receiver_evidence": True,
                 "shot_active": False,
                 "reset_count": 0,
                 "candidate_track_id": 3,
@@ -143,8 +151,10 @@ class P2ControlStateDiagnoseTest(unittest.TestCase):
                 "engine_eligible": True,
                 "current_track_id": None,
                 "lost_frames": 0,
-                "flight_active": False,
-                "flight_supported": False,
+                "flight_active": True,
+                "flight_supported": True,
+                "flight_origin_track_id": 4,
+                "pass_flight_receiver_evidence": False,
                 "shot_active": False,
                 "reset_count": 0,
                 "candidate_track_id": 4,
@@ -153,19 +163,46 @@ class P2ControlStateDiagnoseTest(unittest.TestCase):
                 "candidate_threshold": 0.58,
                 "candidate_required_frames": 3,
             },
+            {
+                "frame_id": 12,
+                "control_state": "unknown",
+                "engine_eligible": True,
+                "current_track_id": None,
+                "lost_frames": 0,
+                "flight_active": True,
+                "flight_supported": True,
+                "flight_origin_track_id": 4,
+                "pass_flight_receiver_evidence": True,
+                "shot_active": False,
+                "reset_count": 0,
+                "candidate_track_id": 5,
+                "candidate_frames": 3,
+                "candidate_score": 0.70,
+                "candidate_threshold": 0.58,
+                "candidate_required_frames": 3,
+            },
         ]
         ground_truth = {
             "control_intervals": [
-                {"state": "possessed", "frame_start": 10, "frame_end": 11},
+                {"state": "possessed", "frame_start": 10, "frame_end": 12},
             ]
         }
 
         interval = diagnose(states, ground_truth)["intervals"][0]
         candidate = interval["candidate_signals"]
-        self.assertEqual(candidate["candidate_present_frames"], 2)
-        self.assertEqual(candidate["candidate_track_switches"], 1)
+        self.assertEqual(candidate["candidate_present_frames"], 3)
+        self.assertEqual(candidate["candidate_track_switches"], 2)
         self.assertEqual(candidate["candidate_below_threshold_frames"], 1)
+        self.assertEqual(candidate["candidate_above_threshold_frames"], 2)
         self.assertEqual(candidate["candidate_lock_pending_frames"], 1)
+        self.assertEqual(candidate["candidate_lock_ready_frames"], 1)
+        self.assertEqual(candidate["candidate_distinct_from_flight_origin_frames"], 2)
+        self.assertEqual(candidate["candidate_same_as_flight_origin_frames"], 1)
+        self.assertEqual(candidate["receiver_evidence_frames"], 2)
+        self.assertEqual(candidate["flight_supported_with_distinct_receiver_frames"], 2)
+        self.assertEqual(candidate["flight_supported_without_receiver_frames"], 1)
+        self.assertEqual(candidate["max_candidate_score"], 0.7)
+        self.assertEqual(candidate["mean_candidate_score"], 0.57)
 
     def test_correlates_optional_frame_input_signals(self) -> None:
         states = [
