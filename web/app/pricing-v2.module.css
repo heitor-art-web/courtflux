@@ -1,0 +1,56 @@
+.trialBanner {
+  margin-top: 30px;
+  padding: 26px 28px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 28px;
+  border: 1px solid rgba(185,71,0,.2);
+  border-radius: 16px;
+  background: #fff8f2;
+}
+
+.trialBanner > div { max-width: 740px; }
+.trialBanner strong { display: block; margin-top: 9px; color: #0a1722; font-size: clamp(1.55rem,2.5vw,2.35rem); line-height: 1.05; letter-spacing: -.04em; }
+.trialBanner p { margin: 9px 0 0; color: #5e6b74; font-size: .9rem; line-height: 1.6; }
+.trialBanner small { display: block; margin-top: 9px; color: #83634f; font-size: .71rem; line-height: 1.5; }
+.trialBanner > a { flex: 0 0 auto; }
+
+.pricingGrid {
+  grid-template-columns: repeat(2,minmax(0,1fr));
+  max-width: 980px;
+  margin-left: auto;
+  margin-right: auto;
+  gap: 16px;
+}
+
+.priceCard { min-height: 520px; padding: 30px; }
+.annualPrice { margin: 0 0 15px; color: #65717a; font-size: .82rem; font-weight: 760; }
+.annualPrice span { font-weight: 600; }
+:global([class*="priceCardFeatured"]) .annualPrice { color: #9fb0bc; }
+
+.organisationRow {
+  margin: 18px auto 0;
+  max-width: 980px;
+  padding: 22px 24px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 24px;
+  border: 1px solid rgba(10,23,34,.12);
+  border-radius: 14px;
+  background: rgba(255,255,255,.58);
+}
+
+.organisationRow strong { color: #0a1722; font-size: .98rem; }
+.organisationRow p { margin: 5px 0 0; color: #65717a; font-size: .8rem; line-height: 1.5; }
+.organisationRow > a { flex: 0 0 auto; }
+
+@media (max-width: 760px) {
+  .trialBanner,
+  .organisationRow { align-items: flex-start; flex-direction: column; }
+  .trialBanner > a,
+  .organisationRow > a { width: 100%; }
+  .pricingGrid { grid-template-columns: 1fr; }
+  .priceCard { min-height: auto; }
+}

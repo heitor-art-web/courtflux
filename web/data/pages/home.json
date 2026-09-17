@@ -1,255 +1,251 @@
 {
   "metadata": {
-    "title": "Basketball Video Analysis Software for Coaches",
-    "description": "AI basketball video analysis for coaches, teams and academies. Track players, teams and the ball from ordinary game film and review useful evidence faster.",
+    "title": "Basketball Video Analysis for Players, Coaches & Teams | CourtFlux",
+    "description": "Turn ordinary basketball game film into structured game intelligence, player insights and reviewable moments with CourtFlux.",
     "canonical": "/",
     "openGraph": {
-      "title": "Basketball Video Analysis for Coaches, Teams & Academies | CourtFlux",
-      "description": "Turn ordinary basketball game film into structured player, ball and spatial intelligence for faster coaching review.",
+      "title": "Turn Every Game Into Your Next Improvement | CourtFlux",
+      "description": "CourtFlux turns ordinary basketball video into structured game intelligence, player insights and the moments that explain them.",
       "image": {
         "url": "/brand/CourtFlux_Full_Analyst_Workspace.png",
         "width": 1672,
         "height": 941,
-        "alt": "CourtFlux basketball video analysis workspace"
+        "alt": "CourtFlux basketball game analysis workspace"
       }
     },
     "twitter": {
-      "title": "Basketball Video Analysis for Coaches | CourtFlux",
-      "description": "Track players, teams and the ball from ordinary basketball game film and turn video into structured coaching evidence.",
+      "title": "Turn Every Game Into Your Next Improvement | CourtFlux",
+      "description": "Understand the game, find the moments that matter and turn basketball film into your next focus.",
       "image": "/brand/CourtFlux_Full_Analyst_Workspace.png"
     }
   },
   "schema": {
-    "organizationDescription": "Basketball video analysis and intelligence for coaches, teams and academies.",
-    "softwareDescription": "CourtFlux is basketball video analysis software that turns game film into structured player, ball, team and spatial intelligence.",
+    "organizationDescription": "Basketball video analysis and game intelligence for players, coaches and teams.",
+    "softwareDescription": "CourtFlux turns ordinary basketball game film into structured player, ball, possession and event intelligence while keeping analysis connected to video evidence.",
     "featureList": [
-      "Basketball player tracking",
-      "Team classification",
+      "Basketball player and team tracking",
       "Ball detection and temporal tracking",
-      "Basketball video processing diagnostics"
+      "Possession and ball-control state analysis",
+      "Basketball event candidates including passes, turnovers, shots and rebounds",
+      "Evidence-grounded basketball video review"
     ],
-    "audienceType": "Basketball coaches, teams, academies and performance analysts",
-    "webPageName": "Basketball Video Analysis Software for Coaches | CourtFlux",
-    "webPageDescription": "AI basketball video analysis for coaches, teams and academies using ordinary game film."
+    "audienceType": "Basketball players, coaches, teams, academies and performance analysts",
+    "webPageName": "Basketball Video Analysis for Players, Coaches & Teams | CourtFlux",
+    "webPageDescription": "Turn ordinary basketball game film into structured game intelligence, player insights and reviewable moments."
   },
   "navigation": [
-    { "label": "Product", "href": "#product" },
+    { "label": "Product", "href": "#understand" },
     { "label": "How it works", "href": "#how" },
     { "label": "Pricing", "href": "#pricing" },
-    { "label": "FAQ", "href": "#faq" },
     { "label": "Sign in", "href": "/login" },
-    { "label": "Start free beta", "href": "/login?mode=signup", "cta": true }
+    { "label": "Analyze your first game free", "href": "/login?mode=signup", "cta": true }
   ],
-  "hero": {
-    "eyebrow": "AI basketball video analysis for coaches and teams",
-    "title": "Basketball video analysis that turns game film into",
-    "highlight": "coaching evidence.",
-    "copy": "Upload ordinary basketball footage. CourtFlux uses computer vision to track players, teams and the ball, giving coaches a structured foundation for faster video review and performance analysis.",
-    "primary": { "label": "Start free beta", "href": "/login?mode=signup" },
-    "secondary": { "label": "See how it works", "href": "#how" },
-    "pills": ["No proprietary camera required", "Coach-first AI", "Private beta"],
-    "image": {
-      "src": "/brand/CourtFlux_Full_Analyst_Workspace.png",
-      "alt": "CourtFlux basketball video analysis workspace showing tracked players, ball movement and coaching analysis panels",
-      "width": 1672,
-      "height": 941
-    }
-  },
-  "signals": [
-    { "title": "Use existing game film", "copy": "Start from normal basketball video." },
-    { "title": "Track players and ball", "copy": "Follow the game across time." },
-    { "title": "Build court context", "copy": "Connect movement to basketball space." },
-    { "title": "Review useful evidence", "copy": "Spend less time searching through footage." }
-  ],
-  "how": {
-    "eyebrow": "How basketball video analysis works",
-    "title": "From basketball video to",
-    "highlight": "structured analysis.",
-    "copy": "CourtFlux connects raw game footage to player tracking, ball tracking and spatial context, then builds toward possessions, events and tactical insights as those layers mature.",
-    "image": {
-      "src": "/brand/CourtFlux_Video_Tracking_Tactical_Insight.png",
-      "alt": "Basketball game video progressing from player and ball tracking to tactical insight in CourtFlux",
-      "width": 768,
-      "height": 1024
-    },
-    "steps": [
-      { "kicker": "01 · Video", "title": "Use the basketball game film you already have.", "copy": "Start with normal basketball footage rather than a proprietary capture system." },
-      { "kicker": "02 · Tracking", "title": "Computer vision follows players, teams and the ball.", "copy": "Detections become persistent objects with temporal context across the game." },
-      { "kicker": "03 · Analysis", "title": "Tracking becomes structured basketball information.", "copy": "Court coordinates, possessions, events and tactical patterns become measurable and searchable as the product develops." }
-    ],
-    "context": {
-      "title": "Start analysing before your roster is perfect.",
-      "copy": "Home and away teams are enough to begin. Jersey numbers and player names can be added later when roster-level identity matters."
-    }
-  },
-  "ball": {
-    "eyebrow": "Basketball ball tracking",
-    "title": "Track the ball through the",
-    "highlight": "flow of play.",
-    "copy": "Reliable ball tracking is the foundation for possession, passing, shot, rebound and later tactical analysis. CourtFlux combines direct detections with temporal continuity to keep the ball connected to the game over time.",
-    "bullets": [
-      { "title": "Direct detection", "copy": "frame-level ball candidates" },
-      { "title": "Temporal tracking", "copy": "continuity through short gaps" },
-      { "title": "Reacquisition", "copy": "recovery when the ball becomes visible again" }
-    ],
-    "image": {
-      "src": "/brand/CourtFlux_Ball_Intelligence.png",
-      "alt": "CourtFlux basketball ball detection and temporal tracking visualization",
-      "width": 768,
-      "height": 1024
-    }
-  },
-  "spatial": {
-    "eyebrow": "Basketball spatial analysis",
-    "title": "Turn video coordinates into",
-    "highlight": "court-level context.",
-    "copy": "Map tracked objects from video coordinates onto a basketball court so coaches can reason about spacing, coverage, trajectories and team shape instead of isolated detection boxes.",
-    "note": "Court mapping is in development and is not represented as a finished beta capability.",
-    "image": {
-      "src": "/brand/CourtFlux_Split_Screen_Court_Reconstruction.png",
-      "alt": "Basketball game video and reconstructed player positions shown side by side in CourtFlux",
-      "width": 1672,
-      "height": 941
-    }
-  },
-  "capabilitiesIntro": {
-    "eyebrow": "Basketball analysis capabilities",
-    "title": "A basketball analysis platform built around the",
-    "highlight": "game itself.",
-    "copy": "CourtFlux is not a traditional box-score tracker. It is being built around video, player movement, ball movement, possessions and spatial context so coaches can connect metrics back to what happened on court."
-  },
-  "capabilities": [
-    { "kicker": "Computer Vision", "title": "Player Tracking", "copy": "Track player movement across basketball game footage.", "status": "Beta" },
-    { "kicker": "Core Priority", "title": "Ball Intelligence", "copy": "Detect and follow the ball across time to support reliable game context.", "status": "Beta" },
-    { "kicker": "Classification", "title": "Team Identification", "copy": "Separate teams consistently from visual appearance.", "status": "Beta" },
-    { "kicker": "Spatial Layer", "title": "Court Mapping", "copy": "Translate image positions into meaningful court coordinates.", "status": "In development" },
-    { "kicker": "Game Structure", "title": "Possession Analysis", "copy": "Segment continuous footage into basketball possessions.", "status": "In development" },
-    { "kicker": "Coaching Layer", "title": "Tactical Intelligence", "copy": "Explain patterns and moments in coaching language.", "status": "Vision" }
-  ],
-  "pricing": {
-    "intro": {
-      "eyebrow": "Pricing",
-      "title": "Pay for the video you",
-      "highlight": "actually analyse.",
-      "copy": "Plans are structured around analysis minutes rather than a fixed number of games. Short clips consume only their duration, while full-game recordings use a larger share of the same monthly allowance."
-    },
-    "plans": [
-      {
-        "kicker": "Private beta",
-        "name": "Beta",
-        "price": "€0",
-        "suffix": "/ month",
-        "description": "Explore the core tracking layer while CourtFlux is being benchmarked and refined.",
-        "allowance": "60 analysis minutes / month",
-        "allowanceCopy": "About one full-game recording, or several shorter clips.",
-        "features": ["Player tracking", "Team classification", "Ball intelligence", "Basic analysis and diagnostics"],
-        "cta": "Start free beta",
-        "href": "/login?mode=signup",
-        "featured": false
+  "sections": [
+    {
+      "type": "hero",
+      "id": "top",
+      "eyebrow": "Basketball intelligence from real game film",
+      "title": "Turn every game into your next",
+      "highlight": "improvement.",
+      "copy": "CourtFlux turns ordinary basketball video into structured game intelligence, player insights and the moments that explain them — so you can understand what happened and what to work on next.",
+      "primary": { "label": "Analyze your first game free", "href": "/login?mode=signup" },
+      "secondary": { "label": "See how it works", "href": "#how" },
+      "pills": ["Use ordinary game film", "No proprietary camera", "Evidence-first analysis"],
+      "media": {
+        "src": "https://images.pexels.com/photos/31760120/pexels-photo-31760120.jpeg?auto=compress&cs=tinysrgb&w=1800",
+        "alt": "Basketball game photography used as a CourtFlux analysis example",
+        "width": 1800,
+        "height": 1200
       },
-      {
-        "kicker": "Individual workflow",
-        "name": "Coach",
-        "price": "€14.99",
-        "suffix": "/ month",
-        "description": "For an individual coach or analyst who wants useful basketball moments without hours of manual review.",
-        "allowance": "300 analysis minutes / month",
-        "allowanceCopy": "About five full-game recordings, or dozens of shorter clips.",
-        "features": ["Everything in Beta", "Possession and event primitives as they launch", "Saved analyses and game summaries", "One coach workspace"],
-        "cta": "Join the beta",
-        "href": "/login?mode=signup",
-        "featured": false
-      },
-      {
-        "tag": "Best for teams",
-        "kicker": "Shared team workflow",
-        "name": "Team",
-        "price": "€29.99",
-        "suffix": "/ month",
-        "description": "For one squad and coaching staff building a repeatable season-long analysis workflow.",
-        "allowance": "720 analysis minutes / month",
-        "allowanceCopy": "About twelve full-game recordings, with clips charged only by duration.",
-        "features": ["Everything in Coach", "Saved roster and player identity", "Structured player and team analytics", "Shared staff access and exports"],
-        "cta": "Join the beta",
-        "href": "/login?mode=signup",
-        "featured": true
-      },
-      {
-        "kicker": "Multi-team development",
-        "name": "Academy",
-        "price": "From €79",
-        "suffix": "/ month",
-        "description": "For academies and clubs managing multiple squads, staff members and player development pathways.",
-        "allowance": "2,400 analysis minutes / month",
-        "allowanceCopy": "About forty full-game recordings across the organisation.",
-        "features": ["Up to 5 teams", "Multiple rosters and staff permissions", "Player development history and cross-team reporting", "Tactical intelligence as it becomes available"],
-        "cta": "Talk to CourtFlux",
-        "href": "/login?mode=signup",
-        "featured": false
+      "overlay": {
+        "kicker": "Game intelligence",
+        "title": "From footage to basketball context",
+        "metrics": ["Possessions", "Shots", "Changes of control"],
+        "note": "P2 event understanding is in validation against reviewed human ground truth."
       }
-    ],
-    "usageExplainer": {
-      "title": "What counts as a game?",
-      "copy": "A game is a basketball session in your library, usually tied to one matchup and date. Usage is based on processed video duration, not the number of game records.",
-      "scale": ["Short clip · up to 5 min", "Segment · 5–20 min", "Full game · up to 60 min"],
-      "scaleCopy": "Footage over 60 minutes simply continues against the same analysis-minute allowance."
     },
-    "note": "Indicative product pricing only. Billing is not active during private beta. Final allowances, feature availability and paid launch terms will be confirmed before charging customers."
-  },
-  "transparency": {
-    "intro": {
-      "eyebrow": "Beta transparency",
-      "title": "Know what CourtFlux can do",
-      "highlight": "today.",
-      "copy": "The product story separates benchmarked capabilities from active development and the longer-term coaching vision, so beta users know what to expect."
+    {
+      "type": "valueStrip",
+      "id": "value",
+      "items": [
+        { "title": "Understand your game", "copy": "Move beyond isolated clips and see how the action develops through time." },
+        { "title": "Find your edge", "copy": "Surface the possessions and moments that deserve a closer look." },
+        { "title": "Improve with evidence", "copy": "Keep analysis connected to the film instead of separating numbers from context." }
+      ]
     },
-    "columns": [
-      { "kicker": "Available / benchmarked", "tone": "now", "items": ["Player detection and tracking", "Team classification", "Ball detection", "Temporal ball tracking", "Processing diagnostics"] },
-      { "kicker": "In development", "tone": "doing", "items": ["Player identity", "Court mapping", "Possession segmentation", "Basketball event detection"] },
-      { "kicker": "Product vision", "tone": "later", "items": ["Automated tactical insights", "Team pattern analysis", "Player development intelligence", "High-performance workflows"] }
-    ]
-  },
-  "betaLab": {
-    "eyebrow": "CourtFlux Beta Lab",
-    "title": "The test environment stays a test environment.",
-    "copy": "Configure clips, tune detector thresholds, run the pipeline and inspect diagnostics without mixing engineering controls into the customer-facing marketing experience.",
-    "cta": { "label": "Open Beta Lab", "href": "/lab" }
-  },
-  "faqIntro": {
-    "eyebrow": "Basketball video analysis FAQ",
-    "title": "Questions about",
-    "highlight": "CourtFlux."
-  },
-  "faq": [
-    { "question": "Who is CourtFlux for?", "answer": "CourtFlux is being built for basketball coaches, teams, academies and performance analysts who want to get more useful information from the game film they already record." },
-    { "question": "What kind of video can CourtFlux analyse?", "answer": "CourtFlux is being developed around basketball game footage where the court and players are sufficiently visible. Camera position, resolution, occlusion and motion blur can affect analysis quality." },
-    { "question": "Do I need specialist cameras?", "answer": "No proprietary capture system is required by the product direction. CourtFlux is designed around normal basketball game film." },
-    { "question": "How do analysis minutes work?", "answer": "Usage is based on processed video duration rather than the number of uploads. A 3-minute clip uses about 3 analysis minutes and a 60-minute recording uses about 60." },
-    { "question": "What counts as a full game?", "answer": "For pricing guidance, a full game means up to 60 minutes of uploaded video. A game can still be stored as a matchup or session in the product; usage is based on the actual video duration processed." },
-    { "question": "What is available in the beta today?", "answer": "The current benchmark focuses on player detection and tracking, team classification, ball detection, temporal ball tracking and processing diagnostics. Court mapping, possessions, events and tactical intelligence are being developed in stages." },
-    { "question": "Does AI replace the coach or analyst?", "answer": "No. CourtFlux is intended to surface evidence and reduce manual video work while keeping basketball judgement with the coach or analyst." }
+    {
+      "type": "story",
+      "id": "understand",
+      "variant": "media-left",
+      "eyebrow": "Understand the game",
+      "title": "See more than the",
+      "highlight": "box score.",
+      "copy": "CourtFlux follows players, teams and the ball across time, then builds that movement into basketball state. The current P2 layer can structure ball control, possession changes, loose-ball sequences, shot attempts and candidate pass, turnover and rebound events.",
+      "points": [
+        { "title": "Track the action", "copy": "Persistent player, team and ball context creates the foundation for game understanding." },
+        { "title": "Connect events through time", "copy": "Basketball decisions happen across sequences, not in isolated frames." },
+        { "title": "Keep uncertainty visible", "copy": "Weak or contradictory evidence can remain unknown instead of being forced into a false answer." }
+      ],
+      "note": "Event and attribution correctness is still being calibrated against reviewed human ground truth; the beta does not present candidate events as perfect truth.",
+      "media": {
+        "src": "https://images.pexels.com/photos/14317217/pexels-photo-14317217.jpeg?auto=compress&cs=tinysrgb&w=1400",
+        "alt": "Real indoor basketball game photography",
+        "width": 1200,
+        "height": 1800
+      }
+    },
+    {
+      "type": "evidence",
+      "id": "evidence",
+      "eyebrow": "Insight stays connected to film",
+      "title": "Every answer should lead back to the",
+      "highlight": "moment.",
+      "copy": "CourtFlux is being built around a simple idea: analysis is useful when you can see the basketball evidence behind it. Structured events retain their frame and time context so review can stay grounded in what actually happened on court.",
+      "insight": {
+        "kicker": "Example review flow",
+        "title": "Possession changed under pressure",
+        "copy": "Jump directly from a structured event to the sequence that produced it, then review the surrounding context instead of searching through the full recording.",
+        "action": "Review the possession"
+      },
+      "media": {
+        "src": "https://images.pexels.com/photos/33281028/pexels-photo-33281028.jpeg?auto=compress&cs=tinysrgb&w=1600",
+        "alt": "Basketball game sequence used as visual evidence",
+        "width": 1600,
+        "height": 1100
+      }
+    },
+    {
+      "type": "audiences",
+      "id": "for-you",
+      "eyebrow": "Built around improvement",
+      "title": "One game. Different ways to",
+      "highlight": "get better.",
+      "copy": "The same structured game can support individual development, faster coaching review and a repeatable team analysis workflow.",
+      "actionLabel": "Explore",
+      "items": [
+        {
+          "audience": "Players",
+          "title": "Understand your game.",
+          "copy": "Use real-game evidence to see where your decisions, shots and possessions deserve attention as player analytics mature.",
+          "href": "/basketball-video-analysis"
+        },
+        {
+          "audience": "Coaches",
+          "title": "Coach what matters.",
+          "copy": "Find important sequences faster and keep observations connected to the film you already use.",
+          "href": "/basketball-analysis-for-coaches"
+        },
+        {
+          "audience": "Teams",
+          "title": "Build a shared game model.",
+          "copy": "Create a structured foundation for repeatable game review, player context and future team-level intelligence.",
+          "href": "/basketball-analysis-for-teams"
+        }
+      ]
+    },
+    {
+      "type": "how",
+      "id": "how",
+      "eyebrow": "How CourtFlux works",
+      "title": "From video to understanding in",
+      "highlight": "three steps.",
+      "copy": "Use the footage you already have. CourtFlux handles the technical layers behind the scenes and keeps the product experience focused on basketball.",
+      "steps": [
+        { "number": "01", "title": "Upload a game", "copy": "Start with ordinary basketball footage. No proprietary capture system is required." },
+        { "number": "02", "title": "CourtFlux follows the action", "copy": "Players, teams, the ball and temporal game state are connected across the recording." },
+        { "number": "03", "title": "Explore what matters", "copy": "Review structured moments and the video context behind them as the analysis layer continues to mature." }
+      ]
+    },
+    {
+      "type": "pricing",
+      "id": "pricing",
+      "eyebrow": "Simple launch pricing",
+      "title": "Start with one game. Pay when CourtFlux earns its",
+      "highlight": "place in your workflow.",
+      "copy": "Analyze your first game free. The launch model is a 14-day trial with no credit card, followed by two simple plans built around how coaches and teams actually review basketball.",
+      "trial": {
+        "kicker": "Free trial",
+        "title": "Your first game is on us.",
+        "copy": "Analyze one game, up to 60 minutes, with the real CourtFlux workflow before choosing a paid plan.",
+        "meta": "14 days · 1 game · no credit card required",
+        "cta": { "label": "Analyze your first game free", "href": "/login?mode=signup" }
+      },
+      "plans": [
+        {
+          "kicker": "Individual workflow",
+          "name": "Coach",
+          "price": "€29",
+          "suffix": "/ month",
+          "annualPrice": "€249",
+          "annualSuffix": "/ year, billed annually",
+          "description": "For an individual coach or analyst turning game film into a repeatable review and improvement workflow.",
+          "allowance": "About 5 full games / month",
+          "allowanceCopy": "300 analysis minutes included. Additional processing can be added when needed.",
+          "features": ["Game analysis", "Player, team and ball tracking", "P2 basketball-state and event outputs", "Video-linked evidence and saved analyses"],
+          "cta": "Start with a free game",
+          "href": "/login?mode=signup",
+          "featured": false
+        },
+        {
+          "tag": "Best for teams",
+          "kicker": "Shared team workflow",
+          "name": "Team",
+          "price": "€69",
+          "suffix": "/ month",
+          "annualPrice": "€699",
+          "annualSuffix": "/ year, billed annually",
+          "description": "For one squad and coaching staff building shared game, player and season intelligence.",
+          "allowance": "About 16 full games / month",
+          "allowanceCopy": "1,000 analysis minutes included. Additional processing can be added when needed.",
+          "features": ["Everything in Coach", "Team workspace and roster context", "Shared coaching workflow", "Structured team and player analytics as validated"],
+          "cta": "Start with a free game",
+          "href": "/login?mode=signup",
+          "featured": true
+        }
+      ],
+      "organisation": {
+        "title": "Running multiple teams?",
+        "copy": "Clubs and academies can talk to CourtFlux about multi-team access, higher processing volume and organisation-level workflows.",
+        "cta": { "label": "Discuss club or academy access", "href": "/login?mode=signup" }
+      },
+      "note": "Target launch pricing. Billing is not active during the private beta. The 14-day trial, paid allowances and any additional-processing options will be enabled and confirmed before paid launch."
+    },
+    {
+      "type": "faq",
+      "id": "faq",
+      "eyebrow": "CourtFlux FAQ",
+      "title": "The important questions,",
+      "highlight": "answered.",
+      "items": [
+        { "question": "Who is CourtFlux for?", "answer": "CourtFlux is being built for basketball players, coaches, teams, academies and performance analysts who want to get more useful information from the game film they already record." },
+        { "question": "What can CourtFlux understand today?", "answer": "The current system tracks players, teams and the ball and includes a P2 basketball-state layer for ball control, possession changes, loose-ball sequences, shot attempts and candidate pass, turnover and rebound events. Formal event and attribution accuracy is still being validated against reviewed human ground truth." },
+        { "question": "Do I need specialist cameras?", "answer": "No proprietary capture system is required. CourtFlux is designed around ordinary basketball game film, although camera position, resolution, occlusion and motion blur can affect analysis quality." },
+        { "question": "How will the free trial work?", "answer": "The launch model is a 14-day trial with no credit card required and one game of up to 60 minutes included. During the private beta, billing and trial enforcement are not yet active." },
+        { "question": "Does CourtFlux replace the coach or analyst?", "answer": "No. CourtFlux is intended to structure evidence, reduce manual video work and help people review the game faster while keeping basketball judgement with the player, coach or analyst." },
+        { "question": "How do game allowances work?", "answer": "Plans are presented in approximate full games because that is how coaches think about usage. Under the hood, usage is measured by processed video duration: Coach includes 300 analysis minutes and Team includes 1,000 per month." }
+      ]
+    },
+    {
+      "type": "finalCta",
+      "id": "start",
+      "eyebrow": "Your next improvement is already in the film",
+      "title": "Turn the game you played into what you",
+      "highlight": "work on next.",
+      "copy": "Start with the footage you already have and see how CourtFlux turns basketball video into structured game understanding.",
+      "primary": { "label": "Analyze your first game free", "href": "/login?mode=signup" },
+      "secondary": { "label": "For coaches", "href": "/basketball-analysis-for-coaches" }
+    }
   ],
-  "finalCta": {
-    "eyebrow": "Start with the footage you already have",
-    "title": "Turn basketball game film into a",
-    "highlight": "faster review workflow.",
-    "copy": "Start with player, team and ball tracking today, then grow into richer basketball analysis as CourtFlux develops.",
-    "primary": { "label": "Start free beta", "href": "/login?mode=signup" },
-    "secondary": { "label": "See pricing", "href": "#pricing" }
-  },
   "footer": {
     "meta": "© 2026 CourtFlux · Basketball Intelligence",
     "links": [
       { "label": "For coaches", "href": "/basketball-analysis-for-coaches" },
       { "label": "For teams", "href": "/basketball-analysis-for-teams" },
-      { "label": "Product", "href": "#product" },
-      { "label": "Pricing", "href": "#pricing" },
-      { "label": "FAQ", "href": "#faq" },
+      { "label": "Video analysis", "href": "/basketball-video-analysis" },
       { "label": "Trust", "href": "/trust" },
+      { "label": "AI limitations", "href": "/ai-limitations" },
       { "label": "Privacy", "href": "/privacy" },
-      { "label": "Terms", "href": "/terms" },
-      { "label": "Sign in", "href": "/login" },
-      { "label": "Beta Lab", "href": "/lab" }
+      { "label": "Terms", "href": "/terms" }
     ]
   }
 }

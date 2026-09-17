@@ -1,0 +1,31 @@
+{
+  "homepage": [
+    {
+      "id": "pexels-31760120",
+      "usage": "hero",
+      "source": "Pexels",
+      "sourceUrl": "https://images.pexels.com/photos/31760120/pexels-photo-31760120.jpeg",
+      "license": "Pexels License",
+      "commercialUse": true,
+      "added": "2026-09-16"
+    },
+    {
+      "id": "pexels-14317217",
+      "usage": "game-understanding",
+      "source": "Pexels",
+      "sourceUrl": "https://images.pexels.com/photos/14317217/pexels-photo-14317217.jpeg",
+      "license": "Pexels License",
+      "commercialUse": true,
+      "added": "2026-09-16"
+    },
+    {
+      "id": "pexels-33281028",
+      "usage": "evidence",
+      "source": "Pexels",
+      "sourceUrl": "https://images.pexels.com/photos/33281028/pexels-photo-33281028.jpeg",
+      "license": "Pexels License",
+      "commercialUse": true,
+      "added": "2026-09-16"
+    }
+  ]
+}

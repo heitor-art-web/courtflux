@@ -1,0 +1,278 @@
+.header {
+  top: 0 !important;
+  width: min(1240px, calc(100% - 48px)) !important;
+  margin: 0 auto !important;
+  padding: 10px 0 !important;
+  border: 0 !important;
+  border-radius: 0 !important;
+  background: rgba(243, 241, 235, .96) !important;
+  box-shadow: none !important;
+  backdrop-filter: blur(14px);
+}
+
+.logoPanel,
+.footerBrandPanel {
+  display: inline-flex;
+  align-items: center;
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  box-shadow: none;
+}
+
+.headerLogo,
+.footerLogo {
+  display: block;
+  width: auto !important;
+  max-width: none !important;
+  mix-blend-mode: normal !important;
+  object-fit: contain;
+}
+
+.headerLogo {
+  height: 52px !important;
+}
+
+.footerLogo {
+  height: 48px !important;
+}
+
+.nav a {
+  color: #26343e;
+}
+
+.nav a:hover {
+  color: #06131f;
+}
+
+.heroImage {
+  filter: saturate(.90) contrast(1.03) brightness(.88) !important;
+}
+
+.heroScrim {
+  background:
+    linear-gradient(90deg,
+      rgba(3, 11, 18, .93) 0%,
+      rgba(3, 11, 18, .86) 30%,
+      rgba(3, 11, 18, .62) 52%,
+      rgba(3, 11, 18, .28) 72%,
+      rgba(3, 11, 18, .06) 100%),
+    linear-gradient(0deg,
+      rgba(3, 11, 18, .55) 0%,
+      rgba(3, 11, 18, .07) 58%,
+      rgba(3, 11, 18, .18) 100%) !important;
+}
+
+.heroEyebrow {
+  color: #ffc19a !important;
+  text-shadow: 0 2px 18px rgba(0, 0, 0, .45);
+}
+
+.heroTitle {
+  color: #fff !important;
+  text-shadow: 0 3px 28px rgba(0, 0, 0, .55) !important;
+}
+
+.heroTitle span {
+  color: #ff9a5b !important;
+}
+
+.heroCopy {
+  color: #f1f5f7 !important;
+  text-shadow: 0 2px 18px rgba(0, 0, 0, .46);
+}
+
+.heroSecondaryButton {
+  border-color: rgba(255, 255, 255, .54) !important;
+  background: rgba(3, 11, 18, .42) !important;
+  color: #fff !important;
+}
+
+.heroSecondaryButton:hover {
+  border-color: rgba(255, 255, 255, .82) !important;
+  background: rgba(3, 11, 18, .62) !important;
+}
+
+.pill {
+  border-color: rgba(255, 255, 255, .28) !important;
+  background: rgba(3, 11, 18, .34) !important;
+  color: #f4f7f8 !important;
+}
+
+.heroInsight {
+  border-color: rgba(255, 255, 255, .20) !important;
+  background: rgba(3, 11, 18, .88) !important;
+  box-shadow: 0 26px 70px rgba(0, 0, 0, .34) !important;
+}
+
+.darkSectionHeader {
+  position: relative;
+  z-index: 2;
+}
+
+.darkEyebrow {
+  color: #ffc19a !important;
+}
+
+.darkTitle {
+  color: #fff !important;
+}
+
+.darkTitle span {
+  color: #ff9a5b !important;
+}
+
+.darkCopy {
+  color: #edf2f5 !important;
+}
+
+.evidenceInsightCard {
+  border-color: rgba(255, 255, 255, .18) !important;
+  background: rgba(255, 255, 255, .075) !important;
+}
+
+.evidenceInsightTitle {
+  color: #fff !important;
+}
+
+.evidenceInsightCopy {
+  color: #e3ebef !important;
+}
+
+.evidenceInsightAction {
+  color: #fff !important;
+}
+
+/* Featured Teams card: keep background and all pricing copy coupled so
+   white text can never land on the light pricing surface. */
+:global(article[class*="priceCardFeatured"]) {
+  background: #06131f !important;
+  border-color: rgba(255, 255, 255, .10) !important;
+  color: #fff !important;
+}
+
+:global(article[class*="priceCardFeatured"]) :global([class*="price"]) {
+  color: #fff !important;
+}
+
+:global(article[class*="priceCardFeatured"]) :global([class*="price"]) small,
+:global(article[class*="priceCardFeatured"]) :global([class*="annualPrice"]),
+:global(article[class*="priceCardFeatured"]) :global([class*="priceDescription"]),
+:global(article[class*="priceCardFeatured"]) :global([class*="usage"]) span,
+:global(article[class*="priceCardFeatured"]) :global([class*="featureList"]) li {
+  color: #d5e0e6 !important;
+}
+
+:global(article[class*="priceCardFeatured"]) :global([class*="usage"]) {
+  background: rgba(255, 255, 255, .075) !important;
+}
+
+:global(article[class*="priceCardFeatured"]) :global([class*="usage"]) strong,
+:global(article[class*="priceCardFeatured"]) h3 {
+  color: #fff !important;
+}
+
+/* Final CTA is another dark surface; pin all copy/button colours explicitly
+   instead of relying on inherited section colours. */
+:global(section[class*="finalCta"]) {
+  background: #06131f !important;
+  color: #fff !important;
+}
+
+:global(section[class*="finalCta"]) :global([class*="eyebrow"]) {
+  color: #ffc19a !important;
+}
+
+:global(section[class*="finalCta"]) :global([class*="sectionTitle"]) {
+  color: #fff !important;
+}
+
+:global(section[class*="finalCta"]) :global([class*="sectionTitle"]) span {
+  color: #ff9a5b !important;
+}
+
+:global(section[class*="finalCta"]) :global([class*="sectionCopy"]) {
+  color: #edf2f5 !important;
+}
+
+:global(section[class*="finalCta"]) :global([class*="heroSecondaryButton"]) {
+  border-color: rgba(255, 255, 255, .50) !important;
+  background: rgba(255, 255, 255, .08) !important;
+  color: #fff !important;
+}
+
+.footer {
+  padding: 30px 0 52px !important;
+  border-top: 1px solid rgba(10, 23, 34, .14) !important;
+  background: transparent;
+  color: #0a1722 !important;
+}
+
+.footer :global([class*="footerMeta"]) {
+  color: #59656e !important;
+}
+
+.footer :global([class*="footerLinks"]) a {
+  color: #3f4d57 !important;
+}
+
+.footer :global([class*="footerLinks"]) a:hover {
+  color: #06131f !important;
+}
+
+@media (max-width: 900px) {
+  .header {
+    width: min(1240px, calc(100% - 32px)) !important;
+    padding: 9px 0 !important;
+  }
+
+  .headerLogo {
+    height: 48px !important;
+  }
+
+  .heroScrim {
+    background:
+      linear-gradient(90deg,
+        rgba(3, 11, 18, .94) 0%,
+        rgba(3, 11, 18, .82) 55%,
+        rgba(3, 11, 18, .52) 100%),
+      linear-gradient(0deg,
+        rgba(3, 11, 18, .72) 0%,
+        rgba(3, 11, 18, .18) 70%,
+        rgba(3, 11, 18, .24) 100%) !important;
+  }
+
+  .heroImage {
+    filter: saturate(.88) contrast(1.03) brightness(.84) !important;
+  }
+}
+
+@media (max-width: 680px) {
+  .header {
+    width: min(100% - 24px, 1240px) !important;
+    padding: 8px 0 !important;
+  }
+
+  .headerLogo {
+    height: 44px !important;
+  }
+
+  .heroScrim {
+    background:
+      linear-gradient(90deg, rgba(3, 11, 18, .93), rgba(3, 11, 18, .62)),
+      linear-gradient(0deg, rgba(3, 11, 18, .76), rgba(3, 11, 18, .16)) !important;
+  }
+
+  .heroImage {
+    filter: saturate(.86) contrast(1.02) brightness(.82) !important;
+  }
+
+  .heroCopy {
+    color: #f5f7f8 !important;
+  }
+
+  .footerLogo {
+    height: 44px !important;
+  }
+}
