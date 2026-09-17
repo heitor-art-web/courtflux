@@ -13,6 +13,7 @@ import type {
   ValueStripSection,
 } from "@/lib/home-content";
 import styles from "./home.module.css";
+import polish from "./home-polish.module.css";
 import pricingStyles from "./pricing-v2.module.css";
 
 function SectionHeading({ eyebrow, title, highlight, copy }: { eyebrow: string; title: string; highlight: string; copy?: string }) {
@@ -35,25 +36,25 @@ function Hero({ section }: { section: HeroSection }) {
           fill
           sizes="(max-width: 900px) 100vw, 1240px"
           priority
-          className={styles.heroImage}
+          className={`${styles.heroImage} ${polish.heroImage}`}
         />
-        <div className={styles.heroScrim} />
+        <div className={`${styles.heroScrim} ${polish.heroScrim}`} />
       </div>
 
       <div className={styles.heroContent}>
-        <div className={styles.eyebrow}>{section.eyebrow}</div>
-        <h1 id="hero-title">{section.title} <span>{section.highlight}</span></h1>
-        <p className={styles.heroCopy}>{section.copy}</p>
+        <div className={`${styles.eyebrow} ${polish.heroEyebrow}`}>{section.eyebrow}</div>
+        <h1 id="hero-title" className={polish.heroTitle}>{section.title} <span>{section.highlight}</span></h1>
+        <p className={`${styles.heroCopy} ${polish.heroCopy}`}>{section.copy}</p>
         <div className={styles.actions}>
           <Link className={styles.primaryButton} href={section.primary.href}>{section.primary.label}</Link>
-          <Link className={styles.heroSecondaryButton} href={section.secondary.href}>{section.secondary.label}</Link>
+          <Link className={`${styles.heroSecondaryButton} ${polish.heroSecondaryButton}`} href={section.secondary.href}>{section.secondary.label}</Link>
         </div>
         <div className={styles.pills} aria-label={section.eyebrow}>
-          {section.pills.map((pill) => <span className={styles.pill} key={pill}>{pill}</span>)}
+          {section.pills.map((pill) => <span className={`${styles.pill} ${polish.pill}`} key={pill}>{pill}</span>)}
         </div>
       </div>
 
-      <aside className={styles.heroInsight} aria-label={section.overlay.kicker} style={{ pointerEvents: "none" }}>
+      <aside className={`${styles.heroInsight} ${polish.heroInsight}`} aria-label={section.overlay.kicker} style={{ pointerEvents: "none" }}>
         <div className={styles.heroInsightTopline}>
           <span>{section.overlay.kicker}</span>
           <i aria-hidden="true" />
