@@ -1,0 +1,237 @@
+{
+  "version": "courtflux_p2_gt_v1",
+  "annotation_status": "pass_a_frozen_human_windows",
+  "evaluation_ready": true,
+  "video": {
+    "source": "https://www.youtube.com/watch?v=C-JjAlX2Dyc",
+    "start_time_sec": 10.0,
+    "end_time_sec": 40.0,
+    "fps": 25.0,
+    "frame_mapping": "frame_id = round((source_time_sec - 10.0) * 25.0)"
+  },
+  "annotation_policy": {
+    "identity": "stable_track_id_when_visible; null_when_not_reliably_identifiable",
+    "team": "neutral_clip; leave team_id null",
+    "unknown_preferred_over_guess": true,
+    "event_timing": "human_event_window; exact release frame is optional",
+    "event_window_scoring": "prediction inside window has zero temporal error; tolerance applies only beyond window edges",
+    "control_scoring": "human interval continuity is primary; frame accuracy remains diagnostic",
+    "control_states": ["unknown", "possessed", "loose", "pass_flight", "shot_flight"],
+    "coarse_boundary_precision_sec": 1.0
+  },
+  "baseline": {
+    "run_id": "20260917_144307_273207",
+    "jersey_enabled": false,
+    "match_config": "evaluation/match_configs/unknown.json",
+    "frames_seen": 751,
+    "note": "Metadata only. Human GT was authored blind from video and was not bootstrapped from P2 predictions."
+  },
+  "control_intervals": [
+    {
+      "state": "shot_flight",
+      "frame_start": 0,
+      "frame_end": 74,
+      "source_time_start_sec": 10.0,
+      "source_time_end_sec": 13.0,
+      "human_note": "shot in flight; made; green team",
+      "boundary_precision": "coarse_1s"
+    },
+    {
+      "state": "pass_flight",
+      "frame_start": 150,
+      "frame_end": 174,
+      "source_time_start_sec": 16.0,
+      "source_time_end_sec": 17.0,
+      "human_note": "pass in flight; blocked",
+      "boundary_precision": "coarse_1s"
+    },
+    {
+      "state": "possessed",
+      "frame_start": 200,
+      "frame_end": 224,
+      "source_time_start_sec": 18.0,
+      "source_time_end_sec": 19.0,
+      "human_note": "green team possessed",
+      "boundary_precision": "coarse_1s"
+    },
+    {
+      "state": "pass_flight",
+      "frame_start": 250,
+      "frame_end": 250,
+      "source_time_start_sec": 20.0,
+      "source_time_end_sec": 20.0,
+      "human_note": "pass in flight; made",
+      "boundary_precision": "human_second_marker"
+    },
+    {
+      "state": "shot_flight",
+      "frame_start": 275,
+      "frame_end": 299,
+      "source_time_start_sec": 21.0,
+      "source_time_end_sec": 22.0,
+      "human_note": "shot made; green team",
+      "boundary_precision": "coarse_1s"
+    },
+    {
+      "state": "pass_flight",
+      "frame_start": 400,
+      "frame_end": 424,
+      "source_time_start_sec": 26.0,
+      "source_time_end_sec": 27.0,
+      "human_note": "pass in flight; made; blue team",
+      "boundary_precision": "coarse_1s"
+    },
+    {
+      "state": "possessed",
+      "frame_start": 550,
+      "frame_end": 550,
+      "source_time_start_sec": 32.0,
+      "source_time_end_sec": 32.0,
+      "human_note": "blue team possessed",
+      "boundary_precision": "human_second_marker"
+    },
+    {
+      "state": "pass_flight",
+      "frame_start": 575,
+      "frame_end": 575,
+      "source_time_start_sec": 33.0,
+      "source_time_end_sec": 33.0,
+      "human_note": "pass in flight",
+      "boundary_precision": "human_second_marker"
+    },
+    {
+      "state": "shot_flight",
+      "frame_start": 600,
+      "frame_end": 624,
+      "source_time_start_sec": 34.0,
+      "source_time_end_sec": 35.0,
+      "human_note": "shot made",
+      "boundary_precision": "coarse_1s"
+    },
+    {
+      "state": "possessed",
+      "frame_start": 750,
+      "frame_end": 750,
+      "source_time_start_sec": 40.0,
+      "source_time_end_sec": 40.0,
+      "human_note": "blue team possessed",
+      "boundary_precision": "human_second_marker"
+    }
+  ],
+  "excluded_intervals": [
+    {
+      "reason": "non_game",
+      "frame_start": 100,
+      "frame_end": 124,
+      "source_time_start_sec": 14.0,
+      "source_time_end_sec": 15.0,
+      "human_note": "non game play"
+    },
+    {
+      "reason": "non_game",
+      "frame_start": 325,
+      "frame_end": 374,
+      "source_time_start_sec": 23.0,
+      "source_time_end_sec": 25.0,
+      "human_note": "non game play"
+    },
+    {
+      "reason": "ambiguous_control_state",
+      "frame_start": 425,
+      "frame_end": 474,
+      "source_time_start_sec": 27.0,
+      "source_time_end_sec": 29.0,
+      "human_note": "dunk; kept as event/context only, not forced into a control-state label"
+    },
+    {
+      "reason": "non_game",
+      "frame_start": 500,
+      "frame_end": 524,
+      "source_time_start_sec": 30.0,
+      "source_time_end_sec": 31.0,
+      "human_note": "non game play"
+    },
+    {
+      "reason": "non_game",
+      "frame_start": 650,
+      "frame_end": 724,
+      "source_time_start_sec": 36.0,
+      "source_time_end_sec": 39.0,
+      "human_note": "non game play"
+    }
+  ],
+  "events": [
+    {
+      "event_type": "shot_attempt",
+      "frame_start": 0,
+      "frame_end": 74,
+      "outcome": "made",
+      "team_id": null,
+      "actor_track_id": null,
+      "secondary_track_id": null,
+      "source_time_start_sec": 10.0,
+      "source_time_end_sec": 13.0,
+      "human_actor_note": "green team"
+    },
+    {
+      "event_type": "shot_attempt",
+      "frame_start": 275,
+      "frame_end": 299,
+      "outcome": "made",
+      "team_id": null,
+      "actor_track_id": null,
+      "secondary_track_id": null,
+      "source_time_start_sec": 21.0,
+      "source_time_end_sec": 22.0,
+      "human_actor_note": "green team"
+    },
+    {
+      "event_type": "shot_attempt",
+      "frame_start": 425,
+      "frame_end": 474,
+      "outcome": "made",
+      "team_id": null,
+      "actor_track_id": null,
+      "secondary_track_id": null,
+      "source_time_start_sec": 27.0,
+      "source_time_end_sec": 29.0,
+      "human_note": "dunk; event preserved for later shot gate, control-state intentionally not inferred"
+    },
+    {
+      "event_type": "shot_attempt",
+      "frame_start": 600,
+      "frame_end": 624,
+      "outcome": "made",
+      "team_id": null,
+      "actor_track_id": null,
+      "secondary_track_id": null,
+      "source_time_start_sec": 34.0,
+      "source_time_end_sec": 35.0
+    }
+  ],
+  "unresolved_event_windows": [],
+  "human_source_notes": [
+    "10-13 shot in flight made green team",
+    "14-15 non game play",
+    "16-17 pass in flight blocked",
+    "18-19 possessed green team",
+    "20 pass in flight made",
+    "21-22 shot made green team",
+    "23-25 non game play",
+    "26-27 pass in flight made blue team",
+    "27-29 dunk",
+    "30-31 non game play",
+    "32 possessed blue team",
+    "33 pass in flight",
+    "34-35 shot made",
+    "36-39 non game play",
+    "40 possessed blue team"
+  ],
+  "notes": [
+    "Pass A is frozen using human windows rather than millisecond/frame-exact event labels.",
+    "The blocked pass remains pass_flight for Gate A; blocked is preserved only as human context.",
+    "The 27-29s dunk is stored as a shot event for later gates but excluded from Gate A control-state scoring because no explicit control-state label was provided.",
+    "Team colours are human context only for neutral V1-V5 clips; team_id remains null.",
+    "Do not require exact release frames from the reviewer."
+  ]
+}
