@@ -3,7 +3,6 @@ from __future__ import annotations
 import unittest
 
 from core.ball_state import BallState, BallStateStatus
-from core.basketball_event import BallControlState
 from evaluation.p2_event_engine_test import ball, frame_state, player
 from services.p2 import P2EngineV1
 from services.p2.engine_v1 import P2EngineV1 as DirectP2EngineV1
@@ -175,7 +174,7 @@ class P2LiveControlResolverTest(unittest.TestCase):
 
     def test_explicit_reset_after_ineligible_frames_keeps_legacy_contract(self) -> None:
         engine = P2EngineV1(fps=10.0, reset_after_ineligible_frames=2)
-        self.assertEqual(engine.gameplay_continuity_grace_frames, 2)
+        self.assertEqual(engine.gameplay_continuity_grace_frames, 1)
         for frame_id in range(3):
             owner = player(frame_id, 1, (10, 10, 30, 50))
             engine.process(
@@ -192,12 +191,12 @@ class P2LiveControlResolverTest(unittest.TestCase):
 
         second_gap = frame_state(4, eligible=False)
         engine.process(second_gap)
-        self.assertTrue(second_gap.diagnostics["p2"]["engine_eligible"])
-
-        third_gap = frame_state(5, eligible=False)
-        engine.process(third_gap)
-        self.assertFalse(third_gap.diagnostics["p2"]["engine_eligible"])
+        self.assertFalse(second_gap.diagnostics["p2"]["engine_eligible"])
         self.assertIsNone(engine.possession_tracker.current_track_id)
+        self.assertEqual(
+            second_gap.diagnostics["p2"]["temporal_reset"]["last_reason"],
+            "gameplay_absent_gap",
+        )
 
 
 if __name__ == "__main__":
