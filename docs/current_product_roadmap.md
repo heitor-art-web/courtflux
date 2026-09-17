@@ -680,6 +680,19 @@ P6 is complete when CourtFlux can use evidence from multiple real games to ident
 
 ---
 
+# Reference-history policy
+
+Historical P0/P1/P2 execution documents are intentionally retained. They record experiments, baselines, rejected challengers and earlier phase assumptions that remain useful for engineering reference.
+
+The rule is:
+
+- do **not** rewrite historical experiment results to match later roadmap decisions;
+- use `docs/current_product_roadmap.md` for current product phase definitions;
+- use `docs/p1_p2_identity_boundary.md` for the current identity boundary;
+- use historical P1/P2 documents for implementation history and experiment evidence.
+
+---
+
 # Product progression
 
 The roadmap can be summarized as:
