@@ -17,11 +17,11 @@
 | **P0** | Vision Foundation | ✅ Complete |
 | **P1** | Perception + Tracking | ✅ Complete |
 | **P2** | Basketball Understanding + Game-Level Player Identity | 🧪 Engineering core complete; human GT + game-entity validation pending |
-| **P3** | Structured Analytics + Actions | ⏳ Future |
+| **P3** | Structured Analytics + Review | ⏳ Future |
 | **P4** | Tactical Intelligence | ⏳ Future |
-| **P4.5** | Persistent Player Identity | ⏳ Future |
-| **P5** | Mobile App | ⏳ Future |
-| **P6** | Continuous Development / AI Coach | ⏳ Future |
+| **P5** | Persistent Player Identity / Jersey Evidence | ⏳ Future |
+| **P6** | Mobile App | ⏳ Future |
+| **P7** | Continuous Development / AI Coach | ⏳ Future |
 
 ### Current priority
 
@@ -38,7 +38,7 @@ calibrate only from measured error
         ↓
 freeze the validated P2 baseline
         ↓
-P3 — Structured Analytics + Actions
+P3 — Structured Analytics + Review
 ```
 
 The P2 basketball motor should not be tuned from one surprising clip or visual intuition alone. Calibration must be driven by frozen evaluation footage and reviewed ground truth.
@@ -79,7 +79,7 @@ These are **structured basketball primitives**, not a claim of perfect basketbal
 
 ## Player identity boundary
 
-CourtFlux now separates three different concepts explicitly:
+CourtFlux separates three different concepts explicitly:
 
 ```text
 Track ID
@@ -104,11 +104,13 @@ P2 must work without knowing that a player is, for example, `João Silva #7`.
 
 ### Jersey recognition
 
-Jersey recognition remains useful R&D and supporting evidence, but it is **not a P1 or P2 exit gate**. `shirt_num` and `player_name` may remain `UNKNOWN` without blocking basketball understanding.
+Jersey recognition remains useful R&D and supporting evidence, but it is **not a P1 or P2 exit gate**. `shirt_num` and `player_name` may remain `UNKNOWN` without blocking basketball understanding, P3 review or P4 tactical intelligence.
 
-### P4.5
+### P5
 
-Persistent real-world identity is planned for **P4.5 — Persistent Player Identity**. That phase may combine roster context, jersey evidence, appearance/ReID, previous games and human confirmation to resolve:
+Persistent real-world identity is planned for **P5 — Persistent Player Identity**. Jersey recognition is an important evidence source in that phase, but is not the identity system by itself.
+
+P5 may combine roster context, jersey evidence, appearance/ReID, previous games and human confirmation to resolve:
 
 ```text
 game_1.game_player_03
@@ -118,7 +120,7 @@ game_1.game_player_03
 game_2.game_player_07
 ```
 
-The detailed identity boundary is recorded in [`docs/p1_p2_identity_boundary.md`](docs/p1_p2_identity_boundary.md).
+The detailed P1/P2 identity boundary is recorded in [`docs/p1_p2_identity_boundary.md`](docs/p1_p2_identity_boundary.md). Historical references to `P4.5 — Persistent Player Identity` predate the current roadmap numbering; the current product order in this README takes precedence.
 
 ---
 
@@ -133,38 +135,48 @@ P1 — Perception + Tracking
         ↓
 P2 — Basketball Understanding + Game-Level Player Identity
         ↓
-P3 — Structured Analytics + Actions
+P3 — Structured Analytics + Review
         ↓
 P4 — Tactical Intelligence
         ↓
-P4.5 — Persistent Player Identity
+P5 — Persistent Player Identity / Jersey Evidence
         ↓
-P5 — Mobile App
+P6 — Mobile App
         ↓
-P6 — Continuous Development / AI Coach
+P7 — Continuous Development / AI Coach
 ```
 
-### P3 — Structured Analytics + Actions
+### P3 — Structured Analytics + Review
 
-Turn P2 events into a usable review product: game/player summaries, timelines, automatically organized clips, filters, evidence-linked insights and review/action workflows.
+Turn P2 events into a durable, reopenable game review product: possessions, game/player summaries, physical evidence clips, Things to Review, timelines, filters, conservative insights, human corrections and simple review actions.
 
-**Exit idea:** a coach or player should no longer need to scrub manually through 60–90 minutes of video to find the possessions that deserve attention.
+**Exit idea:** a coach or player should no longer need to scrub manually through 60–90 minutes of video to find the moments that deserve attention.
+
+Detailed execution lives in [`docs/p3_roadmap.md`](docs/p3_roadmap.md).
 
 ### P4 — Tactical Intelligence
 
-Move from isolated events to team and possession context: spacing, transition, screening/P&R actions, defensive behaviour, possession patterns and recurring team tendencies.
+Move from isolated events to temporal relationships between players, space and possession structure: validated spatial state, tactical primitives, transition, screening/P&R and other offensive actions, multi-label tactical segmentation, game/team tendencies, defensive intelligence and evidence-linked radar review.
 
-### P4.5 — Persistent Player Identity
+P4 is offense-first. Defensive intelligence follows the validated spatial/offensive foundation. Tactical conclusions must preserve `UNKNOWN`/abstention when geometry or context is insufficient.
 
-Resolve game-level player entities to persistent roster identities across games. Human confirmation is an acceptable part of the system; perfect automatic Jersey OCR is not required.
+Detailed execution lives in [`docs/p4_roadmap.md`](docs/p4_roadmap.md).
 
-### P5 — Mobile App
+### P5 — Persistent Player Identity
+
+Resolve game-level player entities to persistent roster identities across games. Jersey OCR is one probabilistic evidence source alongside roster context, appearance/ReID, previous games and human confirmation.
+
+A short confirmation flow is acceptable; false automatic identity is not. Jersey number is mutable metadata, not permanent identity.
+
+### P6 — Mobile App
 
 Make CourtFlux part of the daily coach/player workflow: game feed, clip review, notifications, coach-to-player review, sharing, saved moments and eventually mobile upload/capture flows.
 
-### P6 — Continuous Development / AI Coach
+### P7 — Continuous Development / AI Coach
 
 Use evidence from multiple real games to build player/team models, detect recurring patterns and meaningful change, suggest review/development priorities and measure progress over time.
+
+The AI Coach should reason over structured CourtFlux evidence rather than act as a generic chatbot over raw video.
 
 The intended long-term loop is:
 
@@ -184,7 +196,7 @@ NEXT GAME
 MEASURE AGAIN
 ```
 
-Full phase detail lives in [`docs/current_product_roadmap.md`](docs/current_product_roadmap.md).
+`README.md` is the current viewer-facing phase-order reference. Product-level detail lives in [`docs/current_product_roadmap.md`](docs/current_product_roadmap.md), while the detailed P3 and P4 execution contracts live in their dedicated roadmap documents.
 
 ---
 
@@ -205,9 +217,11 @@ P2EngineV1
     ↓
 control state + basketball event primitives        ← P2
     ↓
-Structured analytics + review actions              ← P3 future
+Structured analytics + evidence-linked review      ← P3 future
     ↓
 Tactical interpretation                            ← P4 future
+    ↓
+Persistent real-world player identity               ← P5 future
 ```
 
 `services/pipeline.py` is the canonical state path. The old alternate analytics runtime and detection-only runtime split are retired. Smart Ball remains **OFF by default**.
@@ -224,26 +238,29 @@ CourtFlux follows a conservative evidence contract:
 - roster information must not manufacture a jersey number;
 - a stable track does not imply a known real-world player;
 - event counts and coverage are diagnostics until validated against human truth;
+- tactical output must expose when geometry/context is not sufficient for analysis;
 - public/product claims must distinguish structural capability from measured accuracy.
 
 ---
 
 ## Documentation and historical reference
 
-The project keeps historical implementation and experiment records intentionally. They remain useful engineering references even when a later roadmap decision changes a phase boundary.
+The project keeps historical implementation and experiment records intentionally. They remain useful engineering references even when a later roadmap decision changes a phase boundary or phase number.
 
 Use this order when documents disagree about **current product scope or phase ownership**:
 
-1. [`README.md`](README.md) — current project status and viewer-facing summary.
-2. [`docs/current_product_roadmap.md`](docs/current_product_roadmap.md) — current P0→P6 product roadmap.
-3. [`docs/p1_p2_identity_boundary.md`](docs/p1_p2_identity_boundary.md) — current identity/phase boundary.
-4. [`docs/p2_roadmap.md`](docs/p2_roadmap.md) — detailed P2 technical contract and execution history.
-5. [`docs/system_quality_gate.md`](docs/system_quality_gate.md) — perception/ball quality evaluation contract where applicable.
-6. [`docs/p1_roadmap.md`](docs/p1_roadmap.md) — historical P1 execution record.
-7. [`docs/p1_jersey_exit_gate.md`](docs/p1_jersey_exit_gate.md) — historical pre-merge Jersey/Identity gate record.
-8. [`docs/p0_foundation_snapshot.md`](docs/p0_foundation_snapshot.md) — frozen historical P0 exit snapshot.
+1. [`README.md`](README.md) — current project status, phase order and viewer-facing summary.
+2. [`docs/p3_roadmap.md`](docs/p3_roadmap.md) — detailed current P3 product/engineering contract.
+3. [`docs/p4_roadmap.md`](docs/p4_roadmap.md) — detailed current P4 tactical contract.
+4. [`docs/current_product_roadmap.md`](docs/current_product_roadmap.md) — broader product roadmap; older `P4.5/P5/P6` numbering is historical where it conflicts with this README.
+5. [`docs/p1_p2_identity_boundary.md`](docs/p1_p2_identity_boundary.md) — P1/P2 identity boundary; older future-phase numbering may be historical.
+6. [`docs/p2_roadmap.md`](docs/p2_roadmap.md) — detailed P2 technical contract and execution history.
+7. [`docs/system_quality_gate.md`](docs/system_quality_gate.md) — perception/ball quality evaluation contract where applicable.
+8. [`docs/p1_roadmap.md`](docs/p1_roadmap.md) — historical P1 execution record.
+9. [`docs/p1_jersey_exit_gate.md`](docs/p1_jersey_exit_gate.md) — historical pre-merge Jersey/Identity gate record.
+10. [`docs/p0_foundation_snapshot.md`](docs/p0_foundation_snapshot.md) — frozen historical P0 exit snapshot.
 
-Older documents are **not deleted or rewritten merely because the roadmap evolved**. When old wording conflicts with current phase ownership, the current roadmap/boundary documents above take precedence while the old material remains available as historical reference.
+Older documents are **not deleted or rewritten merely because the roadmap evolved**. When old wording conflicts with the current phase ownership or numbering above, the current README and dedicated current-phase roadmap documents take precedence while older material remains available as historical reference.
 
 ---
 
@@ -292,6 +309,9 @@ http://localhost:3000/lab
 - ✅ P1 complete
 - 🧪 P2 engineering core integrated; reviewed human GT + game-level entity validation pending
 - ⏳ P3 next product phase after P2 validation/freeze
-- ⏳ P4, P4.5, P5 and P6 are future roadmap phases
+- ⏳ P4 Tactical Intelligence is future
+- ⏳ P5 Persistent Player Identity / Jersey Evidence is future
+- ⏳ P6 Mobile App is future
+- ⏳ P7 Continuous Development / AI Coach is future
 
-**Current engineering focus:** validate basketball correctness and game-level player attribution against reviewed truth, preserve conservative uncertainty, and avoid making Jersey/name recognition a blocker for P3.
+**Current engineering focus:** validate basketball correctness and game-level player attribution against reviewed truth, preserve conservative uncertainty, and avoid making Jersey/name recognition a blocker for P3 or P4.
