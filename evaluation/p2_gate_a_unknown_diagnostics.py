@@ -100,6 +100,34 @@ def _flight_owner_bucket(row: dict[str, Any]) -> str:
     return "owner_present_lost_gt6"
 
 
+def _flight_age_sec(row: dict[str, Any], fps: float) -> float:
+    return max(0.0, _as_int(row.get("flight_frames"), 0) / max(float(fps), 1e-9))
+
+
+def _flight_age_bucket(row: dict[str, Any], fps: float) -> str:
+    age = _flight_age_sec(row, fps)
+    if age <= 0.5:
+        return "age_le_0_5s"
+    if age <= 1.0:
+        return "age_0_5_to_1s"
+    if age <= 2.0:
+        return "age_1_to_2s"
+    if age <= 4.0:
+        return "age_2_to_4s"
+    return "age_gt_4s"
+
+
+def _render_counter(counter: Counter[str]) -> dict[str, Any]:
+    total = sum(counter.values())
+    return {
+        key: {
+            "frames": int(value),
+            "share": round(value / max(total, 1), 4),
+        }
+        for key, value in counter.most_common()
+    }
+
+
 def _clip_diagnostics(clip: str, run_id: str) -> dict[str, Any]:
     run_dir = PROJECT_ROOT / "evaluation" / "runs" / run_id
     states_path = run_dir / "p2_states.jsonl"
@@ -109,13 +137,24 @@ def _clip_diagnostics(clip: str, run_id: str) -> dict[str, Any]:
             raise FileNotFoundError(f"{clip}: missing {path}")
 
     states = load_jsonl(states_path)
-    by_frame = {int(row.get("frame_id", -1)): row for row in states if int(row.get("frame_id", -1)) >= 0}
-    truth = _truth_state_by_frame(load_ground_truth(gt_path))
+    by_frame = {
+        int(row.get("frame_id", -1)): row
+        for row in states
+        if int(row.get("frame_id", -1)) >= 0
+    }
+    gt = load_ground_truth(gt_path)
+    truth = _truth_state_by_frame(gt)
+    fps = _as_float(dict(gt.get("video", {}) or {}).get("fps"), 0.0)
+    if fps <= 0:
+        raise ValueError(f"{clip}: ground-truth video.fps must be positive")
 
     counts: Counter[str] = Counter()
     by_truth: dict[str, Counter[str]] = defaultdict(Counter)
     flight_owner: Counter[str] = Counter()
     flight_owner_by_truth: dict[str, Counter[str]] = defaultdict(Counter)
+    flight_age: Counter[str] = Counter()
+    flight_age_by_truth: dict[str, Counter[str]] = defaultdict(Counter)
+    flight_age_values: list[float] = []
     reset_reasons: Counter[str] = Counter()
     examples: dict[str, list[dict[str, Any]]] = defaultdict(list)
     core_frames = 0
@@ -150,9 +189,14 @@ def _clip_diagnostics(clip: str, run_id: str) -> dict[str, Any]:
         by_truth[truth_state][context] += 1
 
         if context == "flight_supported_no_receiver":
-            bucket = _flight_owner_bucket(row)
-            flight_owner[bucket] += 1
-            flight_owner_by_truth[truth_state][bucket] += 1
+            owner_bucket = _flight_owner_bucket(row)
+            flight_owner[owner_bucket] += 1
+            flight_owner_by_truth[truth_state][owner_bucket] += 1
+
+            age_bucket = _flight_age_bucket(row, fps)
+            flight_age[age_bucket] += 1
+            flight_age_by_truth[truth_state][age_bucket] += 1
+            flight_age_values.append(_flight_age_sec(row, fps))
 
         if reset_on_frame:
             reset_reasons[str(row.get("reset_reason") or "unknown")] += 1
@@ -170,6 +214,8 @@ def _clip_diagnostics(clip: str, run_id: str) -> dict[str, Any]:
                     "candidate_threshold": row.get("candidate_threshold"),
                     "flight_active": row.get("flight_active"),
                     "flight_supported": row.get("flight_supported"),
+                    "flight_frames": row.get("flight_frames"),
+                    "flight_age_sec": round(_flight_age_sec(row, fps), 4),
                     "pass_flight_receiver_evidence": row.get("pass_flight_receiver_evidence"),
                     "shot_active": row.get("shot_active"),
                     "reset_count": row.get("reset_count"),
@@ -177,30 +223,34 @@ def _clip_diagnostics(clip: str, run_id: str) -> dict[str, Any]:
                 }
             )
 
-    def render_counter(counter: Counter[str]) -> dict[str, Any]:
-        total = sum(counter.values())
-        return {
-            key: {
-                "frames": int(value),
-                "share": round(value / max(total, 1), 4),
-            }
-            for key, value in counter.most_common()
-        }
-
     return {
         "clip": clip,
         "run_id": run_id,
+        "fps": fps,
         "core_truth_frames": core_frames,
         "core_unknown_frames": core_unknown,
         "core_unknown_rate": round(core_unknown / max(core_frames, 1), 4),
-        "unknown_contexts": render_counter(counts),
+        "unknown_contexts": _render_counter(counts),
         "unknown_contexts_by_truth_state": {
-            state: render_counter(counter) for state, counter in sorted(by_truth.items())
+            state: _render_counter(counter) for state, counter in sorted(by_truth.items())
         },
-        "flight_supported_no_receiver_owner_breakdown": render_counter(flight_owner),
+        "flight_supported_no_receiver_owner_breakdown": _render_counter(flight_owner),
         "flight_supported_no_receiver_owner_breakdown_by_truth_state": {
-            state: render_counter(counter)
+            state: _render_counter(counter)
             for state, counter in sorted(flight_owner_by_truth.items())
+        },
+        "flight_supported_no_receiver_age_breakdown": _render_counter(flight_age),
+        "flight_supported_no_receiver_age_breakdown_by_truth_state": {
+            state: _render_counter(counter)
+            for state, counter in sorted(flight_age_by_truth.items())
+        },
+        "flight_supported_no_receiver_age_sec": {
+            "mean": (
+                None
+                if not flight_age_values
+                else round(sum(flight_age_values) / len(flight_age_values), 4)
+            ),
+            "max": None if not flight_age_values else round(max(flight_age_values), 4),
         },
         "reset_reasons_on_unknown_frames": dict(reset_reasons.most_common()),
         "examples": dict(examples),
@@ -212,6 +262,8 @@ def _aggregate(clips: list[dict[str, Any]]) -> dict[str, Any]:
     by_truth: dict[str, Counter[str]] = defaultdict(Counter)
     flight_owner: Counter[str] = Counter()
     flight_owner_by_truth: dict[str, Counter[str]] = defaultdict(Counter)
+    flight_age: Counter[str] = Counter()
+    flight_age_by_truth: dict[str, Counter[str]] = defaultdict(Counter)
     total_core = 0
     total_unknown = 0
 
@@ -230,13 +282,13 @@ def _aggregate(clips: list[dict[str, Any]]) -> dict[str, Any]:
         ).items():
             for bucket, row in dict(mapping).items():
                 flight_owner_by_truth[truth_state][bucket] += int(row["frames"])
-
-    def render(counter: Counter[str]) -> dict[str, Any]:
-        total = sum(counter.values())
-        return {
-            key: {"frames": int(value), "share": round(value / max(total, 1), 4)}
-            for key, value in counter.most_common()
-        }
+        for bucket, row in dict(clip["flight_supported_no_receiver_age_breakdown"]).items():
+            flight_age[bucket] += int(row["frames"])
+        for truth_state, mapping in dict(
+            clip["flight_supported_no_receiver_age_breakdown_by_truth_state"]
+        ).items():
+            for bucket, row in dict(mapping).items():
+                flight_age_by_truth[truth_state][bucket] += int(row["frames"])
 
     owner_retained = sum(
         value for key, value in flight_owner.items() if key.startswith("owner_present_")
@@ -246,20 +298,28 @@ def _aggregate(clips: list[dict[str, Any]]) -> dict[str, Any]:
         "core_truth_frames": total_core,
         "core_unknown_frames": total_unknown,
         "core_unknown_rate": round(total_unknown / max(total_core, 1), 4),
-        "unknown_contexts": render(contexts),
+        "unknown_contexts": _render_counter(contexts),
         "unknown_contexts_by_truth_state": {
-            state: render(counter) for state, counter in sorted(by_truth.items())
+            state: _render_counter(counter) for state, counter in sorted(by_truth.items())
         },
-        "flight_supported_no_receiver_owner_breakdown": render(flight_owner),
+        "flight_supported_no_receiver_owner_breakdown": _render_counter(flight_owner),
         "flight_supported_no_receiver_owner_breakdown_by_truth_state": {
-            state: render(counter) for state, counter in sorted(flight_owner_by_truth.items())
+            state: _render_counter(counter)
+            for state, counter in sorted(flight_owner_by_truth.items())
         },
         "flight_supported_no_receiver_owner_retained_frames": int(owner_retained),
+        "flight_supported_no_receiver_age_breakdown": _render_counter(flight_age),
+        "flight_supported_no_receiver_age_breakdown_by_truth_state": {
+            state: _render_counter(counter)
+            for state, counter in sorted(flight_age_by_truth.items())
+        },
     }
 
 
 def parse_args() -> argparse.Namespace:
-    parser = argparse.ArgumentParser(description="Break Gate A core->UNKNOWN frames into observable runtime contexts.")
+    parser = argparse.ArgumentParser(
+        description="Break Gate A core->UNKNOWN frames into observable runtime contexts."
+    )
     for clip, default in DEFAULT_RUNS.items():
         parser.add_argument(f"--{clip.lower()}-run", default=default)
     parser.add_argument("--output", default="evaluation/gate_a_unknown_diagnostics.json")
@@ -273,7 +333,10 @@ def main() -> None:
     aggregate = _aggregate(clips)
     result = {
         "version": "courtflux_p2_gate_a_unknown_diag_v1",
-        "contract": "diagnostic only; classifies observable snapshots for live core-truth frames predicted UNKNOWN",
+        "contract": (
+            "diagnostic only; classifies observable snapshots for live core-truth "
+            "frames predicted UNKNOWN"
+        ),
         "runs": run_map,
         "aggregate": aggregate,
         "clips": clips,
@@ -283,23 +346,38 @@ def main() -> None:
     if not output.is_absolute():
         output = PROJECT_ROOT / output
     output.parent.mkdir(parents=True, exist_ok=True)
-    output.write_text(json.dumps(result, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
+    output.write_text(
+        json.dumps(result, indent=2, ensure_ascii=False) + "\n",
+        encoding="utf-8",
+    )
 
-    print(json.dumps({
-        "aggregate": aggregate,
-        "clips": [
+    print(
+        json.dumps(
             {
-                "clip": clip["clip"],
-                "core_unknown_rate": clip["core_unknown_rate"],
-                "unknown_contexts": clip["unknown_contexts"],
-                "flight_supported_no_receiver_owner_breakdown": clip[
-                    "flight_supported_no_receiver_owner_breakdown"
+                "aggregate": aggregate,
+                "clips": [
+                    {
+                        "clip": clip["clip"],
+                        "core_unknown_rate": clip["core_unknown_rate"],
+                        "unknown_contexts": clip["unknown_contexts"],
+                        "flight_supported_no_receiver_owner_breakdown": clip[
+                            "flight_supported_no_receiver_owner_breakdown"
+                        ],
+                        "flight_supported_no_receiver_age_breakdown": clip[
+                            "flight_supported_no_receiver_age_breakdown"
+                        ],
+                        "flight_supported_no_receiver_age_sec": clip[
+                            "flight_supported_no_receiver_age_sec"
+                        ],
+                    }
+                    for clip in clips
                 ],
-            }
-            for clip in clips
-        ],
-        "output": str(output),
-    }, indent=2, ensure_ascii=False))
+                "output": str(output),
+            },
+            indent=2,
+            ensure_ascii=False,
+        )
+    )
 
 
 if __name__ == "__main__":
