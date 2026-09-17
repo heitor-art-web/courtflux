@@ -94,10 +94,10 @@ export default async function HomePage() {
         <Link href={homeHref} className={`${styles.logoLink} ${polish.logoPanel}`} aria-label="CourtFlux home">
           <Image
             className={`${styles.logo} ${polish.headerLogo}`}
-            src="/brand/02_horizontal_logo_FULL_PANEL.png"
+            src="/brand/light_logo_safe_crop.png"
             alt="CourtFlux — Basketball Intelligence"
-            width={660}
-            height={185}
+            width={320}
+            height={255}
             priority
           />
         </Link>
@@ -117,7 +117,7 @@ export default async function HomePage() {
           <div className={styles.footerInner}>
             <div>
               <div className={polish.footerBrandPanel}>
-                <Image className={`${styles.footerLogo} ${polish.footerLogo}`} src="/brand/02_horizontal_logo_FULL_PANEL.png" alt="CourtFlux — Basketball Intelligence" width={660} height={185} />
+                <Image className={`${styles.footerLogo} ${polish.footerLogo}`} src="/brand/light_logo_safe_crop.png" alt="CourtFlux — Basketball Intelligence" width={320} height={255} />
               </div>
               <div className={styles.footerMeta}>{content.footer.meta}</div>
             </div>
