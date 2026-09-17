@@ -34,17 +34,20 @@ class LiveControlP2EngineV1(_BaseP2EngineV1):
     )
 
     def __init__(self, *args: Any, **kwargs: Any) -> None:
+        explicit_reset_contract = "reset_after_ineligible_frames" in kwargs
         super().__init__(*args, **kwargs)
         self._live_control_state = BallControlState.UNKNOWN
         self._live_control_source = "initial_unknown"
         self._live_control_latch: BallControlState | None = None
         self._live_ineligible_frames = 0
         self._live_seen_reset_count = int(self._reset_count)
-        # Reuse the existing recent-shot-actor continuity horizon; do not add another
-        # independently tuned temporal threshold for gameplay flicker.
-        self.gameplay_continuity_grace_frames = max(
-            self.reset_after_ineligible_frames,
-            self.recent_shot_actor_frames,
+        # Normal runtime reuses the existing recent-shot-actor continuity horizon; an
+        # explicitly configured reset_after_ineligible_frames remains an exact contract for
+        # tests/special callers rather than being silently lengthened by the resolver.
+        self.gameplay_continuity_grace_frames = (
+            self.reset_after_ineligible_frames
+            if explicit_reset_contract
+            else max(self.reset_after_ineligible_frames, self.recent_shot_actor_frames)
         )
 
     def _reset_live_control(self, reason: str) -> None:
