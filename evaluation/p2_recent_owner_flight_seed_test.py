@@ -96,6 +96,39 @@ class P2RecentOwnerFlightSeedTest(unittest.TestCase):
         self.assertEqual(second["recent_owner_flight_seed_count"], 1)
         self.assertEqual(tracker.control_state, BallControlState.UNKNOWN)
 
+    def test_seeded_supported_flight_can_become_pass_with_distinct_receiver_candidate(self) -> None:
+        tracker = PossessionTrackerV1(
+            lock_frames=3,
+            lost_grace_frames=1,
+            loose_confirm_frames=1,
+            release_confirm_frames=2,
+            pass_min_direct_observations=2,
+            pass_min_displacement_heights=0.65,
+        )
+        for frame_id in range(3):
+            owner = player(frame_id, 1, (10, 10, 30, 50))
+            tracker.update(
+                frame_id=frame_id,
+                players=[owner],
+                ball_state=ball(frame_id, 20, 30),
+            )
+        self.assertEqual(tracker.current_track_id, 1)
+
+        tracker.update(frame_id=3, players=[], ball_state=missing_ball(3))
+        tracker.update(frame_id=4, players=[], ball_state=missing_ball(4))
+        self.assertTrue(tracker.diagnostics()["flight_seeded_from_recent_owner"])
+
+        receiver5 = player(5, 2, (65, 10, 95, 50))
+        tracker.update(frame_id=5, players=[receiver5], ball_state=ball(5, 80, 30))
+        receiver6 = player(6, 2, (70, 10, 100, 50))
+        tracker.update(frame_id=6, players=[receiver6], ball_state=ball(6, 85, 30))
+
+        diagnostics = tracker.diagnostics()
+        self.assertTrue(diagnostics["flight"]["flight_supported"])
+        self.assertTrue(diagnostics["pass_flight_receiver_evidence"])
+        self.assertEqual(tracker.control_state, BallControlState.PASS_FLIGHT)
+        self.assertIsNone(tracker.current_track_id)
+
     def test_existing_live_owner_flight_is_not_seeded_twice(self) -> None:
         tracker = self.tracker()
         owner = player(0, 1, (10, 10, 30, 50))
