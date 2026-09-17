@@ -87,6 +87,19 @@ def _unknown_context(row: dict[str, Any], *, reset_on_frame: bool) -> str:
     return "no_owner_no_candidate"
 
 
+def _flight_owner_bucket(row: dict[str, Any]) -> str:
+    if row.get("current_track_id") is None:
+        return "owner_absent"
+    lost = _as_int(row.get("lost_frames"), 0)
+    if lost <= 0:
+        return "owner_present_lost_0"
+    if lost <= 2:
+        return "owner_present_lost_1_2"
+    if lost <= 6:
+        return "owner_present_lost_3_6"
+    return "owner_present_lost_gt6"
+
+
 def _clip_diagnostics(clip: str, run_id: str) -> dict[str, Any]:
     run_dir = PROJECT_ROOT / "evaluation" / "runs" / run_id
     states_path = run_dir / "p2_states.jsonl"
@@ -101,6 +114,8 @@ def _clip_diagnostics(clip: str, run_id: str) -> dict[str, Any]:
 
     counts: Counter[str] = Counter()
     by_truth: dict[str, Counter[str]] = defaultdict(Counter)
+    flight_owner: Counter[str] = Counter()
+    flight_owner_by_truth: dict[str, Counter[str]] = defaultdict(Counter)
     reset_reasons: Counter[str] = Counter()
     examples: dict[str, list[dict[str, Any]]] = defaultdict(list)
     core_frames = 0
@@ -133,6 +148,12 @@ def _clip_diagnostics(clip: str, run_id: str) -> dict[str, Any]:
         context = _unknown_context(row, reset_on_frame=reset_on_frame)
         counts[context] += 1
         by_truth[truth_state][context] += 1
+
+        if context == "flight_supported_no_receiver":
+            bucket = _flight_owner_bucket(row)
+            flight_owner[bucket] += 1
+            flight_owner_by_truth[truth_state][bucket] += 1
+
         if reset_on_frame:
             reset_reasons[str(row.get("reset_reason") or "unknown")] += 1
         if len(examples[context]) < 5:
@@ -176,6 +197,11 @@ def _clip_diagnostics(clip: str, run_id: str) -> dict[str, Any]:
         "unknown_contexts_by_truth_state": {
             state: render_counter(counter) for state, counter in sorted(by_truth.items())
         },
+        "flight_supported_no_receiver_owner_breakdown": render_counter(flight_owner),
+        "flight_supported_no_receiver_owner_breakdown_by_truth_state": {
+            state: render_counter(counter)
+            for state, counter in sorted(flight_owner_by_truth.items())
+        },
         "reset_reasons_on_unknown_frames": dict(reset_reasons.most_common()),
         "examples": dict(examples),
     }
@@ -184,6 +210,8 @@ def _clip_diagnostics(clip: str, run_id: str) -> dict[str, Any]:
 def _aggregate(clips: list[dict[str, Any]]) -> dict[str, Any]:
     contexts: Counter[str] = Counter()
     by_truth: dict[str, Counter[str]] = defaultdict(Counter)
+    flight_owner: Counter[str] = Counter()
+    flight_owner_by_truth: dict[str, Counter[str]] = defaultdict(Counter)
     total_core = 0
     total_unknown = 0
 
@@ -195,6 +223,13 @@ def _aggregate(clips: list[dict[str, Any]]) -> dict[str, Any]:
         for truth_state, mapping in dict(clip["unknown_contexts_by_truth_state"]).items():
             for context, row in dict(mapping).items():
                 by_truth[truth_state][context] += int(row["frames"])
+        for bucket, row in dict(clip["flight_supported_no_receiver_owner_breakdown"]).items():
+            flight_owner[bucket] += int(row["frames"])
+        for truth_state, mapping in dict(
+            clip["flight_supported_no_receiver_owner_breakdown_by_truth_state"]
+        ).items():
+            for bucket, row in dict(mapping).items():
+                flight_owner_by_truth[truth_state][bucket] += int(row["frames"])
 
     def render(counter: Counter[str]) -> dict[str, Any]:
         total = sum(counter.values())
@@ -202,6 +237,10 @@ def _aggregate(clips: list[dict[str, Any]]) -> dict[str, Any]:
             key: {"frames": int(value), "share": round(value / max(total, 1), 4)}
             for key, value in counter.most_common()
         }
+
+    owner_retained = sum(
+        value for key, value in flight_owner.items() if key.startswith("owner_present_")
+    )
 
     return {
         "core_truth_frames": total_core,
@@ -211,6 +250,11 @@ def _aggregate(clips: list[dict[str, Any]]) -> dict[str, Any]:
         "unknown_contexts_by_truth_state": {
             state: render(counter) for state, counter in sorted(by_truth.items())
         },
+        "flight_supported_no_receiver_owner_breakdown": render(flight_owner),
+        "flight_supported_no_receiver_owner_breakdown_by_truth_state": {
+            state: render(counter) for state, counter in sorted(flight_owner_by_truth.items())
+        },
+        "flight_supported_no_receiver_owner_retained_frames": int(owner_retained),
     }
 
 
@@ -248,6 +292,9 @@ def main() -> None:
                 "clip": clip["clip"],
                 "core_unknown_rate": clip["core_unknown_rate"],
                 "unknown_contexts": clip["unknown_contexts"],
+                "flight_supported_no_receiver_owner_breakdown": clip[
+                    "flight_supported_no_receiver_owner_breakdown"
+                ],
             }
             for clip in clips
         ],
