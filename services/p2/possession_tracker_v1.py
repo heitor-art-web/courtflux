@@ -67,9 +67,11 @@ class PossessionTrackerV1(_BasePossessionTrackerV1):
             if self.current_track_id is None
             else self.switch_frames
         )
+        candidate_score = round(float(self._candidate_score), 6)
         diagnostics.update(
             {
-                "candidate_peak_score": round(float(self._candidate_score), 6),
+                "candidate_score": candidate_score,
+                "candidate_peak_score": candidate_score,
                 "candidate_threshold": round(float(threshold), 6),
                 "candidate_required_frames": int(required_frames),
                 "pass_flight_receiver_evidence": self._pass_receiver_evidence(),
