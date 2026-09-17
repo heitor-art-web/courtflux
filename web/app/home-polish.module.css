@@ -2,10 +2,10 @@
   top: 0 !important;
   width: min(1240px, calc(100% - 48px)) !important;
   margin: 0 auto !important;
-  padding: 12px 0 !important;
+  padding: 10px 0 !important;
   border: 0 !important;
   border-radius: 0 !important;
-  background: rgba(243, 241, 235, .94) !important;
+  background: rgba(243, 241, 235, .96) !important;
   box-shadow: none !important;
   backdrop-filter: blur(14px);
 }
@@ -14,22 +14,28 @@
 .footerBrandPanel {
   display: inline-flex;
   align-items: center;
-  padding: 6px 9px;
-  border: 1px solid rgba(10, 23, 34, .10);
-  border-radius: 12px;
-  background: #fff;
-  box-shadow: 0 8px 24px rgba(10, 23, 34, .06);
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  box-shadow: none;
 }
 
 .headerLogo,
 .footerLogo {
   display: block;
-  height: auto;
+  width: auto !important;
+  max-width: none !important;
   mix-blend-mode: normal !important;
+  object-fit: contain;
 }
 
 .headerLogo {
-  width: 172px !important;
+  height: 52px !important;
+}
+
+.footerLogo {
+  height: 58px !important;
 }
 
 .nav a {
@@ -41,21 +47,21 @@
 }
 
 .heroImage {
-  filter: saturate(.78) contrast(1.05) brightness(.68) !important;
+  filter: saturate(.90) contrast(1.03) brightness(.88) !important;
 }
 
 .heroScrim {
   background:
     linear-gradient(90deg,
-      rgba(3, 11, 18, .99) 0%,
-      rgba(3, 11, 18, .96) 34%,
-      rgba(3, 11, 18, .86) 52%,
-      rgba(3, 11, 18, .62) 70%,
-      rgba(3, 11, 18, .28) 100%),
+      rgba(3, 11, 18, .93) 0%,
+      rgba(3, 11, 18, .86) 30%,
+      rgba(3, 11, 18, .62) 52%,
+      rgba(3, 11, 18, .28) 72%,
+      rgba(3, 11, 18, .06) 100%),
     linear-gradient(0deg,
-      rgba(3, 11, 18, .80) 0%,
-      rgba(3, 11, 18, .18) 58%,
-      rgba(3, 11, 18, .34) 100%) !important;
+      rgba(3, 11, 18, .55) 0%,
+      rgba(3, 11, 18, .07) 58%,
+      rgba(3, 11, 18, .18) 100%) !important;
 }
 
 .heroEyebrow {
@@ -79,25 +85,63 @@
 
 .heroSecondaryButton {
   border-color: rgba(255, 255, 255, .54) !important;
-  background: rgba(3, 11, 18, .48) !important;
+  background: rgba(3, 11, 18, .42) !important;
   color: #fff !important;
 }
 
 .heroSecondaryButton:hover {
   border-color: rgba(255, 255, 255, .82) !important;
-  background: rgba(3, 11, 18, .68) !important;
+  background: rgba(3, 11, 18, .62) !important;
 }
 
 .pill {
   border-color: rgba(255, 255, 255, .28) !important;
-  background: rgba(3, 11, 18, .42) !important;
+  background: rgba(3, 11, 18, .34) !important;
   color: #f4f7f8 !important;
 }
 
 .heroInsight {
   border-color: rgba(255, 255, 255, .20) !important;
-  background: rgba(3, 11, 18, .92) !important;
-  box-shadow: 0 26px 70px rgba(0, 0, 0, .38) !important;
+  background: rgba(3, 11, 18, .88) !important;
+  box-shadow: 0 26px 70px rgba(0, 0, 0, .34) !important;
+}
+
+.darkSectionHeader {
+  position: relative;
+  z-index: 2;
+}
+
+.darkEyebrow {
+  color: #ffc19a !important;
+}
+
+.darkTitle {
+  color: #fff !important;
+}
+
+.darkTitle span {
+  color: #ff9a5b !important;
+}
+
+.darkCopy {
+  color: #edf2f5 !important;
+}
+
+.evidenceInsightCard {
+  border-color: rgba(255, 255, 255, .18) !important;
+  background: rgba(255, 255, 255, .075) !important;
+}
+
+.evidenceInsightTitle {
+  color: #fff !important;
+}
+
+.evidenceInsightCopy {
+  color: #e3ebef !important;
+}
+
+.evidenceInsightAction {
+  color: #fff !important;
 }
 
 .footer {
@@ -106,71 +150,58 @@
   background: transparent;
 }
 
-.footerBrandPanel {
-  padding: 7px 10px;
-}
-
-.footerLogo {
-  width: 176px !important;
-}
-
 @media (max-width: 900px) {
   .header {
     width: min(1240px, calc(100% - 32px)) !important;
-    padding: 10px 0 !important;
+    padding: 9px 0 !important;
   }
 
   .headerLogo {
-    width: 158px !important;
+    height: 48px !important;
   }
 
   .heroScrim {
     background:
       linear-gradient(90deg,
-        rgba(3, 11, 18, .98) 0%,
-        rgba(3, 11, 18, .94) 58%,
-        rgba(3, 11, 18, .78) 100%),
+        rgba(3, 11, 18, .94) 0%,
+        rgba(3, 11, 18, .82) 55%,
+        rgba(3, 11, 18, .52) 100%),
       linear-gradient(0deg,
-        rgba(3, 11, 18, .90) 0%,
-        rgba(3, 11, 18, .38) 70%,
-        rgba(3, 11, 18, .42) 100%) !important;
+        rgba(3, 11, 18, .72) 0%,
+        rgba(3, 11, 18, .18) 70%,
+        rgba(3, 11, 18, .24) 100%) !important;
   }
 
   .heroImage {
-    filter: saturate(.74) contrast(1.04) brightness(.62) !important;
+    filter: saturate(.88) contrast(1.03) brightness(.84) !important;
   }
 }
 
 @media (max-width: 680px) {
   .header {
     width: min(100% - 24px, 1240px) !important;
-    padding: 9px 0 !important;
-  }
-
-  .logoPanel {
-    padding: 5px 7px;
-    border-radius: 10px;
+    padding: 8px 0 !important;
   }
 
   .headerLogo {
-    width: 142px !important;
+    height: 44px !important;
   }
 
   .heroScrim {
     background:
-      linear-gradient(90deg, rgba(3, 11, 18, .97), rgba(3, 11, 18, .86)),
-      linear-gradient(0deg, rgba(3, 11, 18, .92), rgba(3, 11, 18, .34)) !important;
+      linear-gradient(90deg, rgba(3, 11, 18, .93), rgba(3, 11, 18, .62)),
+      linear-gradient(0deg, rgba(3, 11, 18, .76), rgba(3, 11, 18, .16)) !important;
+  }
+
+  .heroImage {
+    filter: saturate(.86) contrast(1.02) brightness(.82) !important;
   }
 
   .heroCopy {
     color: #f5f7f8 !important;
   }
 
-  .footerBrandPanel {
-    padding: 6px 8px;
-  }
-
   .footerLogo {
-    width: 164px !important;
+    height: 52px !important;
   }
 }
