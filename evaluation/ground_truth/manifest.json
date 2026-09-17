@@ -1,0 +1,84 @@
+{
+  "version": "courtflux_p2_gt_manifest_v1",
+  "frozen_on": "2026-09-16",
+  "branch": "validation/p2-gt-calibration",
+  "motor_policy": "basketball thresholds frozen until reviewed human GT is evaluated",
+  "jersey_policy": "Jersey OFF for P2 basketball GT and baseline freeze; final Jersey gate runs only after P2 calibration",
+  "clips": [
+    {
+      "id": "V1",
+      "video_id": "hILf-ySowIo",
+      "source": "https://www.youtube.com/watch?v=hILf-ySowIo",
+      "start_time_sec": 10.0,
+      "end_time_sec": 40.0,
+      "team_context": "neutral",
+      "match_config": "evaluation/match_configs/unknown.json",
+      "targets": ["control_state", "possession", "loose_ball", "shot", "shooter"],
+      "gt_file": "evaluation/ground_truth/v1.json"
+    },
+    {
+      "id": "V2",
+      "video_id": "ULUpcQXsRII",
+      "source": "https://www.youtube.com/watch?v=ULUpcQXsRII",
+      "start_time_sec": 0.0,
+      "end_time_sec": 30.0,
+      "team_context": "neutral",
+      "match_config": "evaluation/match_configs/unknown.json",
+      "targets": ["control_state", "possession", "loose_ball", "shot", "shooter"],
+      "gt_file": "evaluation/ground_truth/v2.json"
+    },
+    {
+      "id": "V3",
+      "video_id": "Vr4105n-cPM",
+      "source": "https://www.youtube.com/watch?v=Vr4105n-cPM",
+      "start_time_sec": 0.0,
+      "end_time_sec": 30.0,
+      "team_context": "neutral",
+      "match_config": "evaluation/match_configs/unknown.json",
+      "targets": ["control_state", "possession", "loose_ball", "shot", "shooter"],
+      "gt_file": "evaluation/ground_truth/v3.json"
+    },
+    {
+      "id": "V4",
+      "video_id": "WMWTbS8J2ec",
+      "source": "https://www.youtube.com/watch?v=WMWTbS8J2ec",
+      "start_time_sec": 0.0,
+      "end_time_sec": 30.0,
+      "team_context": "neutral",
+      "match_config": "evaluation/match_configs/unknown.json",
+      "targets": ["control_state", "possession", "loose_ball", "shot", "shooter"],
+      "gt_file": "evaluation/ground_truth/v4.json"
+    },
+    {
+      "id": "V5",
+      "video_id": "C-JjAlX2Dyc",
+      "source": "https://www.youtube.com/watch?v=C-JjAlX2Dyc",
+      "start_time_sec": 10.0,
+      "end_time_sec": 40.0,
+      "team_context": "neutral",
+      "match_config": "evaluation/match_configs/unknown.json",
+      "targets": ["control_state", "possession", "loose_ball", "shot", "shooter"],
+      "gt_file": "evaluation/ground_truth/v5.json"
+    },
+    {
+      "id": "PORTO_OVARENSE_60S",
+      "video_id": "OwiQgAMqyUs",
+      "source": "https://www.youtube.com/watch?v=OwiQgAMqyUs",
+      "start_time_sec": 0.0,
+      "end_time_sec": 60.0,
+      "team_context": "known",
+      "match_config": "data/match_config.json",
+      "targets": [
+        "control_state",
+        "possession",
+        "loose_ball",
+        "shot",
+        "shooter",
+        "team_attribution",
+        "pass",
+        "turnover"
+      ],
+      "gt_file": "evaluation/ground_truth/porto_ovarense_60s.json"
+    }
+  ]
+}

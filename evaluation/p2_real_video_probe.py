@@ -8,6 +8,7 @@ from pathlib import Path
 from typing import Any
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
+DEFAULT_NEUTRAL_MATCH_CONFIG = "evaluation/match_configs/unknown.json"
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
@@ -106,7 +107,14 @@ def parse_args() -> argparse.Namespace:
         choices=("botsort.yaml", "bytetrack.yaml"),
         default="botsort.yaml",
     )
-    parser.add_argument("--match-config", default="data/match_config.json")
+    parser.add_argument(
+        "--match-config",
+        default=DEFAULT_NEUTRAL_MATCH_CONFIG,
+        help=(
+            "Match config used for team evidence. Defaults to the neutral/unknown P2 GT "
+            "config; pass data/match_config.json explicitly for the Porto/Ovarense known-team control."
+        ),
+    )
     parser.add_argument("--jersey-interval", type=int, default=24)
     parser.add_argument("--diagnostics-batch-size", type=int, default=100)
     parser.add_argument(

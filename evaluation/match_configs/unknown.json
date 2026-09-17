@@ -1,0 +1,10 @@
+{
+  "metadata": {
+    "home_team": null,
+    "away_team": null,
+    "active_kits": {},
+    "evaluation_scope": "unknown_match",
+    "note": "Neutral P2 GT benchmark config. Emits UNKNOWN team evidence instead of reusing another game's teams."
+  },
+  "teams": {}
+}
