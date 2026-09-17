@@ -23,9 +23,11 @@ export async function proxy(request: NextRequest) {
   const { pathname } = request.nextUrl;
   const pathLocale = localeFromPathname(pathname);
   const cleanPath = stripLocalePrefix(pathname);
-  const locale: Locale = pathLocale ?? (isPublicPath(pathname) ? DEFAULT_LOCALE : cookieLocale(request));
+  const publicRequest = isPublicPath(pathname);
+  const locale: Locale = pathLocale ?? (publicRequest ? DEFAULT_LOCALE : cookieLocale(request));
   const requestHeaders = new Headers(request.headers);
   requestHeaders.set("x-courtflux-locale", locale);
+  requestHeaders.set("x-courtflux-public", publicRequest ? "1" : "0");
   const sessionRequest = new NextRequest(request, { headers: requestHeaders });
   const sessionResponse = await updateSession(sessionRequest);
 

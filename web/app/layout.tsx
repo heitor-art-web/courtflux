@@ -1,11 +1,9 @@
 import type { Metadata, Viewport } from "next";
 import "./globals.css";
 import "./accessibility.css";
-import "./homepage-light.css";
-import "./footer-brand-fix.css";
 import { getSiteUrl } from "@/lib/site";
-import { getRequestLocale } from "@/lib/i18n/request";
-import { LanguageSwitcher } from "./language-switcher";
+import { getRequestLocale, isPublicRequest } from "@/lib/i18n/request";
+import { AppLanguageSwitcherBridge } from "./language-switcher";
 import { LocaleTextBridge } from "./locale-text-bridge";
 import { InteractionA11yBridge } from "./interaction-a11y-bridge";
 import { Analytics } from "@vercel/analytics/next";
@@ -58,7 +56,7 @@ export const viewport: Viewport = {
 };
 
 export default async function RootLayout({ children }: Readonly<{ children: React.ReactNode }>) {
-  const locale = await getRequestLocale();
+  const [locale, publicPage] = await Promise.all([getRequestLocale(), isPublicRequest()]);
   const skipLabel = locale === "pt-PT"
     ? "Saltar para o conteúdo principal"
     : locale === "es-ES"
@@ -67,13 +65,13 @@ export default async function RootLayout({ children }: Readonly<{ children: Reac
 
   return (
     <html lang={locale}>
-      <body>
+      <body data-public-page={publicPage ? "true" : "false"}>
         <a className="skip-link" href="#main-content">{skipLabel}</a>
         <div id="main-content" tabIndex={-1}>
           {children}
         </div>
         <LocaleTextBridge locale={locale} />
-        <LanguageSwitcher initialLocale={locale} />
+        <AppLanguageSwitcherBridge initialLocale={locale} />
         <InteractionA11yBridge />
         <Analytics />
       </body>

@@ -1,0 +1,97 @@
+.publicRoot {
+  --cf-bg: #f3f1eb;
+  --cf-surface: #ffffff;
+  --cf-ink: #0a1722;
+  --cf-muted: #59656e;
+  --cf-muted-strong: #4f5c65;
+  --cf-line: rgba(10, 23, 34, 0.13);
+  --cf-orange: #b94700;
+  --cf-orange-bright: #ed6a19;
+  --cf-night: #06131f;
+  --cf-focus: rgba(237, 106, 25, 0.82);
+  --cf-radius-card: 16px;
+  --cf-radius-panel: 24px;
+  --cf-space-section: clamp(84px, 8vw, 108px);
+  --cf-type-page-hero: clamp(2.85rem, 4.4vw, 4rem);
+  --cf-type-home-hero: clamp(3.2rem, 5vw, 4.5rem);
+  --cf-type-section: clamp(2.3rem, 3.7vw, 3.5rem);
+  --cf-type-legal-hero: clamp(2.45rem, 4.1vw, 3.65rem);
+  --cf-type-body: clamp(1rem, 1.08vw, 1.125rem);
+  --cf-type-meta: 0.8125rem;
+  width: 100%;
+  color: var(--cf-ink);
+}
+
+.homeRoot h1 {
+  font-size: var(--cf-type-home-hero);
+  line-height: 0.98;
+  letter-spacing: -0.048em;
+  text-wrap: balance;
+}
+
+.standardRoot h1 {
+  font-size: var(--cf-type-page-hero);
+  line-height: 0.98;
+  letter-spacing: -0.048em;
+  text-wrap: balance;
+}
+
+.legalRoot h1 {
+  font-size: var(--cf-type-legal-hero);
+  line-height: 1;
+  letter-spacing: -0.045em;
+}
+
+.homeRoot h2,
+.standardRoot h2 {
+  font-size: var(--cf-type-section);
+  line-height: 1;
+  letter-spacing: -0.045em;
+  text-wrap: balance;
+}
+
+.homeRoot :where(#understand, #evidence, #for-you, #how, #pricing, #faq),
+.standardRoot :where(#how-it-works, #capabilities, #workflow, #benefits) {
+  padding-top: var(--cf-space-section);
+  scroll-margin-top: 116px;
+}
+
+.publicRoot :where(a, button, summary, select):focus-visible {
+  outline: 3px solid var(--cf-focus);
+  outline-offset: 3px;
+}
+
+.publicRoot :where(header nav a, header summary, footer a) {
+  min-height: 44px;
+}
+
+.publicRoot :where(header nav a, footer a) {
+  display: inline-flex;
+  align-items: center;
+}
+
+.publicRoot details > summary {
+  min-height: 44px;
+}
+
+@media (max-width: 760px) {
+  .publicRoot {
+    --cf-space-section: 72px;
+    --cf-type-page-hero: clamp(2.35rem, 10.5vw, 2.9rem);
+    --cf-type-home-hero: clamp(2.55rem, 11.5vw, 3.15rem);
+    --cf-type-section: clamp(2rem, 9vw, 2.6rem);
+    --cf-type-legal-hero: clamp(2.2rem, 9.5vw, 2.8rem);
+  }
+
+  .homeRoot :where(#understand, #evidence, #for-you, #how, #pricing, #faq),
+  .standardRoot :where(#how-it-works, #capabilities, #workflow, #benefits) {
+    scroll-margin-top: 104px;
+  }
+}
+
+@media (max-width: 430px) {
+  .publicRoot {
+    --cf-space-section: 64px;
+    --cf-type-section: clamp(1.9rem, 8.8vw, 2.35rem);
+  }
+}

@@ -6,3 +6,8 @@ export async function getRequestLocale(): Promise<Locale> {
   const locale = requestHeaders.get("x-courtflux-locale");
   return isLocale(locale) ? locale : DEFAULT_LOCALE;
 }
+
+export async function isPublicRequest(): Promise<boolean> {
+  const requestHeaders = await headers();
+  return requestHeaders.get("x-courtflux-public") === "1";
+}

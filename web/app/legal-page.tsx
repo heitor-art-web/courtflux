@@ -65,6 +65,7 @@ export function LegalPage({
         navigation={localizedShared.legalNavigation}
         navLabel="Trust and legal navigation"
         brandAlt={localizedShared.brandAlt}
+        variant="legal"
         footer={{
           meta: localizedShared.legalFooter.copyright,
           links: localizedShared.legalFooter.links,

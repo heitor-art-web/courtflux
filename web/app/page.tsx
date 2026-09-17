@@ -93,6 +93,7 @@ export default async function HomePage() {
         navigation={content.navigation}
         navLabel="Primary navigation"
         footer={content.footer}
+        variant="home"
       >
         <div className={styles.shell}>
           {content.sections.map(renderHomeSection)}
