@@ -82,7 +82,7 @@ Game Player Entity         = stable identity inside one game
 Persistent Player Identity = real person / roster identity across games
 ```
 
-Persistent real-world identity belongs to a later roadmap phase, currently P4.5, where CourtFlux can resolve game-level entities to roster players using jersey evidence, appearance, roster context, previous games and human confirmation.
+Persistent real-world identity belongs to roadmap phase **P4.5 — Persistent Player Identity**, where CourtFlux can resolve game-level entities to roster players using jersey evidence, appearance, roster context, previous games and human confirmation.
 
 ## Exit criteria
 
