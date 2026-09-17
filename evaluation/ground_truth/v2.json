@@ -1,0 +1,32 @@
+{
+  "version": "courtflux_p2_gt_v1",
+  "video": {
+    "source": "https://www.youtube.com/watch?v=ULUpcQXsRII",
+    "start_time_sec": 0.0,
+    "end_time_sec": 30.0,
+    "fps": 50.0
+  },
+  "annotation_policy": {
+    "identity": "stable_track_id_when_visible; null_when_not_reliably_identifiable",
+    "team": "null_for_neutral_v1_v5",
+    "unknown_preferred_over_guess": true,
+    "event_timing": "human_event_window; exact release frame is optional",
+    "control_states": [
+      "unknown",
+      "possessed",
+      "loose",
+      "pass_flight",
+      "shot_flight"
+    ]
+  },
+  "control_intervals": [],
+  "events": [],
+  "notes": [
+    "Gate A V2 blind human-GT skeleton.",
+    "Canonical source run: evaluation/runs/20260917_141201_062495.",
+    "Run completed with Jersey OFF and neutral match config; home_team and away_team were null.",
+    "video_fps=50.0 from canonical run summary; analysis_fps=23.08 is processing throughput and must not be used for temporal GT conversion.",
+    "Human labels only. Do not inspect or bootstrap labels from p2_events.jsonl or p2_states.jsonl before Pass A is frozen.",
+    "For Gate A, prioritize control_intervals; events may remain empty until later gates unless needed as human context."
+  ]
+}
