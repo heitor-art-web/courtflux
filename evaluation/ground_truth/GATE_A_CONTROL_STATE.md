@@ -55,6 +55,52 @@ Also report, by truth state and clip:
 - `loose` recall/confusions;
 - engine-ineligible frames inside labelled intervals.
 
+## Frozen acceptance thresholds
+
+These thresholds were frozen after blind V1–V5 human annotation and before inspecting P2 scores on V2–V5.
+They are product-reliability gates, not calibration targets for an individual clip.
+
+### Coverage sanity gate
+
+- aggregate prediction coverage on human-labelled frames: **>= 0.98**;
+- each individual clip: **>= 0.95**.
+
+Coverage failure is treated as a runtime/evaluation-boundary defect rather than a semantic-control miss.
+
+### Interval-continuity gate
+
+Across all V1–V5 human control intervals:
+
+- aggregate dominant-state interval accuracy: **>= 0.70**;
+- aggregate mean interval matching rate: **>= 0.65**.
+
+Generalization safeguard for every individual clip:
+
+- dominant-state interval accuracy: **>= 0.50**;
+- mean interval matching rate: **>= 0.45**.
+
+### Core-state frame recall guardrails
+
+Aggregate recall on human-labelled frames must be:
+
+- `possessed`: **>= 0.60**;
+- `pass_flight`: **>= 0.60**;
+- `shot_flight`: **>= 0.60**.
+
+For `loose`, require **>= 0.50** only when the frozen V1–V5 set contains at least two independently annotated loose-ball intervals. Otherwise report it as insufficient-GT rather than silently passing or failing it.
+
+`unknown` has no positive-recall threshold because human `unknown` means evidence is insufficient, not a basketball state that P3 should optimize toward.
+
+### Critical semantic-confusion guardrails
+
+On aggregate labelled frames:
+
+- truth `pass_flight` predicted as `shot_flight`: **<= 0.20**;
+- truth `shot_flight` predicted as `pass_flight`: **<= 0.20**;
+- predictions of `unknown` while truth is one of `possessed`, `pass_flight`, or `shot_flight`: **<= 0.30**.
+
+These guardrails prevent a superficially acceptable overall score from hiding semantic failures that would corrupt P3 timelines and analytics.
+
 ## Live vs resolved contract
 
 `control_state` / `live_control_state` is the online decision and remains the primary Gate-A result.
@@ -78,7 +124,7 @@ Gate A closes only when:
 
 - V1–V5 all have reviewed frozen human control-state GT;
 - one frozen canonical runtime has been evaluated on all five clips;
-- predeclared numeric acceptance thresholds are met on the aggregate and required per-clip safeguards;
+- the predeclared numeric acceptance thresholds above are met on the aggregate and required per-clip safeguards;
 - remaining material confusions are documented and either accepted explicitly for P3 candidate/UNKNOWN handling or assigned to a later gate;
 - focused P2 regressions remain green.
 
