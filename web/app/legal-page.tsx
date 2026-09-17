@@ -63,10 +63,10 @@ export function LegalPage({
       <header className={styles.header}>
         <Link className={styles.brand} href={homeHref} aria-label="CourtFlux home">
           <Image
-            src="/brand/horizontal_logo_safe_crop.png"
+            src="/brand/light_logo_safe_crop.png"
             alt={localizedShared.brandAlt}
-            width={660}
-            height={185}
+            width={320}
+            height={255}
             priority
           />
         </Link>
