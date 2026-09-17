@@ -1,88 +1,51 @@
 # CourtFlux — Basketball Intelligence from Video
 
-**CourtFlux** is a computer-vision system for turning standard basketball broadcast footage into structured player, ball, event and tactical intelligence.
+**CourtFlux** turns ordinary basketball game video into structured evidence, reviewable moments and, over time, actionable development intelligence.
 
-The long-term objective is to reconstruct a basketball game from ordinary video well enough to answer, with measurable confidence:
-
-```text
-Where are the players?
-Who probably has the ball?
-What happened?
-Who did it?
-Where did it happen?
-What does it mean tactically?
-```
-
-CourtFlux is in active development. P0 and P1 are closed. P2 engineering/reconstruction is also closed: the remaining P2 work is scientific validation against reviewed human ground truth, evidence-driven calibration, baseline freeze and the final Jersey/Identity gate.
+> **Product loop:** Video → Understanding → Insight → Evidence → Improvement
+>
+> Every important insight should remain traceable to the source video. Weak, missing or contradictory evidence may remain `UNKNOWN`; CourtFlux should not manufacture certainty to increase coverage.
 
 ---
 
 ## Current project status
 
-**Status as of 2026-09-16:**
+**Last updated: 2026-09-17**
+
+| Phase | Scope | Status |
+| --- | --- | --- |
+| **P0** | Vision Foundation | ✅ Complete |
+| **P1** | Perception + Tracking | ✅ Complete |
+| **P2** | Basketball Understanding + Game-Level Player Identity | 🧪 Engineering core complete; human GT + game-entity validation pending |
+| **P3** | Structured Analytics + Actions | ⏳ Future |
+| **P4** | Tactical Intelligence | ⏳ Future |
+| **P4.5** | Persistent Player Identity | ⏳ Future |
+| **P5** | Mobile App | ⏳ Future |
+| **P6** | Continuous Development / AI Coach | ⏳ Future |
+
+### Current priority
+
+P2 does **not** need another architectural reconstruction. The current work is validation:
 
 ```text
-P0 — VISION FOUNDATION                         ✅ COMPLETE
-P1 — PERCEPTION + GAME STATE                  ✅ COMPLETE
-P2 — BASKETBALL UNDERSTANDING                 🧪 ENGINEERING COMPLETE / GT VALIDATION PENDING
-P3 — STRUCTURED ANALYTICS + ACTIONS           ⏳ FUTURE
-P4 — TACTICAL INTELLIGENCE                    ⏳ FUTURE
-```
-
-### P2 status in one sentence
-
-> **Architecture/implementation closed; structural stability confirmed; real-video baseline confirmed; basketball correctness against human truth still pending.**
-
-This means P2 does **not** need another reconstruction. The remaining sequence is:
-
-```text
-human GT
-  ↓
-measure prediction vs truth
-  ↓
+reviewed human ground truth
+        ↓
+measure basketball-event correctness
+        ↓
+validate game-level player continuity / attribution
+        ↓
 calibrate only from measured error
-  ↓
-freeze Jersey-OFF P2 baseline
-  ↓
-final Jersey / Identity gate
-  ↓
-P2 exit
+        ↓
+freeze the validated P2 baseline
+        ↓
+P3 — Structured Analytics + Actions
 ```
 
-Key milestones:
-
-- PR #43 merged the accepted P1 / Identity-v2 baseline and deferred final Jersey/Identity correctness to the end of P2.
-- PR #48 merged the reconstructed canonical P2 runtime into `main`.
-- PR #49 closed the current P2 validation/lifecycle work around canonical metrics and event-state stability.
-- The gameplay-boundary refactor separates gameplay presence from strict analysis quality.
-- The frozen V1–V5 Jersey-OFF battery was rerun with the canonical `p2_metrics_v5` collector.
-- A known-team Porto/Ovarense control established a stable real-video P2 baseline for team-aware diagnostics.
-- PR #50 restored the selected SoccerNet PARSeq Jersey backend contract after a worker refactor had silently dropped per-job backend propagation.
-- A post-PR #50 Jersey-ON run verified `requested_backend=parseq_soccernet`, `backend=parseq_soccernet` and `backend_contract_verified=true` while leaving P2 outputs unchanged.
-- Basketball motor thresholds remain frozen until human GT provides evidence for calibration.
-
-The confidence contract remains unchanged: missing, contradictory or weak evidence may remain `UNKNOWN`. CourtFlux must not force player, jersey, ball or basketball-event identity merely to increase coverage.
+The P2 basketball motor should not be tuned from one surprising clip or visual intuition alone. Calibration must be driven by frozen evaluation footage and reviewed ground truth.
 
 ---
 
-## Documentation status and source of truth
-
-Use the following order when documents disagree:
-
-1. `README.md` — current project/operational status.
-2. `docs/p2_roadmap.md` — P2 technical contract, gates and detailed execution history.
-3. `docs/system_quality_gate.md` — perception/ball quality evaluation contract where applicable.
-4. `docs/p1_roadmap.md` — **HISTORICAL / SUPERSEDED** P1 execution record.
-5. `docs/p1_jersey_exit_gate.md` — **HISTORICAL / SUPERSEDED** pre-merge P1 Jersey/Identity gate record.
-6. `docs/p0_foundation_snapshot.md` — frozen historical P0 exit snapshot.
-
-Historical P1/P2 notes are retained for experiment history and design rationale. Old branch names, phase labels and runtime instructions must not be interpreted as current instructions when they conflict with this README.
-
----
-
-## Current P2 validation contract
-
-P2 converts canonical P1 state into confidence-aware basketball event primitives.
+## What P2 currently understands
 
 Current control states:
 
@@ -108,141 +71,120 @@ SHOT_ATTEMPT
 REBOUND_CANDIDATE
 ```
 
-P2 currently supports:
+The implemented P2 runtime includes ball-control state, possession acquisition/change, loose-ball lifecycle, pass/turnover candidates, shot attempt/outcome evidence, rebound candidates, temporal reset handling, actor/team attribution diagnostics and human-GT evaluation tooling.
 
-- explicit ball-control state;
-- possession acquisition/change;
-- loose-ball lifecycle, including same-handler recovery and explicit terminal closure;
-- pass-flight evidence;
-- pass/turnover attribution using stable tracks;
-- shot-flight isolation from possession;
-- shot attempt/outcome evidence with conservative `unknown` handling;
-- robust shot re-arm/de-duplication;
-- rebound candidate chaining;
-- gameplay-gap, frame-discontinuity and timestamp-discontinuity resets;
-- per-event actor/team attribution diagnostics;
-- canonical `p2_metrics_v5` observability;
-- human-GT evaluation tooling.
-
-A semantic detection such as `player-jump-shot`, `player-layup-dunk`, `player-shot-block`, `ball-in-basket` or `rim` is supporting evidence only. No single semantic class is event truth by itself.
-
-### Frozen motor rule
-
-Until human ground truth is evaluated, do **not** tune possession/shot/pass/turnover state-machine thresholds by intuition from one video. Architecture and observability fixes are allowed when they repair a broken contract; basketball calibration must be driven by the frozen evaluation set and reviewed GT.
+These are **structured basketball primitives**, not a claim of perfect basketball truth. Formal accuracy remains pending reviewed human ground-truth validation.
 
 ---
 
-## Confirmed P2 v5 multi-video baseline
+## Player identity boundary
 
-The frozen V1–V5 battery was rerun after:
+CourtFlux now separates three different concepts explicitly:
 
-- the `gameplay_present` / `analysis_eligible` scope split;
-- loose-ball lifecycle closure fixes;
-- removal of the duplicate real-video-probe metrics collector;
-- adoption of the single canonical `p2_metrics_v5` collector;
-- reset diagnostic rename from `analysis_ineligible_gap` to `gameplay_absent_gap`.
+```text
+Track ID
+  = technical visual tracking identity
 
-These runs use `weights/model_v1.1.0.pt`, BoT-SORT, Jersey OFF and the historical neutral/unknown match config. Because that config has no home/away team evidence, the battery does **not** validate team attribution, pass classification or turnover classification.
+Game Player Entity
+  = the same player consistently represented inside one game
 
-| Video | Window | Metric frames | Engine frames | Limited gameplay | Possessed | UNKNOWN | Shots | Loose closure |
-| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
-| V1 `hILf-ySowIo` | 10–40 s | 247 | 720 | 473 | 26.94% | 38.75% | 6 | 100% |
-| V2 `ULUpcQXsRII` | 0–30 s | 50 | 724 | 674 | 7.18% | 90.19% | 0 | 100% |
-| V3 `Vr4105n-cPM` | 0–30 s | 540 | 888 | 348 | 13.85% | 72.97% | 2 | 100% |
-| V4 `WMWTbS8J2ec` | 0–30 s | 1782 | 1785 | 3 | 19.83% | 69.58% | 1 | 96.67% |
-| V5 `C-JjAlX2Dyc` | 10–40 s | 535 | 644 | 109 | 22.52% | 53.26% | 3 | 100% |
+Persistent Player Identity
+  = the real roster/person identity across games
+```
 
-### What this battery confirms
+### P1
 
-- **Gameplay scope split works.** P2 preserves temporal state through `GAMEPLAY_LIMITED` frames without widening the strict metric denominator.
-- **Loose-ball lifecycle is structurally stable.** Four clips close 100% of loose intervals; V4 closes 29/30 (96.67%) with one terminal interval at the clip boundary.
-- **Shot de-duplication is stable.** `rapid_unknown_retrigger_count = 0` across all five runs.
-- **P1 immutability holds.** `p1_state_not_mutated_rate = 100%` across all five runs.
-- **Observability is internally consistent.** Probe and normal runtime use the same canonical v5 collector.
-- **The wider engine scope does not create an uncontrolled event explosion.**
+P1 owns perception and tracking. A `track_id` is a technical identity, not a real-world player identity.
 
-### What this battery does not confirm
+### P2
 
-- **Formal basketball accuracy.** Event counts and coverage are diagnostics, not precision/recall.
-- **Team-aware correctness.** Neutral V1–V5 runs cannot prove pass, turnover or team attribution accuracy.
-- **Shooter attribution correctness.** Coverage exists, but truth still requires reviewed GT.
-- **V2 correctness.** V2 remains a difficult upstream case with high `UNKNOWN`; do not tune the motor specifically to make it emit more events without GT.
+P2 owns basketball understanding and must attribute events to a sufficiently stable **game-level player entity** so P3 can aggregate possessions, clips and analytics by player inside one game.
 
-The architecture/reconstruction question is closed. The remaining P2 question is:
+P2 must work without knowing that a player is, for example, `João Silva #7`.
 
-> **How accurate are these states and events against reviewed human truth?**
+### Jersey recognition
+
+Jersey recognition remains useful R&D and supporting evidence, but it is **not a P1 or P2 exit gate**. `shirt_num` and `player_name` may remain `UNKNOWN` without blocking basketball understanding.
+
+### P4.5
+
+Persistent real-world identity is planned for **P4.5 — Persistent Player Identity**. That phase may combine roster context, jersey evidence, appearance/ReID, previous games and human confirmation to resolve:
+
+```text
+game_1.game_player_03
+        ↓
+     João Silva
+        ↑
+game_2.game_player_07
+```
+
+The detailed identity boundary is recorded in [`docs/p1_p2_identity_boundary.md`](docs/p1_p2_identity_boundary.md).
 
 ---
 
-## Known-team Porto/Ovarense control
+## Product roadmap
 
-The canonical 0–60 s Porto/Ovarense control uses:
-
-```text
-model             weights/model_v1.1.0.pt
-player conf       0.40
-inference conf    0.03
-ball conf         0.075
-imgsz             960
-device            mps
-tracker           botsort.yaml
-single-forward    ON
-Smart Ball        OFF
-court calibration OFF
-```
-
-The current known-team baseline is structurally stable across Jersey OFF and Jersey ON. With the same video and P2 configuration, the Jersey-ON PARSeq run retained the same P2 shape:
+The current product roadmap is:
 
 ```text
-metric eligible frames       953
-engine eligible frames      1441
-events                        84
-shots                           8
-passes                          3
-turnovers                       5
-rebounds                        4
-loose-ball closure          100%
-p1_state_not_mutated_rate   100%
+P0 — Vision Foundation
+        ↓
+P1 — Perception + Tracking
+        ↓
+P2 — Basketball Understanding + Game-Level Player Identity
+        ↓
+P3 — Structured Analytics + Actions
+        ↓
+P4 — Tactical Intelligence
+        ↓
+P4.5 — Persistent Player Identity
+        ↓
+P5 — Mobile App
+        ↓
+P6 — Continuous Development / AI Coach
 ```
 
-This is evidence of runtime stability, **not basketball correctness**. Human GT is still required to decide whether each possession transition, pass, turnover, shot, rebound, actor and team attribution is correct.
+### P3 — Structured Analytics + Actions
 
----
+Turn P2 events into a usable review product: game/player summaries, timelines, automatically organized clips, filters, evidence-linked insights and review/action workflows.
 
-## Gameplay presence vs analysis quality
+**Exit idea:** a coach or player should no longer need to scrub manually through 60–90 minutes of video to find the possessions that deserve attention.
 
-The canonical runtime separates two questions:
+### P4 — Tactical Intelligence
 
-1. **Is basketball gameplay present strongly enough to preserve temporal continuity?**
-2. **Is this frame high-quality enough for strict spatial/metric analysis?**
+Move from isolated events to team and possession context: spacing, transition, screening/P&R actions, defensive behaviour, possession patterns and recurring team tendencies.
 
-Post-detector `CourtState` exposes:
+### P4.5 — Persistent Player Identity
+
+Resolve game-level player entities to persistent roster identities across games. Human confirmation is an acceptable part of the system; perfect automatic Jersey OCR is not required.
+
+### P5 — Mobile App
+
+Make CourtFlux part of the daily coach/player workflow: game feed, clip review, notifications, coach-to-player review, sharing, saved moments and eventually mobile upload/capture flows.
+
+### P6 — Continuous Development / AI Coach
+
+Use evidence from multiple real games to build player/team models, detect recurring patterns and meaningful change, suggest review/development priorities and measure progress over time.
+
+The intended long-term loop is:
 
 ```text
-NON_GAMEPLAY
-GAMEPLAY_LIMITED
-GAMEPLAY_ANALYSIS
+GAME
+  ↓
+ANALYSIS
+  ↓
+PATTERN
+  ↓
+FOCUS
+  ↓
+REVIEW / TRAIN
+  ↓
+NEXT GAME
+  ↓
+MEASURE AGAIN
 ```
 
-Conceptually:
-
-```text
-GAMEPLAY_LIMITED
-tracking / Identity / BallState / P2 continuity   ✅
-strict metric analysis                            ❌ / abstain
-
-GAMEPLAY_ANALYSIS
-tracking / Identity / BallState / P2 continuity   ✅
-strict metric analysis                            ✅
-```
-
-`CourtState.gameplay_present` owns the high-recall gameplay/continuity decision. `CourtState.analysis_eligible` remains the conservative gate for strict metric-scoped analysis.
-
-P2 metrics keep separate denominators for:
-
-- `metric_eligible_frames` — strict analysis scope;
-- `engine_eligible_frames` — frames where P2 may preserve/control basketball temporal state;
-- `limited_gameplay_frames` — gameplay retained for continuity but excluded from strict metric analysis.
+Full phase detail lives in [`docs/current_product_roadmap.md`](docs/current_product_roadmap.md).
 
 ---
 
@@ -255,186 +197,57 @@ Frame Loader
     ↓
 Gameplay Filter
     ↓
-Detector + Tracker + Identity v2
+Detector + Tracker + team / optional identity evidence
     ↓
-CourtState
-    ├── gameplay_present        → temporal continuity scope
-    └── analysis_eligible       → strict metric scope
-    ↓
-PlayerState[] + BallState + CourtState            ← P1
+PlayerState[] + BallState + CourtState             ← P1
     ↓
 P2EngineV1
     ↓
-control state + basketball event primitives       ← P2
+control state + basketball event primitives        ← P2
     ↓
-Structured statistics / observable actions        ← P3 later
+Structured analytics + review actions              ← P3 future
     ↓
-Tactical interpretation                           ← P4 later
+Tactical interpretation                            ← P4 future
 ```
 
-`services/pipeline.py` is the canonical state path. The old alternate analytics runtime and detection-only runtime split are retired.
-
-`services.p2.P2Pipeline` remains only a compatibility wrapper around the canonical P2 stage; it must not run a second event engine.
-
-`services/p2/metrics.py` owns the canonical `P2MetricsCollector`. Real-video probes and normal analyzer runs must reuse this collector.
-
-Smart Ball remains **OFF by default**.
+`services/pipeline.py` is the canonical state path. The old alternate analytics runtime and detection-only runtime split are retired. Smart Ball remains **OFF by default**.
 
 ---
 
-## P1 / Identity / Jersey boundary
+## Confidence and evidence rules
 
-Stable track/entity IDs are the operational identity source for P2.
+CourtFlux follows a conservative evidence contract:
 
-During P2:
-
-- `track_id` / stable entity identity is authoritative for possession and event attribution;
-- `shirt_num` and `player_name` are optional confidence-aware labels;
-- downstream basketball logic must work when Jersey/Identity is `UNKNOWN`;
-- roster information is validator-only and must never manufacture a visual jersey number;
-- `UNKNOWN` is preferred to a false identity lock;
-- Identity v2 is the downstream temporal evidence/lock layer.
-
-### Jersey backend contract restored in PR #50
-
-A P2 worker refactor had accidentally removed the per-job Jersey backend field and subprocess environment propagation. That allowed the Lab to request a backend while the analyzer silently fell back to `best_temporal`.
-
-PR #50 restored the contract:
-
-```text
-Lab request
-  ↓
-worker JobRequest.jersey_backend
-  ↓
-resolve_jersey_backend()
-  ↓
-BASKETBALL_JERSEY_BACKEND
-  ↓
-Jersey factory
-  ↓
-requested backend == actual backend, or fail closed
-```
-
-The canonical selected backend is now:
-
-```text
-parseq_soccernet
-```
-
-The runtime records `requested_backend` and `backend_contract_verified`, and the factory fails closed on an explicit requested/actual mismatch instead of silently running a different recognizer.
-
-### Verified Jersey-ON PARSeq baseline
-
-Run `20260916_135307_364002` verified the restored contract on the Porto/Ovarense 0–60 s clip:
-
-```text
-backend                       parseq_soccernet
-checkpoint                    weights/parseq_soccernet.ckpt
-requested backend             parseq_soccernet
-backend contract verified     true
-jersey attempts               438
-accepted raw observations     153
-identified tracks              23
-jersey identification rate   13.2%
-```
-
-Compared with the accidental `best_temporal` run, the old `8/9/4/6` output collapse disappeared and Jersey coverage improved materially. This does **not** establish Jersey accuracy.
-
-The current PARSeq baseline still shows substantial high-confidence `raw_not_in_roster` abstention and a concentration of `#10` observations. Because `#10` is valid for both teams, roster validation cannot determine whether those reads are true or false. This must be resolved with visual/human GT rather than threshold tuning.
-
-### Final Jersey gate
-
-The final Jersey/Identity gate remains part of P2 exit. Current priorities are:
-
-1. Review accepted/locked Jersey observations against visual truth.
-2. Measure false-lock and abstention behaviour by number/team/track.
-3. Use localized number ROI and/or soft frame ranking only if GT shows that input localization/selection is the error source.
-4. Keep Identity v2 as the single downstream temporal consensus/locking layer.
-5. Keep roster information validator-only.
-6. Freeze the Identity/Jersey configuration only after reviewed GT.
-
-Jersey may be ON for targeted gate experiments, but the basketball motor must continue to be validated independently with Jersey-OFF baselines.
+- `UNKNOWN` is a valid output;
+- weak evidence must not be promoted into confident truth;
+- semantic detections are supporting evidence, not event truth by themselves;
+- roster information must not manufacture a jersey number;
+- a stable track does not imply a known real-world player;
+- event counts and coverage are diagnostics until validated against human truth;
+- public/product claims must distinguish structural capability from measured accuracy.
 
 ---
 
-## Historical P1 baseline
+## Documentation and historical reference
 
-The accepted integrated P1 reference was the Porto/Ovarense `0–60 s` run `20260914_140057_772692`:
+The project keeps historical implementation and experiment records intentionally. They remain useful engineering references even when a later roadmap decision changes a phase boundary.
 
-```text
-model               weights/model_v1.1.0.pt
-segment             0–60 s
-player conf         0.40
-inference conf      0.03
-ball conf           0.075
-imgsz               960
-device              mps
-tracker             botsort.yaml
-single-forward      ON
-Smart Ball          OFF
-Jersey              ON
-jersey interval     24 frames
-court calibration   OFF
+Use this order when documents disagree about **current product scope or phase ownership**:
 
-analysis FPS                     18.60
-detector                         44.81 ms/frame
-total pipeline                   49.43 ms/frame
-ball effective trajectory        89.51%
-team classification coverage     99.5%
-```
+1. [`README.md`](README.md) — current project status and viewer-facing summary.
+2. [`docs/current_product_roadmap.md`](docs/current_product_roadmap.md) — current P0→P6 product roadmap.
+3. [`docs/p1_p2_identity_boundary.md`](docs/p1_p2_identity_boundary.md) — current identity/phase boundary.
+4. [`docs/p2_roadmap.md`](docs/p2_roadmap.md) — detailed P2 technical contract and execution history.
+5. [`docs/system_quality_gate.md`](docs/system_quality_gate.md) — perception/ball quality evaluation contract where applicable.
+6. [`docs/p1_roadmap.md`](docs/p1_roadmap.md) — historical P1 execution record.
+7. [`docs/p1_jersey_exit_gate.md`](docs/p1_jersey_exit_gate.md) — historical pre-merge Jersey/Identity gate record.
+8. [`docs/p0_foundation_snapshot.md`](docs/p0_foundation_snapshot.md) — frozen historical P0 exit snapshot.
 
-This is a historical P1 acceptance baseline, not a formal Jersey accuracy result.
+Older documents are **not deleted or rewritten merely because the roadmap evolved**. When old wording conflicts with current phase ownership, the current roadmap/boundary documents above take precedence while the old material remains available as historical reference.
 
 ---
 
-## Current validation sequence
-
-Completed:
-
-1. ✅ Reconstruct and integrate one canonical P2 motor.
-2. ✅ Separate gameplay presence from strict analysis quality.
-3. ✅ Rerun the frozen V1–V5 battery with Jersey OFF.
-4. ✅ Validate loose lifecycle closure, shot de-duplication, reset semantics and P1 immutability cross-video.
-5. ✅ Collapse probe/runtime observability onto the single canonical `p2_metrics_v5` collector.
-6. ✅ Run the Porto/Ovarense known-team control and establish a reproducible P2 baseline.
-7. ✅ Restore and verify the selected `parseq_soccernet` Jersey runtime contract.
-8. ✅ Confirm that targeted Jersey ON does not mutate the established P2 output shape.
-
-Next:
-
-9. **Human-label the frozen clips** for possession/control transitions, loose-ball lifecycle, passes, turnovers, shots, outcomes and actor/team attribution.
-10. Compare predictions against reviewed GT and calculate state/event correctness metrics.
-11. Calibrate only where the GT error analysis supports a motor change.
-12. Rerun the frozen GT set and freeze the validated Jersey-OFF P2 baseline.
-13. Execute the final Jersey/Identity GT gate using the restored PARSeq baseline.
-14. Apply ROI/frame-selection changes only when supported by Jersey GT error analysis.
-15. Freeze Identity/Jersey and promote P2 only when both basketball and Jersey exit gates are acceptable.
-
-Canonical Porto/Ovarense probe:
-
-```bash
-git switch main
-git pull --ff-only
-python evaluation/p2_real_video_probe.py \
-  --video "https://www.youtube.com/watch?v=OwiQgAMqyUs" \
-  --start 0 \
-  --end 60 \
-  --model weights/model_v1.1.0.pt \
-  --device mps \
-  --no-jersey
-```
-
-For a targeted Jersey gate run, use the Lab/worker contract and verify that the resulting summary reports:
-
-```text
-backend=parseq_soccernet
-requested_backend=parseq_soccernet
-backend_contract_verified=true
-```
-
----
-
-## Local development
+## Development
 
 ### Python environment
 
@@ -455,7 +268,7 @@ export WORKER_PORT="8787"
 python3 -m services.worker_api
 ```
 
-When changing worker/backend code, restart the worker process before validating a new run; a long-lived Python worker keeps the previously imported module code in memory.
+When worker/backend code changes, restart the worker before validating a new run; a long-lived Python worker keeps previously imported module code in memory.
 
 ### Web Lab
 
@@ -471,26 +284,14 @@ Open:
 http://localhost:3000/lab
 ```
 
-Generated local evaluation/worker artifacts are disposable once their conclusions are recorded durably in the README or current roadmap.
-
 ---
 
-## Summary
+## Status summary
 
-✅ **P0 complete**
+- ✅ P0 complete
+- ✅ P1 complete
+- 🧪 P2 engineering core integrated; reviewed human GT + game-level entity validation pending
+- ⏳ P3 next product phase after P2 validation/freeze
+- ⏳ P4, P4.5, P5 and P6 are future roadmap phases
 
-✅ **P1 complete; PR #43 merged**
-
-✅ **P2 canonical runtime integrated into `main`**
-
-✅ **P2 architecture/implementation closed**
-
-✅ **P2 structural stability + multi-video/known-team baseline confirmed**
-
-✅ **Selected SoccerNet PARSeq Jersey runtime contract restored and verified through PR #50**
-
-🧪 **Current work: human GT → measured calibration → Jersey-OFF freeze → final Jersey/Identity gate**
-
-Current priority:
-
-> Measure basketball correctness against reviewed human truth. Do not tune the basketball motor from visual intuition alone. Keep Jersey evaluation evidence-driven and fail closed on backend/runtime mismatches.
+**Current engineering focus:** validate basketball correctness and game-level player attribution against reviewed truth, preserve conservative uncertainty, and avoid making Jersey/name recognition a blocker for P3.
