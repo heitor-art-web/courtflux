@@ -35,7 +35,7 @@
 }
 
 .footerLogo {
-  height: 58px !important;
+  height: 48px !important;
 }
 
 .nav a {
@@ -144,10 +144,81 @@
   color: #fff !important;
 }
 
+/* Featured Teams card: keep background and all pricing copy coupled so
+   white text can never land on the light pricing surface. */
+:global(article[class*="priceCardFeatured"]) {
+  background: #06131f !important;
+  border-color: rgba(255, 255, 255, .10) !important;
+  color: #fff !important;
+}
+
+:global(article[class*="priceCardFeatured"]) :global([class*="price"]) {
+  color: #fff !important;
+}
+
+:global(article[class*="priceCardFeatured"]) :global([class*="price"]) small,
+:global(article[class*="priceCardFeatured"]) :global([class*="annualPrice"]),
+:global(article[class*="priceCardFeatured"]) :global([class*="priceDescription"]),
+:global(article[class*="priceCardFeatured"]) :global([class*="usage"]) span,
+:global(article[class*="priceCardFeatured"]) :global([class*="featureList"]) li {
+  color: #d5e0e6 !important;
+}
+
+:global(article[class*="priceCardFeatured"]) :global([class*="usage"]) {
+  background: rgba(255, 255, 255, .075) !important;
+}
+
+:global(article[class*="priceCardFeatured"]) :global([class*="usage"]) strong,
+:global(article[class*="priceCardFeatured"]) h3 {
+  color: #fff !important;
+}
+
+/* Final CTA is another dark surface; pin all copy/button colours explicitly
+   instead of relying on inherited section colours. */
+:global(section[class*="finalCta"]) {
+  background: #06131f !important;
+  color: #fff !important;
+}
+
+:global(section[class*="finalCta"]) :global([class*="eyebrow"]) {
+  color: #ffc19a !important;
+}
+
+:global(section[class*="finalCta"]) :global([class*="sectionTitle"]) {
+  color: #fff !important;
+}
+
+:global(section[class*="finalCta"]) :global([class*="sectionTitle"]) span {
+  color: #ff9a5b !important;
+}
+
+:global(section[class*="finalCta"]) :global([class*="sectionCopy"]) {
+  color: #edf2f5 !important;
+}
+
+:global(section[class*="finalCta"]) :global([class*="heroSecondaryButton"]) {
+  border-color: rgba(255, 255, 255, .50) !important;
+  background: rgba(255, 255, 255, .08) !important;
+  color: #fff !important;
+}
+
 .footer {
-  padding-top: 38px !important;
-  border-top: 1px solid rgba(10, 23, 34, .11) !important;
+  padding: 30px 0 52px !important;
+  border-top: 1px solid rgba(10, 23, 34, .14) !important;
   background: transparent;
+  color: #0a1722 !important;
+}
+
+.footer :global([class*="footerMeta"]) {
+  color: #59656e !important;
+}
+
+.footer :global([class*="footerLinks"]) a {
+  color: #3f4d57 !important;
+}
+
+.footer :global([class*="footerLinks"]) a:hover {
+  color: #06131f !important;
 }
 
 @media (max-width: 900px) {
@@ -202,6 +273,6 @@
   }
 
   .footerLogo {
-    height: 52px !important;
+    height: 44px !important;
   }
 }
