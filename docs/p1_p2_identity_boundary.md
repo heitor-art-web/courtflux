@@ -110,3 +110,7 @@ P6 — Continuous Development / AI Coach
 ```
 
 The immediate technical priority is therefore not perfect Jersey OCR. It is reliable game-level player continuity so P3 can aggregate events and clips per player within a game.
+
+## Historical-reference rule
+
+Older P1/P2 documents remain valid as records of experiments, baselines and implementation decisions. Their historical Jersey/Identity exit-gate wording must not be read as the current product phase boundary.
