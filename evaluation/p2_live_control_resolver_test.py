@@ -63,7 +63,10 @@ class P2LiveControlResolverTest(unittest.TestCase):
         engine.process(frame_state(1, player_states=[], ball_state=missing_ball(1)))
         engine.process(frame_state(2, player_states=[], ball_state=missing_ball(2)))
 
-        preflight = frame_state(3, player_states=[], ball_state=ball(3, 100, 70))
+        # Keep the ball above the rim and within the frozen <=8 normalized-distance
+        # challenger, but deliberately outside ShotEventTrackerV1's near_x<=2.5 rim-width
+        # trajectory-start gate. This isolates the live resolver preflight path.
+        preflight = frame_state(3, player_states=[], ball_state=ball(3, 170, 70))
         engine.process(preflight)
         possession = preflight.diagnostics["p2"]["possession"]
         live = preflight.diagnostics["p2"]["live_control"]
@@ -71,6 +74,7 @@ class P2LiveControlResolverTest(unittest.TestCase):
         self.assertEqual(possession["control_state"], "shot_flight")
         self.assertEqual(possession["live_control_source"], "frozen_shot_preflight")
         self.assertTrue(live["shot_preflight"]["signal"])
+        self.assertFalse(live["shot_active"])
 
         latched = frame_state(4, player_states=[], ball_state=ball(4, 250, 250))
         engine.process(latched)
@@ -89,26 +93,28 @@ class P2LiveControlResolverTest(unittest.TestCase):
             pass_min_displacement_heights=0.65,
         )
         for frame_id in range(3):
-            owner = player(frame_id, 1, (10, 10, 30, 50))
+            owner = player(frame_id, 1, (10, 180, 30, 220))
             engine.process(
                 frame_state(
                     frame_id,
                     player_states=[owner],
-                    ball_state=ball(frame_id, 20, 30),
+                    ball_state=ball(frame_id, 20, 200),
                 )
             )
 
         engine.process(frame_state(3, player_states=[], ball_state=missing_ball(3)))
         engine.process(frame_state(4, player_states=[], ball_state=missing_ball(4)))
-        receiver5 = player(5, 2, (65, 10, 95, 50))
+        # Keep this synthetic pass trajectory well below the test rim so the shot tracker
+        # cannot pre-empt the receiver-evidence path we are validating.
+        receiver5 = player(5, 2, (65, 180, 95, 220))
         engine.process(
-            frame_state(5, player_states=[receiver5], ball_state=ball(5, 80, 30))
+            frame_state(5, player_states=[receiver5], ball_state=ball(5, 80, 200))
         )
-        receiver6 = player(6, 2, (70, 10, 100, 50))
+        receiver6 = player(6, 2, (70, 180, 100, 220))
         classified = frame_state(
             6,
             player_states=[receiver6],
-            ball_state=ball(6, 85, 30),
+            ball_state=ball(6, 85, 200),
         )
         engine.process(classified)
         self.assertEqual(
@@ -120,7 +126,7 @@ class P2LiveControlResolverTest(unittest.TestCase):
             "distinct_receiver_pass",
         )
 
-        latched = frame_state(7, player_states=[], ball_state=ball(7, 90, 30))
+        latched = frame_state(7, player_states=[], ball_state=ball(7, 90, 200))
         engine.process(latched)
         possession = latched.diagnostics["p2"]["possession"]
         self.assertEqual(possession["tracker_control_state"], "unknown")
