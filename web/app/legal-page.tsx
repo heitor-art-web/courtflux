@@ -1,9 +1,9 @@
-import Image from "next/image";
 import Link from "next/link";
 import type { ReactNode } from "react";
 import shared from "@/data/pages/shared.json";
 import { localizePublicHref, type Locale } from "@/lib/i18n/config";
 import { localizeContent } from "@/lib/i18n/public-content";
+import { PublicMarketingLayout } from "./public-marketing-shell";
 import styles from "./legal.module.css";
 
 type RichTextPart = {
@@ -60,41 +60,26 @@ export function LegalPage({
 
   return (
     <main className={styles.legalPage}>
-      <header className={styles.header}>
-        <Link className={styles.brand} href={homeHref} aria-label="CourtFlux home">
-          <Image
-            src="/brand/light_logo_safe_crop.png"
-            alt={localizedShared.brandAlt}
-            width={320}
-            height={255}
-            priority
-          />
-        </Link>
-        <nav className={styles.nav} aria-label="Trust and legal navigation">
-          {localizedShared.legalNavigation.map((item) => (
-            <Link href={item.href} key={item.href}>{item.label}</Link>
-          ))}
-        </nav>
-      </header>
-
-      <div className={styles.content}>
-        <section className={styles.hero}>
-          <div className={styles.eyebrow}>{eyebrow}</div>
-          <h1>{title}</h1>
-          <p>{intro}</p>
-          {notice ? <div className={styles.notice}>{notice}</div> : null}
-        </section>
-        <div className={styles.sections}>{children}</div>
-      </div>
-
-      <footer className={styles.footer}>
-        <span>{localizedShared.legalFooter.copyright}</span>
-        <div className={styles.footerLinks}>
-          {localizedShared.legalFooter.links.map((item) => (
-            <Link href={item.href} key={item.href}>{item.label}</Link>
-          ))}
+      <PublicMarketingLayout
+        homeHref={homeHref}
+        navigation={localizedShared.legalNavigation}
+        navLabel="Trust and legal navigation"
+        brandAlt={localizedShared.brandAlt}
+        footer={{
+          meta: localizedShared.legalFooter.copyright,
+          links: localizedShared.legalFooter.links,
+        }}
+      >
+        <div className={styles.content}>
+          <section className={styles.hero}>
+            <div className={styles.eyebrow}>{eyebrow}</div>
+            <h1>{title}</h1>
+            <p>{intro}</p>
+            {notice ? <div className={styles.notice}>{notice}</div> : null}
+          </section>
+          <div className={styles.sections}>{children}</div>
         </div>
-      </footer>
+      </PublicMarketingLayout>
     </main>
   );
 }

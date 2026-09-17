@@ -1,6 +1,4 @@
 import type { Metadata } from "next";
-import Image from "next/image";
-import Link from "next/link";
 import englishContent from "@/data/pages/home.json";
 import { getFaqSection, type HomeContent } from "@/lib/home-content";
 import { localizePublicHref } from "@/lib/i18n/config";
@@ -9,8 +7,8 @@ import { getRequestLocale } from "@/lib/i18n/request";
 import { metadataFromContent } from "@/lib/page-content";
 import { getSiteUrl } from "@/lib/site";
 import { renderHomeSection } from "./home-sections";
+import { PublicMarketingLayout } from "./public-marketing-shell";
 import styles from "./home.module.css";
-import polish from "./home-polish.module.css";
 
 const siteUrl = getSiteUrl();
 const sourceContent = englishContent as HomeContent;
@@ -90,43 +88,16 @@ export default async function HomePage() {
         dangerouslySetInnerHTML={{ __html: JSON.stringify(structuredData).replace(/</g, "\\u003c") }}
       />
 
-      <header className={`${styles.siteHeader} ${polish.header}`}>
-        <Link href={homeHref} className={`${styles.logoLink} ${polish.logoPanel}`} aria-label="CourtFlux home">
-          <Image
-            className={`${styles.logo} ${polish.headerLogo}`}
-            src="/brand/light_logo_safe_crop.png"
-            alt="CourtFlux — Basketball Intelligence"
-            width={320}
-            height={255}
-            priority
-          />
-        </Link>
-        <nav className={`${styles.nav} ${polish.nav}`} aria-label="Primary navigation">
-          {content.navigation.map((item) => (
-            <Link className={item.cta ? styles.navCta : undefined} href={item.href} key={`${item.href}-${item.label}`}>
-              {item.label}
-            </Link>
-          ))}
-        </nav>
-      </header>
-
-      <div className={styles.shell}>
-        {content.sections.map(renderHomeSection)}
-
-        <footer className={`${styles.footer} ${polish.footer}`}>
-          <div className={styles.footerInner}>
-            <div>
-              <div className={polish.footerBrandPanel}>
-                <Image className={`${styles.footerLogo} ${polish.footerLogo}`} src="/brand/light_logo_safe_crop.png" alt="CourtFlux — Basketball Intelligence" width={320} height={255} />
-              </div>
-              <div className={styles.footerMeta}>{content.footer.meta}</div>
-            </div>
-            <div className={styles.footerLinks}>
-              {content.footer.links.map((item) => <Link href={item.href} key={`${item.href}-${item.label}`}>{item.label}</Link>)}
-            </div>
-          </div>
-        </footer>
-      </div>
+      <PublicMarketingLayout
+        homeHref={homeHref}
+        navigation={content.navigation}
+        navLabel="Primary navigation"
+        footer={content.footer}
+      >
+        <div className={styles.shell}>
+          {content.sections.map(renderHomeSection)}
+        </div>
+      </PublicMarketingLayout>
     </main>
   );
 }
