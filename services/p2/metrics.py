@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import math
 from typing import Any
 
 from services.p2.metrics_base_v5 import P2MetricsCollector as _BaseP2MetricsCollector
@@ -14,6 +15,10 @@ class P2MetricsCollector(_BaseP2MetricsCollector):
     relabeled as ``shot_flight``. ``soft_acquisition_challenger_state`` is another additive
     evaluation-only channel for a conservative ownerless/no-flight possession hypothesis.
     Neither channel mutates live P2 state or live metrics.
+
+    Shot-preflight diagnostics are causal per-frame observations computed from the current
+    FrameState only. They expose ball/rim geometry and short temporal trends for evaluating
+    an online shot-preactivation challenger without changing shot/control decisions.
     """
 
     RESOLVED_CONTROL_POLICY = (
@@ -26,6 +31,10 @@ class P2MetricsCollector(_BaseP2MetricsCollector):
         "diagnostic_only;live_unknown;engine_eligible;owner_absent;thresholded_candidate_absent;"
         "flight_inactive;shot_inactive;same_raw_best_track>=4_frames;raw_best_mean_score>=0.35"
     )
+    SHOT_PREFLIGHT_POLICY = (
+        "diagnostic_only;causal_current_and_past_frames_only;nearest_rim_geometry;"
+        "no_live_or_resolved_state_mutation"
+    )
 
     def __init__(self) -> None:
         super().__init__()
@@ -35,6 +44,11 @@ class P2MetricsCollector(_BaseP2MetricsCollector):
         self._soft_score_sum = 0.0
         self._soft_score_peak = 0.0
         self._soft_last_frame: int | None = None
+        self._preflight_last_frame: int | None = None
+        self._preflight_last_distance_norm: float | None = None
+        self._preflight_last_relative_y: float | None = None
+        self._preflight_approach_streak = 0
+        self._preflight_rising_streak = 0
 
     @staticmethod
     def _same_reset(a: dict[str, Any], b: dict[str, Any]) -> bool:
@@ -55,6 +69,169 @@ class P2MetricsCollector(_BaseP2MetricsCollector):
         if frame_id < 0:
             return None
         return max(0, frame_id - flight_frames + 1)
+
+    @staticmethod
+    def _preflight_ball_position(frame_state: Any) -> tuple[float, float] | None:
+        ball_state = getattr(frame_state, "ball_state", None)
+        if ball_state is None or not bool(getattr(ball_state, "available", False)):
+            return None
+        position_fn = getattr(ball_state, "position", None)
+        if not callable(position_fn):
+            return None
+        position = position_fn()
+        if position is None:
+            return None
+        try:
+            return float(position[0]), float(position[1])
+        except (TypeError, ValueError, IndexError):
+            return None
+
+    @staticmethod
+    def _preflight_direct_observed(frame_state: Any) -> bool:
+        ball_state = getattr(frame_state, "ball_state", None)
+        if ball_state is None:
+            return False
+        status = getattr(ball_state, "status", None)
+        status_name = str(getattr(status, "name", status) or "").strip().lower()
+        return bool(status_name == "observed" and P2MetricsCollector._preflight_ball_position(frame_state))
+
+    @staticmethod
+    def _preflight_rims(frame_state: Any) -> list[tuple[float, float, float, float]]:
+        court_state = getattr(frame_state, "court_state", None)
+        if court_state is None:
+            return []
+        result: list[tuple[float, float, float, float]] = []
+        for evidence in list(getattr(court_state, "basket_evidence", None) or []):
+            if not isinstance(evidence, dict) or str(evidence.get("kind") or "").lower() != "rim":
+                continue
+            raw = evidence.get("bbox_px", evidence.get("box", evidence.get("bbox")))
+            if not isinstance(raw, (list, tuple)) or len(raw) < 4:
+                continue
+            try:
+                x1, y1, x2, y2 = [float(value) for value in raw[:4]]
+            except (TypeError, ValueError):
+                continue
+            if x2 > x1 and y2 > y1:
+                result.append((x1, y1, x2, y2))
+        return result
+
+    def _update_shot_preflight(self, row: dict[str, Any], frame_state: Any) -> None:
+        try:
+            frame_id = int(row.get("frame_id", -1))
+        except (TypeError, ValueError):
+            frame_id = -1
+        position = self._preflight_ball_position(frame_state)
+        rims = self._preflight_rims(frame_state)
+        direct_observed = self._preflight_direct_observed(frame_state)
+
+        rim = None
+        if position is not None and rims:
+            bx, by = position
+            rim = min(
+                rims,
+                key=lambda candidate: (
+                    ((candidate[0] + candidate[2]) / 2.0 - bx) ** 2
+                    + ((candidate[1] + candidate[3]) / 2.0 - by) ** 2
+                ),
+            )
+
+        if frame_id < 0 or position is None or rim is None:
+            self._preflight_last_frame = None
+            self._preflight_last_distance_norm = None
+            self._preflight_last_relative_y = None
+            self._preflight_approach_streak = 0
+            self._preflight_rising_streak = 0
+            row.update(
+                {
+                    "shot_preflight_available": False,
+                    "shot_preflight_direct_observed": direct_observed,
+                    "shot_preflight_near_x": False,
+                    "shot_preflight_above": False,
+                    "shot_preflight_rim_band": False,
+                    "shot_preflight_trajectory_start": False,
+                    "shot_preflight_ball_to_rim_distance_norm": None,
+                    "shot_preflight_horizontal_distance_rim_widths": None,
+                    "shot_preflight_relative_y_rim_heights": None,
+                    "shot_preflight_delta_distance_norm": None,
+                    "shot_preflight_delta_relative_y": None,
+                    "shot_preflight_approach_streak": 0,
+                    "shot_preflight_rising_streak": 0,
+                    "shot_preflight_policy": self.SHOT_PREFLIGHT_POLICY,
+                }
+            )
+            return
+
+        bx, by = position
+        x1, y1, x2, y2 = rim
+        width = max(1.0, x2 - x1)
+        height = max(1.0, y2 - y1)
+        rim_x = (x1 + x2) / 2.0
+        rim_y = (y1 + y2) / 2.0
+        dx = bx - rim_x
+        dy = by - rim_y
+        horizontal_widths = abs(dx) / width
+        relative_y = dy / height
+        distance_norm = math.hypot(dx / width, dy / height)
+        near_x = horizontal_widths <= 2.5
+        above = relative_y < -0.20
+        rim_band = bool((-1.3 <= relative_y <= 1.3) and near_x)
+        trajectory_start = bool(above and near_x)
+
+        consecutive = bool(
+            direct_observed
+            and self._preflight_last_frame is not None
+            and frame_id == self._preflight_last_frame + 1
+            and self._preflight_last_distance_norm is not None
+            and self._preflight_last_relative_y is not None
+        )
+        delta_distance = None
+        delta_relative_y = None
+        if consecutive:
+            delta_distance = distance_norm - float(self._preflight_last_distance_norm)
+            delta_relative_y = relative_y - float(self._preflight_last_relative_y)
+            self._preflight_approach_streak = (
+                self._preflight_approach_streak + 1 if delta_distance < 0.0 else 0
+            )
+            self._preflight_rising_streak = (
+                self._preflight_rising_streak + 1 if delta_relative_y < 0.0 else 0
+            )
+        else:
+            self._preflight_approach_streak = 0
+            self._preflight_rising_streak = 0
+
+        if direct_observed:
+            self._preflight_last_frame = frame_id
+            self._preflight_last_distance_norm = distance_norm
+            self._preflight_last_relative_y = relative_y
+        else:
+            self._preflight_last_frame = None
+            self._preflight_last_distance_norm = None
+            self._preflight_last_relative_y = None
+            self._preflight_approach_streak = 0
+            self._preflight_rising_streak = 0
+
+        row.update(
+            {
+                "shot_preflight_available": True,
+                "shot_preflight_direct_observed": direct_observed,
+                "shot_preflight_near_x": near_x,
+                "shot_preflight_above": above,
+                "shot_preflight_rim_band": rim_band,
+                "shot_preflight_trajectory_start": trajectory_start,
+                "shot_preflight_ball_to_rim_distance_norm": round(distance_norm, 6),
+                "shot_preflight_horizontal_distance_rim_widths": round(horizontal_widths, 6),
+                "shot_preflight_relative_y_rim_heights": round(relative_y, 6),
+                "shot_preflight_delta_distance_norm": (
+                    None if delta_distance is None else round(delta_distance, 6)
+                ),
+                "shot_preflight_delta_relative_y": (
+                    None if delta_relative_y is None else round(delta_relative_y, 6)
+                ),
+                "shot_preflight_approach_streak": int(self._preflight_approach_streak),
+                "shot_preflight_rising_streak": int(self._preflight_rising_streak),
+                "shot_preflight_policy": self.SHOT_PREFLIGHT_POLICY,
+            }
+        )
 
     def _reset_soft_acquisition(self) -> None:
         self._soft_track_id = None
@@ -274,6 +451,7 @@ class P2MetricsCollector(_BaseP2MetricsCollector):
         row["resolved_control_provisional"] = False
         row["resolved_control_policy"] = self.RESOLVED_CONTROL_POLICY
 
+        self._update_shot_preflight(row, frame_state)
         self._update_soft_acquisition(row)
 
         shot_active = bool(row.get("shot_active", False))
