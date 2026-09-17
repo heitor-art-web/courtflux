@@ -45,7 +45,7 @@ P3 — Structured Analytics + Actions                         ⏳ NEXT
 P4 — Tactical Intelligence                                  ⏳ FUTURE
 P4.5 — Persistent Player Identity                           ⏳ FUTURE
 P5 — Mobile App                                             ⏳ FUTURE
-P6 — Continuous Development / AI Coach                     ⏳ FUTURE
+P6 — Continuous Development / AI Coach                      ⏳ FUTURE
 ```
 
 The identity distinction is fundamental:
