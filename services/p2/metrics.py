@@ -27,6 +27,7 @@ class P2MetricsCollector(_BaseP2MetricsCollector):
             {
                 "candidate_track_id": possession.get("candidate_track_id"),
                 "candidate_frames": possession.get("candidate_frames"),
+                "candidate_score": possession.get("candidate_score"),
                 "candidate_peak_score": possession.get("candidate_peak_score"),
                 "candidate_threshold": possession.get("candidate_threshold"),
                 "candidate_required_frames": possession.get("candidate_required_frames"),
