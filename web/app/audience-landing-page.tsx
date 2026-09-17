@@ -97,7 +97,7 @@ export function AudienceLandingPage({ content, locale = "en" }: { content: Audie
 
       <header className={styles.header}>
         <Link href={homeHref} aria-label="CourtFlux home" className={styles.logoLink}>
-          <Image src="/brand/horizontal_logo_safe_crop.png" alt="CourtFlux — Basketball Intelligence" width={660} height={185} className={styles.logo} priority />
+          <Image src="/brand/light_logo_safe_crop.png" alt="CourtFlux — Basketball Intelligence" width={320} height={255} className={styles.logo} priority />
         </Link>
         <nav className={styles.nav} aria-label="Audience landing page navigation">
           {content.navigation.map((item) => <Link href={item.href} className={item.cta ? styles.navCta : undefined} key={item.href}>{item.label}</Link>)}
