@@ -106,7 +106,6 @@ def _clip_diagnostics(clip: str, run_id: str) -> dict[str, Any]:
     core_frames = 0
     core_unknown = 0
 
-    previous_reset_count: int | None = None
     for frame_id, truth_state in sorted(truth.items()):
         if truth_state not in CORE_STATES:
             continue
@@ -118,8 +117,13 @@ def _clip_diagnostics(clip: str, run_id: str) -> dict[str, Any]:
             continue
 
         reset_count = _as_int(row.get("reset_count"), 0)
-        reset_on_frame = previous_reset_count is not None and reset_count > previous_reset_count
-        previous_reset_count = reset_count
+        previous_row = by_frame.get(frame_id - 1)
+        previous_reset_count = (
+            reset_count
+            if previous_row is None
+            else _as_int(previous_row.get("reset_count"), reset_count)
+        )
+        reset_on_frame = previous_row is not None and reset_count > previous_reset_count
 
         predicted = str(row.get("live_control_state", row.get("control_state")) or "unknown")
         if predicted != "unknown":
