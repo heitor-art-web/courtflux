@@ -98,15 +98,29 @@ def _optional_candidate_signals(rows: list[dict[str, Any]]) -> dict[str, Any] | 
 
     present = [row for row in rows if row.get("candidate_track_id") is not None]
     below_threshold = 0
+    above_threshold = 0
     lock_pending = 0
+    lock_ready = 0
+    receiver_evidence = 0
+    distinct_from_origin = 0
+    same_as_origin = 0
+    supported_distinct_receiver = 0
+    supported_without_receiver = 0
+    candidate_scores: list[float] = []
+
     for row in present:
         score = row.get("candidate_score")
         threshold = row.get("candidate_threshold")
         frames = row.get("candidate_frames")
         required = row.get("candidate_required_frames")
         try:
-            if score is not None and threshold is not None and float(score) < float(threshold):
-                below_threshold += 1
+            if score is not None:
+                candidate_scores.append(float(score))
+            if score is not None and threshold is not None:
+                if float(score) < float(threshold):
+                    below_threshold += 1
+                else:
+                    above_threshold += 1
         except (TypeError, ValueError):
             pass
         try:
@@ -116,17 +130,54 @@ def _optional_candidate_signals(rows: list[dict[str, Any]]) -> dict[str, Any] | 
                 and float(score) >= float(threshold)
                 and frames is not None
                 and required is not None
-                and int(frames) < int(required)
             ):
-                lock_pending += 1
+                if int(frames) < int(required):
+                    lock_pending += 1
+                else:
+                    lock_ready += 1
         except (TypeError, ValueError):
             pass
+
+        if bool(row.get("pass_flight_receiver_evidence", False)):
+            receiver_evidence += 1
+
+        candidate_track = row.get("candidate_track_id")
+        origin_track = row.get("flight_origin_track_id")
+        if candidate_track is not None and origin_track is not None:
+            try:
+                if int(candidate_track) != int(origin_track):
+                    distinct_from_origin += 1
+                    if bool(row.get("flight_supported", False)):
+                        supported_distinct_receiver += 1
+                else:
+                    same_as_origin += 1
+            except (TypeError, ValueError):
+                pass
+        if bool(row.get("flight_supported", False)) and not bool(
+            row.get("pass_flight_receiver_evidence", False)
+        ):
+            supported_without_receiver += 1
 
     return {
         "candidate_present_frames": len(present),
         "candidate_track_switches": _track_switches(rows, "candidate_track_id"),
         "candidate_below_threshold_frames": below_threshold,
+        "candidate_above_threshold_frames": above_threshold,
         "candidate_lock_pending_frames": lock_pending,
+        "candidate_lock_ready_frames": lock_ready,
+        "candidate_distinct_from_flight_origin_frames": distinct_from_origin,
+        "candidate_same_as_flight_origin_frames": same_as_origin,
+        "receiver_evidence_frames": receiver_evidence,
+        "flight_supported_with_distinct_receiver_frames": supported_distinct_receiver,
+        "flight_supported_without_receiver_frames": supported_without_receiver,
+        "max_candidate_score": (
+            None if not candidate_scores else round(max(candidate_scores), 6)
+        ),
+        "mean_candidate_score": (
+            None
+            if not candidate_scores
+            else round(sum(candidate_scores) / len(candidate_scores), 6)
+        ),
     }
 
 
@@ -202,6 +253,9 @@ def analyze_interval(
     lost_frames_positive = sum(int(row.get("lost_frames", 0) or 0) > 0 for row in interval_rows)
     flight_active = sum(bool(row.get("flight_active", False)) for row in interval_rows)
     flight_supported = sum(bool(row.get("flight_supported", False)) for row in interval_rows)
+    receiver_evidence = sum(
+        bool(row.get("pass_flight_receiver_evidence", False)) for row in interval_rows
+    )
     shot_active = sum(bool(row.get("shot_active", False)) for row in interval_rows)
     predicted_shot_flight = int(state_counts.get("shot_flight", 0))
     predicted_unknown = int(state_counts.get("unknown", 0))
@@ -223,6 +277,7 @@ def analyze_interval(
         "lost_frames_positive": lost_frames_positive,
         "flight_active_frames": flight_active,
         "flight_supported_frames": flight_supported,
+        "receiver_evidence_frames": receiver_evidence,
         "shot_active_frames": shot_active,
         "predicted_shot_flight_frames": predicted_shot_flight,
         "predicted_unknown_frames": predicted_unknown,
@@ -246,6 +301,7 @@ def analyze_interval(
             ),
             "pass_truth_with_flight_active_frames": flight_active,
             "pass_truth_with_flight_supported_frames": flight_supported,
+            "pass_truth_with_receiver_evidence_frames": receiver_evidence,
             "pass_truth_predicted_shot_flight_frames": predicted_shot_flight,
             "pass_truth_predicted_unknown_frames": predicted_unknown,
         }
@@ -305,6 +361,7 @@ def diagnose(
                 "lost_frames_positive": 0,
                 "flight_active_frames": 0,
                 "flight_supported_frames": 0,
+                "receiver_evidence_frames": 0,
                 "shot_active_frames": 0,
                 "predicted_shot_flight_frames": 0,
                 "predicted_unknown_frames": 0,
@@ -319,6 +376,7 @@ def diagnose(
             "lost_frames_positive",
             "flight_active_frames",
             "flight_supported_frames",
+            "receiver_evidence_frames",
             "shot_active_frames",
             "predicted_shot_flight_frames",
             "predicted_unknown_frames",
