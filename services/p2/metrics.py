@@ -137,6 +137,14 @@ class P2MetricsCollector(_BaseP2MetricsCollector):
                 "candidate_peak_score": possession.get("candidate_peak_score"),
                 "candidate_threshold": possession.get("candidate_threshold"),
                 "candidate_required_frames": possession.get("candidate_required_frames"),
+                "raw_best_track_id": possession.get("raw_best_track_id"),
+                "raw_best_score": possession.get("raw_best_score"),
+                "raw_best_above_threshold": bool(
+                    possession.get("raw_best_above_threshold", False)
+                ),
+                "raw_best_distinct_from_flight_origin": bool(
+                    possession.get("raw_best_distinct_from_flight_origin", False)
+                ),
                 "pass_flight_receiver_evidence": bool(
                     possession.get("pass_flight_receiver_evidence", False)
                 ),
