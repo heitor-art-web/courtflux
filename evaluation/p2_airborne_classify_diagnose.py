@@ -255,10 +255,10 @@ def diagnose(
 
     aggregate_report: dict[str, Any] = {}
     for state, counts in sorted(aggregate.items()):
-        frames = int(counts.get("frames", 0))
+        observed_frames = int(counts.get("frames", 0))
         aggregate_report[state] = {
             "intervals": int(counts.get("intervals", 0)),
-            "observed_frames": frames,
+            "observed_frames": observed_frames,
             "geometry_available_frames": int(counts.get("geometry_available", 0)),
             "flight_active_frames": int(counts.get("flight_active", 0)),
             "flight_supported_frames": int(counts.get("flight_supported", 0)),
@@ -266,13 +266,13 @@ def diagnose(
             "shot_active_frames": int(counts.get("shot_active", 0)),
             "early_shot_signal_frames": int(counts.get("early_shot_signal", 0)),
             "early_shot_signal_rate": _rate(
-                int(counts.get("early_shot_signal", 0)), frames
+                int(counts.get("early_shot_signal", 0)), observed_frames
             ),
             "supported_early_shot_signal_frames": int(
                 counts.get("supported_early_shot_signal", 0)
             ),
             "supported_early_shot_signal_rate": _rate(
-                int(counts.get("supported_early_shot_signal", 0)), frames
+                int(counts.get("supported_early_shot_signal", 0)), observed_frames
             ),
         }
 
