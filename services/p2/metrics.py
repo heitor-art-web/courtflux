@@ -6,22 +6,35 @@ from services.p2.metrics_base_v5 import P2MetricsCollector as _BaseP2MetricsColl
 
 
 class P2MetricsCollector(_BaseP2MetricsCollector):
-    """P2 metrics with calibration diagnostics and provisional resolved control state.
+    """P2 metrics with calibration diagnostics and provisional challenger channels.
 
     ``control_state`` remains the live online P2 decision. ``resolved_control_state`` is
     an additive, retrospective evaluation channel: when the shot tracker later activates,
     a directly preceding generic flight segment from the same temporal-reset epoch may be
-    relabeled as ``shot_flight``. This never mutates live P2 state or the live metrics.
+    relabeled as ``shot_flight``. ``soft_acquisition_challenger_state`` is another additive
+    evaluation-only channel for a conservative ownerless/no-flight possession hypothesis.
+    Neither channel mutates live P2 state or live metrics.
     """
 
     RESOLVED_CONTROL_POLICY = (
         "live_state_immutable;late_shot_activation_may_backfill_preceding_generic_flight;"
         "receiver_evidence_abstains;resolved_state_is_provisional"
     )
+    SOFT_ACQUISITION_MIN_STREAK_FRAMES = 4
+    SOFT_ACQUISITION_MIN_MEAN_SCORE = 0.35
+    SOFT_ACQUISITION_POLICY = (
+        "diagnostic_only;live_unknown;engine_eligible;owner_absent;thresholded_candidate_absent;"
+        "flight_inactive;shot_inactive;same_raw_best_track>=4_frames;raw_best_mean_score>=0.35"
+    )
 
     def __init__(self) -> None:
         super().__init__()
         self._previous_shot_active = False
+        self._soft_track_id: int | None = None
+        self._soft_streak_frames = 0
+        self._soft_score_sum = 0.0
+        self._soft_score_peak = 0.0
+        self._soft_last_frame: int | None = None
 
     @staticmethod
     def _same_reset(a: dict[str, Any], b: dict[str, Any]) -> bool:
@@ -42,6 +55,99 @@ class P2MetricsCollector(_BaseP2MetricsCollector):
         if frame_id < 0:
             return None
         return max(0, frame_id - flight_frames + 1)
+
+    def _reset_soft_acquisition(self) -> None:
+        self._soft_track_id = None
+        self._soft_streak_frames = 0
+        self._soft_score_sum = 0.0
+        self._soft_score_peak = 0.0
+        self._soft_last_frame = None
+
+    def _update_soft_acquisition(self, row: dict[str, Any]) -> None:
+        try:
+            frame_id = int(row.get("frame_id", -1))
+        except (TypeError, ValueError):
+            frame_id = -1
+        raw_track = row.get("raw_best_track_id")
+        try:
+            raw_track_id = None if raw_track is None else int(raw_track)
+            raw_score = float(row.get("raw_best_score", 0.0) or 0.0)
+        except (TypeError, ValueError):
+            raw_track_id = None
+            raw_score = 0.0
+
+        eligible = bool(
+            frame_id >= 0
+            and bool(row.get("engine_eligible", False))
+            and str(row.get("live_control_state") or row.get("control_state") or "unknown")
+            == "unknown"
+            and row.get("current_track_id") is None
+            and row.get("candidate_track_id") is None
+            and not bool(row.get("flight_active", False))
+            and not bool(row.get("shot_active", False))
+            and raw_track_id is not None
+        )
+
+        if not eligible:
+            self._reset_soft_acquisition()
+            row.update(
+                {
+                    "soft_acquisition_eligible": False,
+                    "soft_acquisition_track_id": None,
+                    "soft_acquisition_streak_frames": 0,
+                    "soft_acquisition_mean_score": 0.0,
+                    "soft_acquisition_peak_score": 0.0,
+                    "soft_acquisition_triggered": False,
+                    "soft_acquisition_challenger_state": str(
+                        row.get("live_control_state") or row.get("control_state") or "unknown"
+                    ),
+                    "soft_acquisition_challenger_source": "live",
+                    "soft_acquisition_policy": self.SOFT_ACQUISITION_POLICY,
+                }
+            )
+            return
+
+        consecutive_same_track = bool(
+            self._soft_track_id is not None
+            and self._soft_track_id == raw_track_id
+            and self._soft_last_frame is not None
+            and frame_id == self._soft_last_frame + 1
+        )
+        if consecutive_same_track:
+            self._soft_streak_frames += 1
+            self._soft_score_sum += raw_score
+            self._soft_score_peak = max(self._soft_score_peak, raw_score)
+        else:
+            self._soft_track_id = raw_track_id
+            self._soft_streak_frames = 1
+            self._soft_score_sum = raw_score
+            self._soft_score_peak = raw_score
+        self._soft_last_frame = frame_id
+
+        mean_score = self._soft_score_sum / max(self._soft_streak_frames, 1)
+        triggered = bool(
+            self._soft_streak_frames >= self.SOFT_ACQUISITION_MIN_STREAK_FRAMES
+            and mean_score >= self.SOFT_ACQUISITION_MIN_MEAN_SCORE
+        )
+        row.update(
+            {
+                "soft_acquisition_eligible": True,
+                "soft_acquisition_track_id": self._soft_track_id,
+                "soft_acquisition_streak_frames": int(self._soft_streak_frames),
+                "soft_acquisition_mean_score": round(float(mean_score), 6),
+                "soft_acquisition_peak_score": round(float(self._soft_score_peak), 6),
+                "soft_acquisition_triggered": triggered,
+                "soft_acquisition_challenger_state": (
+                    "possessed"
+                    if triggered
+                    else str(row.get("live_control_state") or row.get("control_state") or "unknown")
+                ),
+                "soft_acquisition_challenger_source": (
+                    "temporal_soft_acquisition" if triggered else "live"
+                ),
+                "soft_acquisition_policy": self.SOFT_ACQUISITION_POLICY,
+            }
+        )
 
     def _backfill_resolved_shot_flight(self, activation_index: int) -> None:
         if activation_index < 0 or activation_index >= len(self.state_rows):
@@ -167,6 +273,8 @@ class P2MetricsCollector(_BaseP2MetricsCollector):
         row["resolved_control_source"] = "live"
         row["resolved_control_provisional"] = False
         row["resolved_control_policy"] = self.RESOLVED_CONTROL_POLICY
+
+        self._update_soft_acquisition(row)
 
         shot_active = bool(row.get("shot_active", False))
         if shot_active and not self._previous_shot_active:
