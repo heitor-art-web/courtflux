@@ -10,6 +10,7 @@ import { metadataFromContent } from "@/lib/page-content";
 import { getSiteUrl } from "@/lib/site";
 import { renderHomeSection } from "./home-sections";
 import styles from "./home.module.css";
+import polish from "./home-polish.module.css";
 
 const siteUrl = getSiteUrl();
 const sourceContent = englishContent as HomeContent;
@@ -89,18 +90,18 @@ export default async function HomePage() {
         dangerouslySetInnerHTML={{ __html: JSON.stringify(structuredData).replace(/</g, "\\u003c") }}
       />
 
-      <header className={styles.siteHeader}>
-        <Link href={homeHref} className={styles.logoLink} aria-label="CourtFlux home">
+      <header className={`${styles.siteHeader} ${polish.header}`}>
+        <Link href={homeHref} className={`${styles.logoLink} ${polish.logoPanel}`} aria-label="CourtFlux home">
           <Image
-            className={styles.logo}
-            src="/brand/horizontal_logo_safe_crop.png"
+            className={`${styles.logo} ${polish.headerLogo}`}
+            src="/brand/02_horizontal_logo_FULL_PANEL.png"
             alt="CourtFlux — Basketball Intelligence"
             width={660}
             height={185}
             priority
           />
         </Link>
-        <nav className={styles.nav} aria-label="Primary navigation">
+        <nav className={`${styles.nav} ${polish.nav}`} aria-label="Primary navigation">
           {content.navigation.map((item) => (
             <Link className={item.cta ? styles.navCta : undefined} href={item.href} key={`${item.href}-${item.label}`}>
               {item.label}
@@ -112,10 +113,12 @@ export default async function HomePage() {
       <div className={styles.shell}>
         {content.sections.map(renderHomeSection)}
 
-        <footer className={styles.footer}>
+        <footer className={`${styles.footer} ${polish.footer}`}>
           <div className={styles.footerInner}>
             <div>
-              <Image className={styles.footerLogo} src="/brand/horizontal_logo_safe_crop.png" alt="CourtFlux — Basketball Intelligence" width={660} height={185} />
+              <div className={polish.footerBrandPanel}>
+                <Image className={`${styles.footerLogo} ${polish.footerLogo}`} src="/brand/02_horizontal_logo_FULL_PANEL.png" alt="CourtFlux — Basketball Intelligence" width={660} height={185} />
+              </div>
               <div className={styles.footerMeta}>{content.footer.meta}</div>
             </div>
             <div className={styles.footerLinks}>
