@@ -314,7 +314,7 @@ Explore supported evidence for:
 
 Weak or ambiguous evidence should remain `UNKNOWN` rather than force a tactical label.
 
-## P4.5 within P4 implementation — Possession Pattern Classification
+## P4 tactical milestone — Possession Pattern Classification
 
 Classify possessions when evidence supports patterns such as:
 
@@ -330,7 +330,7 @@ broken play
 unknown
 ```
 
-This subsection is a P4 implementation milestone and is distinct from roadmap phase **P4.5 — Persistent Player Identity** below.
+This is an internal P4 milestone and should not be confused with roadmap phase **P4.5 — Persistent Player Identity** below.
 
 ## P4.6 — Team Tendencies
 
