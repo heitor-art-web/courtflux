@@ -71,7 +71,15 @@ def _numeric_summary(rows: list[dict[str, Any]], field: str) -> dict[str, Any]:
         except (TypeError, ValueError):
             continue
     if not values:
-        return {"count": 0, "mean": None, "min": None, "p50": None, "p75": None, "p90": None, "max": None}
+        return {
+            "count": 0,
+            "mean": None,
+            "min": None,
+            "p50": None,
+            "p75": None,
+            "p90": None,
+            "max": None,
+        }
     return {
         "count": len(values),
         "mean": round(sum(values) / len(values), 4),
@@ -160,7 +168,7 @@ def analyze(
         if bool(by_frame.get(frame_id, {}).get("resolved_shot_backfill_applied", False))
     ]
 
-    positive_frames: set[int] = set()
+    confirmed_pre_shot_frames: set[int] = set()
     activation_windows: list[dict[str, Any]] = []
     for activation in confirmed_activations:
         activation_row = by_frame.get(activation, {})
@@ -175,7 +183,7 @@ def analyze(
             row = by_frame.get(frame_id)
             if row is None or not _eligible_preflight(row):
                 continue
-            positive_frames.add(frame_id)
+            confirmed_pre_shot_frames.add(frame_id)
             rows.append(row)
         activation_windows.append(
             {
@@ -187,12 +195,24 @@ def analyze(
                 "last_rows": [
                     {
                         "frame_id": int(row.get("frame_id", -1)),
-                        "truth_state": truth.get(int(row.get("frame_id", -1)), "unlabeled"),
-                        "distance_norm": row.get("shot_preflight_ball_to_rim_distance_norm"),
-                        "horizontal_rim_widths": row.get("shot_preflight_horizontal_distance_rim_widths"),
-                        "relative_y": row.get("shot_preflight_relative_y_rim_heights"),
-                        "delta_distance": row.get("shot_preflight_delta_distance_norm"),
-                        "delta_relative_y": row.get("shot_preflight_delta_relative_y"),
+                        "truth_state": truth.get(
+                            int(row.get("frame_id", -1)), "unlabeled"
+                        ),
+                        "distance_norm": row.get(
+                            "shot_preflight_ball_to_rim_distance_norm"
+                        ),
+                        "horizontal_rim_widths": row.get(
+                            "shot_preflight_horizontal_distance_rim_widths"
+                        ),
+                        "relative_y": row.get(
+                            "shot_preflight_relative_y_rim_heights"
+                        ),
+                        "delta_distance": row.get(
+                            "shot_preflight_delta_distance_norm"
+                        ),
+                        "delta_relative_y": row.get(
+                            "shot_preflight_delta_relative_y"
+                        ),
                         "approach_streak": row.get("shot_preflight_approach_streak"),
                         "rising_streak": row.get("shot_preflight_rising_streak"),
                         "near_x": row.get("shot_preflight_near_x"),
@@ -203,37 +223,65 @@ def analyze(
             }
         )
 
+    eligible_rows = [row for row in states if _eligible_preflight(row)]
+    labeled_positive_rows: list[dict[str, Any]] = []
+    labeled_negative_rows: list[dict[str, Any]] = []
+    unlabeled_rows: list[dict[str, Any]] = []
+    for row in eligible_rows:
+        frame_id = int(row.get("frame_id", -1))
+        truth_state = truth.get(frame_id)
+        if truth_state == "shot_flight":
+            labeled_positive_rows.append(row)
+        elif truth_state is None:
+            unlabeled_rows.append(row)
+        else:
+            labeled_negative_rows.append(row)
+
     exclusion: set[int] = set()
     radius = max(0, int(negative_exclusion_frames))
     for activation in activation_frames:
         exclusion.update(range(max(0, activation - radius), activation + radius + 1))
 
-    negative_rows = [
+    generic_unlabeled_rows = [
         row
-        for row in states
-        if _eligible_preflight(row)
-        and int(row.get("frame_id", -1)) not in positive_frames
+        for row in unlabeled_rows
+        if int(row.get("frame_id", -1)) not in confirmed_pre_shot_frames
         and int(row.get("frame_id", -1)) not in exclusion
     ]
-    positive_rows = [by_frame[frame_id] for frame_id in sorted(positive_frames) if frame_id in by_frame]
+    confirmed_rows = [
+        by_frame[frame_id]
+        for frame_id in sorted(confirmed_pre_shot_frames)
+        if frame_id in by_frame
+    ]
 
     return {
-        "version": "courtflux_p2_gate_a_shot_preflight_diag_v1",
+        "version": "courtflux_p2_gate_a_shot_preflight_diag_v2",
         "run_id": run_id,
         "ground_truth": str(ground_truth_path.relative_to(PROJECT_ROOT)),
         "lookback_frames": int(lookback_frames),
         "negative_exclusion_frames": int(negative_exclusion_frames),
         "shot_activation_frames": activation_frames,
         "confirmed_backfill_activation_frames": confirmed_activations,
-        "positive_pre_shot": _summarize(positive_rows, truth),
-        "negative_generic_flight": _summarize(negative_rows, truth),
+        "cohort_contract": {
+            "labeled_positive_shot_flight": "eligible preflight frames whose frozen human GT is shot_flight",
+            "labeled_negative_non_shot": "eligible preflight frames with frozen human GT other than shot_flight",
+            "unlabeled_eligible": "eligible frames outside frozen human control windows; never treated as negative",
+            "confirmed_backfill_pre_shot": "discovery cohort before causal shot activations confirmed retrospectively; may include unlabeled frames",
+        },
+        "labeled_positive_shot_flight": _summarize(labeled_positive_rows, truth),
+        "labeled_negative_non_shot": _summarize(labeled_negative_rows, truth),
+        "unlabeled_eligible": _summarize(unlabeled_rows, truth),
+        "generic_unlabeled_outside_activation_exclusion": _summarize(
+            generic_unlabeled_rows, truth
+        ),
+        "confirmed_backfill_pre_shot": _summarize(confirmed_rows, truth),
         "activation_windows": activation_windows,
     }
 
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
-        description="Compare causal shot-preflight geometry before confirmed shot activations against generic flight."
+        description="Compare causal shot-preflight geometry on frozen labeled shot/non-shot cohorts and confirmed activation windows."
     )
     parser.add_argument("--run", required=True)
     parser.add_argument("--ground-truth", default="evaluation/ground_truth/v1.json")
