@@ -15,11 +15,26 @@ class PossessionTrackerV1(_BasePossessionTrackerV1):
     classify the control state as PASS_FLIGHT. PASS_FLIGHT requires a distinct receiver
     candidate from the flight origin; otherwise the tracker abstains to UNKNOWN while
     preserving the flight evidence for later shot/pass classification and recovery.
+
+    When a confirmed owner expires before flight evidence was able to start, the last
+    confirmed control anchor seeds an ownerless flight hypothesis on that exact expiry
+    frame. The seed does not change control state and does not count as supported flight;
+    normal direct-observation, release-duration and displacement requirements still apply.
     """
 
     FLIGHT_CLASSIFICATION_POLICY = (
         "flight_supported_is_generic_airborne;pass_requires_distinct_receiver_candidate"
     )
+    RECENT_OWNER_FLIGHT_SEED_POLICY = (
+        "seed_on_confirmed_owner_expiry_only;requires_last_control_ball_anchor;"
+        "seed_is_hypothesis_only;existing_flight_support_thresholds_unchanged"
+    )
+
+    def __init__(self, *args: Any, **kwargs: Any) -> None:
+        super().__init__(*args, **kwargs)
+        self._recent_owner_flight_seed_count = 0
+        self._recent_owner_flight_last_seed_frame: int | None = None
+        self._recent_owner_flight_last_origin_track_id: int | None = None
 
     def _rank(
         self,
@@ -46,6 +61,42 @@ class PossessionTrackerV1(_BasePossessionTrackerV1):
             return False
         return int(self._candidate_track_id) != int(flight.origin_track_id)
 
+    def _seed_flight_on_owner_expiry(
+        self,
+        *,
+        frame_id: int,
+        owner_before_update: int | None,
+        ball_state: BallState | None,
+    ) -> bool:
+        """Preserve release origin when ownership expires before flight can start.
+
+        This is deliberately narrower than a generic "recent owner" lookup. A flight may
+        be seeded only on the exact update where a live owner transitions to no owner, and
+        only when the last confirmed-control anchor belongs to that same owner. Missing
+        current-ball evidence is allowed: the seed remains unsupported until later frames
+        satisfy the existing flight evidence requirements.
+        """
+        if owner_before_update is None or self.current_track_id is not None or self._flight is not None:
+            return False
+        if self._last_control_track_id is None or self._last_control_frame is None:
+            return False
+        if int(self._last_control_track_id) != int(owner_before_update):
+            return False
+        if self._last_control_ball_position is None:
+            return False
+
+        self._begin_or_update_flight(
+            frame_id=frame_id,
+            timestamp_sec=self._timestamp(None, ball_state),
+            ball_state=ball_state,
+            origin_track_id=int(self._last_control_track_id),
+            origin_team_id=self._last_control_team_id,
+        )
+        self._recent_owner_flight_seed_count += 1
+        self._recent_owner_flight_last_seed_frame = int(frame_id)
+        self._recent_owner_flight_last_origin_track_id = int(self._last_control_track_id)
+        return True
+
     def update(
         self,
         *,
@@ -55,12 +106,23 @@ class PossessionTrackerV1(_BasePossessionTrackerV1):
         team_evidence: dict[int, tuple[str | None, float]] | None = None,
         semantic_evidence: list[dict[str, Any]] | None = None,
     ) -> list[BasketballEvent]:
+        owner_before_update = self.current_track_id
         events = super().update(
             frame_id=frame_id,
             players=players,
             ball_state=ball_state,
             team_evidence=team_evidence,
             semantic_evidence=semantic_evidence,
+        )
+
+        # If the confirmed owner expired on this update before a release flight could be
+        # created, preserve the last confirmed ball/control anchor as an unsupported
+        # ownerless flight hypothesis. Later frames must still satisfy the unchanged
+        # flight-support thresholds before this evidence can affect classification/events.
+        self._seed_flight_on_owner_expiry(
+            frame_id=frame_id,
+            owner_before_update=owner_before_update,
+            ball_state=ball_state,
         )
 
         # The base V1 historically equated supported release flight with PASS_FLIGHT.
@@ -95,6 +157,13 @@ class PossessionTrackerV1(_BasePossessionTrackerV1):
             and raw_best_track_id is not None
             and int(raw_best_track_id) != int(flight.origin_track_id)
         )
+        current_flight_seeded_from_recent_owner = bool(
+            flight is not None
+            and self._recent_owner_flight_last_seed_frame is not None
+            and flight.frame_start == self._recent_owner_flight_last_seed_frame
+            and self._recent_owner_flight_last_origin_track_id is not None
+            and int(flight.origin_track_id) == self._recent_owner_flight_last_origin_track_id
+        )
         diagnostics.update(
             {
                 "candidate_score": candidate_score,
@@ -109,6 +178,11 @@ class PossessionTrackerV1(_BasePossessionTrackerV1):
                 "raw_best_distinct_from_flight_origin": raw_best_distinct_from_flight_origin,
                 "pass_flight_receiver_evidence": self._pass_receiver_evidence(),
                 "flight_classification_policy": self.FLIGHT_CLASSIFICATION_POLICY,
+                "recent_owner_flight_seed_policy": self.RECENT_OWNER_FLIGHT_SEED_POLICY,
+                "recent_owner_flight_seed_count": int(self._recent_owner_flight_seed_count),
+                "recent_owner_flight_last_seed_frame": self._recent_owner_flight_last_seed_frame,
+                "recent_owner_flight_last_origin_track_id": self._recent_owner_flight_last_origin_track_id,
+                "flight_seeded_from_recent_owner": current_flight_seeded_from_recent_owner,
             }
         )
         return diagnostics
