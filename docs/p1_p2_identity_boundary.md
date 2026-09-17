@@ -2,6 +2,8 @@
 
 This document records the current roadmap decision for identity handling. It supersedes older P1/P2 wording where Jersey recognition or real-world player naming was treated as a P1/P2 exit gate.
 
+For the consolidated product roadmap from P0 through P6, see `docs/current_product_roadmap.md`. Historical implementation documents remain preserved as reference and are not rewritten by this decision.
+
 ## P1 — Perception + Tracking
 
 P1 answers:
@@ -75,12 +77,12 @@ Jersey recognition remains useful supporting R&D, but it is **not a P1 or P2 exi
 The roadmap distinction is:
 
 ```text
-Track ID                 = technical visual tracking identity
-Game Player Entity       = stable identity inside one game
+Track ID                   = technical visual tracking identity
+Game Player Entity         = stable identity inside one game
 Persistent Player Identity = real person / roster identity across games
 ```
 
-Persistent real-world identity belongs to a later roadmap phase (currently planned around P4.5), where CourtFlux can resolve game-level entities to roster players using jersey evidence, appearance, roster context, previous games and human confirmation.
+Persistent real-world identity belongs to a later roadmap phase, currently P4.5, where CourtFlux can resolve game-level entities to roster players using jersey evidence, appearance, roster context, previous games and human confirmation.
 
 ## Exit criteria
 
