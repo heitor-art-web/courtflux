@@ -56,6 +56,7 @@ class P2AirborneClassifyDiagnoseTest(unittest.TestCase):
 
         report = diagnose(states, frames, ground_truth)
         interval = report["intervals"][0]
+        self.assertEqual(report["frame_rows"], len(frames))
         self.assertEqual(interval["early_shot_signal_frames"], 2)
         self.assertEqual(interval["supported_early_shot_signal_frames"], 2)
         self.assertEqual(interval["first_early_shot_signal_frame"], 1)
@@ -75,6 +76,7 @@ class P2AirborneClassifyDiagnoseTest(unittest.TestCase):
 
         report = diagnose(states, frames, ground_truth)
         interval = report["intervals"][0]
+        self.assertEqual(report["frame_rows"], len(frames))
         self.assertEqual(interval["early_shot_signal_frames"], 0)
         self.assertEqual(interval["supported_early_shot_signal_frames"], 0)
 
