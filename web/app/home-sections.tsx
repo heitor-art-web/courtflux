@@ -16,12 +16,14 @@ import styles from "./home.module.css";
 import polish from "./home-polish.module.css";
 import pricingStyles from "./pricing-v2.module.css";
 
-function SectionHeading({ eyebrow, title, highlight, copy }: { eyebrow: string; title: string; highlight: string; copy?: string }) {
+function SectionHeading({ eyebrow, title, highlight, copy, tone = "default" }: { eyebrow: string; title: string; highlight: string; copy?: string; tone?: "default" | "dark" }) {
+  const dark = tone === "dark";
+
   return (
-    <div className={styles.sectionHeader}>
-      <div className={styles.eyebrow}>{eyebrow}</div>
-      <h2 className={styles.sectionTitle}>{title} <span>{highlight}</span></h2>
-      {copy ? <p className={styles.sectionCopy}>{copy}</p> : null}
+    <div className={`${styles.sectionHeader} ${dark ? polish.darkSectionHeader : ""}`}>
+      <div className={`${styles.eyebrow} ${dark ? polish.darkEyebrow : ""}`}>{eyebrow}</div>
+      <h2 className={`${styles.sectionTitle} ${dark ? polish.darkTitle : ""}`}>{title} <span>{highlight}</span></h2>
+      {copy ? <p className={`${styles.sectionCopy} ${dark ? polish.darkCopy : ""}`}>{copy}</p> : null}
     </div>
   );
 }
@@ -134,7 +136,7 @@ function Story({ section }: { section: StorySection }) {
 function Evidence({ section }: { section: EvidenceSection }) {
   return (
     <section id={section.id} className={`${styles.section} ${styles.evidenceSection}`}>
-      <SectionHeading eyebrow={section.eyebrow} title={section.title} highlight={section.highlight} copy={section.copy} />
+      <SectionHeading eyebrow={section.eyebrow} title={section.title} highlight={section.highlight} copy={section.copy} tone="dark" />
       <div className={styles.evidenceGrid}>
         <div className={styles.evidenceMedia} aria-hidden="true">
           <Image
@@ -155,12 +157,12 @@ function Evidence({ section }: { section: EvidenceSection }) {
             <b />
           </div>
         </div>
-        <article className={styles.insightCard}>
-          <span className={styles.kicker}>{section.insight.kicker}</span>
-          <strong>{section.insight.title}</strong>
-          <p>{section.insight.copy}</p>
+        <article className={`${styles.insightCard} ${polish.evidenceInsightCard}`}>
+          <span className={`${styles.kicker} ${polish.darkEyebrow}`}>{section.insight.kicker}</span>
+          <strong className={polish.evidenceInsightTitle}>{section.insight.title}</strong>
+          <p className={polish.evidenceInsightCopy}>{section.insight.copy}</p>
           <div className={styles.insightDivider} />
-          <div className={styles.insightAction}>{section.insight.action} <span aria-hidden="true">↗</span></div>
+          <div className={`${styles.insightAction} ${polish.evidenceInsightAction}`}>{section.insight.action} <span aria-hidden="true">↗</span></div>
         </article>
       </div>
     </section>
