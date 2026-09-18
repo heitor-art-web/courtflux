@@ -31,6 +31,64 @@
     "frames_seen": 900,
     "note": "Metadata only. Human GT was authored blind from video and was not bootstrapped from P2 predictions."
   },
+  "human_kit_audit": {
+    "version": "courtflux_p2_human_kit_audit_v1",
+    "review_scope": "Gate C team-colour context only; does not rewrite frozen Gate A/B labels",
+    "prediction_blind": true,
+    "clip_context": "player highlight with time-varying equipment context",
+    "classifier_feature_policy": "jersey_body colours are candidate team-classifier context; shorts and lettering are recorded as human context and are not automatically injected as torso colours",
+    "unreviewed_time_ranges_sec": [[20.0, 21.0]],
+    "segments": [
+      {
+        "source_time_start_sec": 0.0,
+        "source_time_end_sec": 16.0,
+        "team_a": {
+          "name": null,
+          "shorts": ["Black", "Red"],
+          "jersey_body": ["Black", "Red"],
+          "lettering": ["White"]
+        },
+        "team_b": {
+          "name": null,
+          "shorts": ["White"],
+          "jersey_body": ["White"],
+          "lettering": ["Black"]
+        }
+      },
+      {
+        "source_time_start_sec": 16.0,
+        "source_time_end_sec": 20.0,
+        "team_a": {
+          "name": null,
+          "shorts": ["Red"],
+          "jersey_body": ["Red"],
+          "lettering": ["White"]
+        },
+        "team_b": {
+          "name": null,
+          "shorts": ["White"],
+          "jersey_body": ["White"],
+          "lettering": ["Black"]
+        }
+      },
+      {
+        "source_time_start_sec": 21.0,
+        "source_time_end_sec": 30.0,
+        "team_a": {
+          "name": null,
+          "shorts": ["Black"],
+          "jersey_body": ["Black"],
+          "lettering": ["White"]
+        },
+        "team_b": {
+          "name": null,
+          "shorts": ["White"],
+          "jersey_body": ["White"],
+          "lettering": ["Black"]
+        }
+      }
+    ]
+  },
   "control_intervals": [
     {
       "state": "shot_flight",
@@ -196,8 +254,9 @@
     "Canonical source run: evaluation/runs/20260917_142607_777551.",
     "Run completed with Jersey OFF and neutral match config; home_team and away_team were null.",
     "video_fps=29.97 from canonical run summary; analysis_fps=26.776 is processing throughput and is not used for temporal GT conversion.",
-    "Human colour/team notes are preserved as context only; team_id remains null for neutral V1-V5 clips.",
+    "Human colour/team notes are preserved as context only; event team_id remains null for neutral V1-V5 clips.",
     "13-14s and 22-23s were not labelled by the human reviewer and are excluded rather than inferred.",
-    "The alley-oop made finish remains pass_flight for Gate A control scoring while also being a shot_attempt event for Gate B; control-state and event semantics are evaluated independently."
+    "The alley-oop made finish remains pass_flight for Gate A control scoring while also being a shot_attempt event for Gate B; control-state and event semantics are evaluated independently.",
+    "Detailed time-varying Gate C equipment context is stored in human_kit_audit."
   ]
 }
