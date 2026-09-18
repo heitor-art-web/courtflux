@@ -13,34 +13,312 @@ if str(PROJECT_ROOT) not in sys.path:
 
 from evaluation.p2_ground_truth import evaluate_payload, load_ground_truth, load_jsonl
 
-DEFAULT_RUNS = {
-    "V1": "20260917_133606_837768",
-    "V2": "20260917_141201_062495",
-    "V3": "20260917_142607_777551",
-    "V4": "20260917_143501_261725",
-    "V5": "20260917_144307_273207",
-}
+CLIPS = ("V1", "V2", "V3", "V4", "V5")
+CORE_STATES = ("possessed", "pass_flight", "shot_flight")
 
+# Gate A v2 — P3 timeline-readiness contract. Frozen before AirborneClassifierV1
+# validation. Frame-level accuracy remains diagnostic only.
 COVERAGE_AGG_MIN = 0.98
 COVERAGE_CLIP_MIN = 0.95
-DOMINANT_AGG_MIN = 0.70
-DOMINANT_CLIP_MIN = 0.50
-MATCHING_AGG_MIN = 0.65
-MATCHING_CLIP_MIN = 0.45
-STATE_RECALL_MIN = {
-    "possessed": 0.60,
-    "pass_flight": 0.60,
-    "shot_flight": 0.60,
-}
-LOOSE_RECALL_MIN = 0.50
-PASS_AS_SHOT_MAX = 0.20
-SHOT_AS_PASS_MAX = 0.20
-CORE_UNKNOWN_MAX = 0.30
+CORE_INTERVAL_RECALL_MIN = 0.70
+POSSESSED_INTERVAL_RECALL_MIN = 0.70
+PASS_INTERVAL_RECALL_MIN = 0.60
+SHOT_INTERVAL_RECALL_MIN = 0.70
+SEQUENCE_TRANSITION_RECALL_MIN = 0.65
+CORE_UNRESOLVED_MAX = 0.25
+PASS_AS_SHOT_MAX = 0.15
+SHOT_AS_PASS_MAX = 0.15
+CLIP_CORE_INTERVAL_RECALL_MIN = 0.40
+CLIP_CORE_UNRESOLVED_MAX = 0.45
 
 
 def _run_paths(run_id: str) -> tuple[Path, Path, Path]:
     run_dir = PROJECT_ROOT / "evaluation" / "runs" / run_id
     return run_dir, run_dir / "p2_events.jsonl", run_dir / "p2_states.jsonl"
+
+
+def _interval_distance(a: dict[str, Any], b: dict[str, Any]) -> int:
+    a_start, a_end = int(a["frame_start"]), int(a["frame_end"])
+    b_start, b_end = int(b["frame_start"]), int(b["frame_end"])
+    if a_end < b_start:
+        return b_start - a_end
+    if b_end < a_start:
+        return a_start - b_end
+    return 0
+
+
+def _overlap_frames(a: dict[str, Any], b: dict[str, Any]) -> int:
+    start = max(int(a["frame_start"]), int(b["frame_start"]))
+    end = min(int(a["frame_end"]), int(b["frame_end"]))
+    return max(0, end - start + 1)
+
+
+def _iou(a: dict[str, Any], b: dict[str, Any]) -> float:
+    overlap = _overlap_frames(a, b)
+    if overlap <= 0:
+        return 0.0
+    union_start = min(int(a["frame_start"]), int(b["frame_start"]))
+    union_end = max(int(a["frame_end"]), int(b["frame_end"]))
+    return overlap / max(1, union_end - union_start + 1)
+
+
+def _truth_intervals(gt: dict[str, Any]) -> list[dict[str, Any]]:
+    rows: list[dict[str, Any]] = []
+    for index, raw in enumerate(list(gt.get("control_intervals", []) or [])):
+        if not isinstance(raw, dict):
+            continue
+        state = str(raw.get("state") or "unknown")
+        start = int(raw.get("frame_start", raw.get("frame", 0)))
+        end = int(raw.get("frame_end", start))
+        if end < start:
+            start, end = end, start
+        rows.append(
+            {
+                "truth_index": index,
+                "state": state,
+                "frame_start": start,
+                "frame_end": end,
+            }
+        )
+    return rows
+
+
+def _predicted_intervals(states: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    frames: list[tuple[int, str]] = []
+    for row in states:
+        if not isinstance(row, dict):
+            continue
+        try:
+            frame_id = int(row.get("frame_id", -1))
+        except (TypeError, ValueError):
+            continue
+        if frame_id < 0:
+            continue
+        frames.append((frame_id, str(row.get("control_state") or "unknown")))
+    frames.sort()
+    if not frames:
+        return []
+
+    intervals: list[dict[str, Any]] = []
+    start, previous, state = frames[0][0], frames[0][0], frames[0][1]
+    for frame_id, next_state in frames[1:]:
+        if frame_id == previous + 1 and next_state == state:
+            previous = frame_id
+            continue
+        intervals.append(
+            {
+                "prediction_index": len(intervals),
+                "state": state,
+                "frame_start": start,
+                "frame_end": previous,
+            }
+        )
+        start, previous, state = frame_id, frame_id, next_state
+    intervals.append(
+        {
+            "prediction_index": len(intervals),
+            "state": state,
+            "frame_start": start,
+            "frame_end": previous,
+        }
+    )
+    return intervals
+
+
+def _gt_window_coverage(
+    truth: list[dict[str, Any]], predicted_states: list[dict[str, Any]]
+) -> tuple[int, int, float]:
+    predicted_frames = {
+        int(row.get("frame_id", -1))
+        for row in predicted_states
+        if isinstance(row, dict) and int(row.get("frame_id", -1)) >= 0
+    }
+    gt_frames: set[int] = set()
+    for row in truth:
+        if row["state"] not in CORE_STATES:
+            continue
+        gt_frames.update(range(int(row["frame_start"]), int(row["frame_end"]) + 1))
+    observed = len(gt_frames & predicted_frames)
+    return len(gt_frames), observed, round(observed / max(len(gt_frames), 1), 4)
+
+
+def _match_intervals(
+    truth: list[dict[str, Any]],
+    predicted: list[dict[str, Any]],
+    *,
+    tolerance_frames: int,
+) -> dict[str, Any]:
+    core_truth = [row for row in truth if row["state"] in CORE_STATES]
+    core_pred = [row for row in predicted if row["state"] in CORE_STATES]
+
+    same_state_pairs: list[tuple[int, int, int, int, int]] = []
+    for ti, t in enumerate(core_truth):
+        for pi, p in enumerate(core_pred):
+            if t["state"] != p["state"]:
+                continue
+            distance = _interval_distance(t, p)
+            if distance > tolerance_frames:
+                continue
+            same_state_pairs.append(
+                (distance, -_overlap_frames(t, p), ti, pi, int(p["frame_start"]))
+            )
+
+    used_truth: set[int] = set()
+    used_pred: set[int] = set()
+    correct_matches: dict[int, int] = {}
+    for _distance, _neg_overlap, ti, pi, _start in sorted(same_state_pairs):
+        if ti in used_truth or pi in used_pred:
+            continue
+        used_truth.add(ti)
+        used_pred.add(pi)
+        correct_matches[ti] = pi
+
+    wrong_type_pairs: list[tuple[int, int, int, int, int]] = []
+    for ti, t in enumerate(core_truth):
+        if ti in used_truth:
+            continue
+        for pi, p in enumerate(core_pred):
+            if pi in used_pred or t["state"] == p["state"]:
+                continue
+            distance = _interval_distance(t, p)
+            if distance > tolerance_frames:
+                continue
+            wrong_type_pairs.append(
+                (distance, -_overlap_frames(t, p), ti, pi, int(p["frame_start"]))
+            )
+
+    wrong_matches: dict[int, int] = {}
+    for _distance, _neg_overlap, ti, pi, _start in sorted(wrong_type_pairs):
+        if ti in used_truth or pi in used_pred:
+            continue
+        used_truth.add(ti)
+        used_pred.add(pi)
+        wrong_matches[ti] = pi
+
+    interval_rows: list[dict[str, Any]] = []
+    by_state: dict[str, Counter[str]] = defaultdict(Counter)
+    boundary_ious: list[float] = []
+    start_errors: list[int] = []
+    end_errors: list[int] = []
+
+    for ti, t in enumerate(core_truth):
+        if ti in correct_matches:
+            p = core_pred[correct_matches[ti]]
+            resolution = "correct"
+            predicted_state = p["state"]
+            iou = _iou(t, p)
+            boundary_ious.append(iou)
+            start_errors.append(int(p["frame_start"]) - int(t["frame_start"]))
+            end_errors.append(int(p["frame_end"]) - int(t["frame_end"]))
+        elif ti in wrong_matches:
+            p = core_pred[wrong_matches[ti]]
+            resolution = "wrong_type"
+            predicted_state = p["state"]
+            iou = _iou(t, p)
+        else:
+            p = None
+            resolution = "unresolved"
+            predicted_state = None
+            iou = None
+
+        by_state[t["state"]][resolution] += 1
+        if predicted_state is not None:
+            by_state[t["state"]][f"predicted:{predicted_state}"] += 1
+        interval_rows.append(
+            {
+                **t,
+                "resolution": resolution,
+                "predicted_state": predicted_state,
+                "prediction_frame_start": None if p is None else p["frame_start"],
+                "prediction_frame_end": None if p is None else p["frame_end"],
+                "distance_frames": None if p is None else _interval_distance(t, p),
+                "overlap_frames": None if p is None else _overlap_frames(t, p),
+                "iou": None if iou is None else round(iou, 4),
+            }
+        )
+
+    state_summary: dict[str, Any] = {}
+    for state in CORE_STATES:
+        counter = by_state.get(state, Counter())
+        total = sum(counter[key] for key in ("correct", "wrong_type", "unresolved"))
+        state_summary[state] = {
+            "intervals": total,
+            "correct": int(counter.get("correct", 0)),
+            "wrong_type": int(counter.get("wrong_type", 0)),
+            "unresolved": int(counter.get("unresolved", 0)),
+            "recall": round(counter.get("correct", 0) / max(total, 1), 4),
+            "unresolved_rate": round(counter.get("unresolved", 0) / max(total, 1), 4),
+            "predicted_as": {
+                pred_state: int(counter.get(f"predicted:{pred_state}", 0))
+                for pred_state in CORE_STATES
+                if counter.get(f"predicted:{pred_state}", 0) > 0
+            },
+        }
+
+    core_total = len(core_truth)
+    core_correct = sum(1 for row in interval_rows if row["resolution"] == "correct")
+    core_unresolved = sum(1 for row in interval_rows if row["resolution"] == "unresolved")
+
+    transitions_total = max(0, len(core_truth) - 1)
+    transitions_correct = 0
+    transition_rows: list[dict[str, Any]] = []
+    for left_index in range(transitions_total):
+        right_index = left_index + 1
+        left = core_truth[left_index]
+        right = core_truth[right_index]
+        left_pi = correct_matches.get(left_index)
+        right_pi = correct_matches.get(right_index)
+        correct = bool(
+            left_pi is not None
+            and right_pi is not None
+            and int(core_pred[left_pi]["frame_start"]) <= int(core_pred[right_pi]["frame_start"])
+        )
+        if correct:
+            transitions_correct += 1
+        transition_rows.append(
+            {
+                "from_state": left["state"],
+                "to_state": right["state"],
+                "correct": correct,
+            }
+        )
+
+    pass_summary = state_summary["pass_flight"]
+    shot_summary = state_summary["shot_flight"]
+    pass_as_shot = int(by_state.get("pass_flight", Counter()).get("predicted:shot_flight", 0))
+    shot_as_pass = int(by_state.get("shot_flight", Counter()).get("predicted:pass_flight", 0))
+
+    return {
+        "contract": "P3 semantic interval detection; one-to-one same-state match; causal tolerance",
+        "tolerance_frames": int(tolerance_frames),
+        "core_intervals": core_total,
+        "correct_core_intervals": core_correct,
+        "core_interval_detection_recall": round(core_correct / max(core_total, 1), 4),
+        "core_unresolved_intervals": core_unresolved,
+        "core_unresolved_rate": round(core_unresolved / max(core_total, 1), 4),
+        "by_state": state_summary,
+        "critical_confusions": {
+            "pass_interval_as_shot": round(pass_as_shot / max(pass_summary["intervals"], 1), 4),
+            "shot_interval_as_pass": round(shot_as_pass / max(shot_summary["intervals"], 1), 4),
+        },
+        "semantic_transitions": {
+            "total": transitions_total,
+            "correct": transitions_correct,
+            "recall": round(transitions_correct / max(transitions_total, 1), 4),
+            "rows": transition_rows,
+        },
+        "boundary_diagnostics": {
+            "matched_intervals": len(boundary_ious),
+            "mean_iou": None if not boundary_ious else round(sum(boundary_ious) / len(boundary_ious), 4),
+            "mean_absolute_start_error_frames": None
+            if not start_errors
+            else round(sum(abs(value) for value in start_errors) / len(start_errors), 3),
+            "mean_absolute_end_error_frames": None
+            if not end_errors
+            else round(sum(abs(value) for value in end_errors) / len(end_errors), 3),
+        },
+        "intervals": interval_rows,
+    }
 
 
 def _clip_metrics(clip: str, run_id: str, tolerance_frames: int) -> dict[str, Any]:
@@ -50,100 +328,88 @@ def _clip_metrics(clip: str, run_id: str, tolerance_frames: int) -> dict[str, An
     if missing:
         raise FileNotFoundError(f"{clip}: missing required files: {missing}")
 
-    result = evaluate_payload(
-        predicted_events=load_jsonl(events_path),
-        predicted_states=load_jsonl(states_path),
-        ground_truth=load_ground_truth(gt_path),
+    predicted_events = load_jsonl(events_path)
+    predicted_states = load_jsonl(states_path)
+    gt = load_ground_truth(gt_path)
+    legacy = evaluate_payload(
+        predicted_events=predicted_events,
+        predicted_states=predicted_states,
+        ground_truth=gt,
         tolerance_frames=tolerance_frames,
     )
-    output_path = run_dir / "p2_gt_eval.json"
-    output_path.write_text(json.dumps(result, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
-    control = result["control_states"]
-    continuity = control["continuity"]
+    truth = _truth_intervals(gt)
+    predicted = _predicted_intervals(predicted_states)
+    gate_a = _match_intervals(truth, predicted, tolerance_frames=tolerance_frames)
+    gt_frames, observed_frames, coverage = _gt_window_coverage(truth, predicted_states)
+
     return {
         "clip": clip,
         "run_id": run_id,
         "gt_file": str(gt_path.relative_to(PROJECT_ROOT)),
-        "eval_file": str(output_path.relative_to(PROJECT_ROOT)),
-        "ground_truth_labeled_frames": int(control["ground_truth_labeled_frames"]),
-        "evaluated_frames": int(control["evaluated_frames"]),
-        "missing_prediction_frames": int(control["missing_prediction_frames"]),
-        "prediction_coverage": float(control["prediction_coverage"]),
-        "frame_accuracy": float(control["accuracy"]),
-        "dominant_state_interval_accuracy": float(continuity["dominant_state_interval_accuracy"]),
-        "mean_interval_matching_rate": continuity["mean_interval_matching_rate"],
-        "ground_truth_intervals": int(continuity["ground_truth_intervals"]),
-        "evaluated_intervals": int(continuity["evaluated_intervals"]),
-        "confusion": control["confusion"],
-        "intervals": continuity["intervals"],
+        "gt_window_frames": gt_frames,
+        "observed_gt_window_frames": observed_frames,
+        "prediction_coverage": coverage,
+        "timeline": gate_a,
+        "frame_diagnostics": {
+            "frame_accuracy": legacy["control_states"]["accuracy"],
+            "dominant_state_interval_accuracy": legacy["control_states"]["continuity"]["dominant_state_interval_accuracy"],
+            "mean_interval_matching_rate": legacy["control_states"]["continuity"]["mean_interval_matching_rate"],
+        },
     }
 
 
-def _sum_confusions(clips: list[dict[str, Any]]) -> dict[str, Counter[str]]:
-    agg: dict[str, Counter[str]] = defaultdict(Counter)
+def _aggregate(clips: list[dict[str, Any]]) -> dict[str, Any]:
+    gt_frames = sum(int(c["gt_window_frames"]) for c in clips)
+    observed_frames = sum(int(c["observed_gt_window_frames"]) for c in clips)
+    by_state: dict[str, Counter[str]] = defaultdict(Counter)
+    core_total = core_correct = core_unresolved = 0
+    transitions_total = transitions_correct = 0
+
     for clip in clips:
-        for truth_state, preds in dict(clip["confusion"]).items():
-            for pred_state, count in dict(preds).items():
-                agg[str(truth_state)][str(pred_state)] += int(count)
-    return agg
+        timeline = clip["timeline"]
+        core_total += int(timeline["core_intervals"])
+        core_correct += int(timeline["correct_core_intervals"])
+        core_unresolved += int(timeline["core_unresolved_intervals"])
+        transitions_total += int(timeline["semantic_transitions"]["total"])
+        transitions_correct += int(timeline["semantic_transitions"]["correct"])
+        for state in CORE_STATES:
+            row = timeline["by_state"][state]
+            for key in ("intervals", "correct", "wrong_type", "unresolved"):
+                by_state[state][key] += int(row[key])
+            for pred_state, count in dict(row.get("predicted_as", {})).items():
+                by_state[state][f"predicted:{pred_state}"] += int(count)
 
-
-def _safe_ratio(num: int, den: int) -> float | None:
-    if den <= 0:
-        return None
-    return round(num / den, 4)
-
-
-def _build_aggregate(clips: list[dict[str, Any]]) -> dict[str, Any]:
-    confusion = _sum_confusions(clips)
-    gt_frames = sum(int(c["ground_truth_labeled_frames"]) for c in clips)
-    eval_frames = sum(int(c["evaluated_frames"]) for c in clips)
-    correct = sum(counter.get(state, 0) for state, counter in confusion.items())
-    all_intervals = [row for c in clips for row in c["intervals"] if row.get("observed_frames", 0) > 0]
-    dominant_correct = sum(1 for row in all_intervals if row.get("dominant_matches_truth") is True)
-    matching_values = [float(row["matching_rate"]) for row in all_intervals if row.get("matching_rate") is not None]
-
-    state_recall: dict[str, Any] = {}
-    for truth_state, counter in sorted(confusion.items()):
-        total = sum(counter.values())
-        state_recall[truth_state] = {
-            "frames": total,
-            "correct": int(counter.get(truth_state, 0)),
-            "recall": _safe_ratio(int(counter.get(truth_state, 0)), total),
+    state_summary: dict[str, Any] = {}
+    for state in CORE_STATES:
+        counter = by_state[state]
+        total = int(counter["intervals"])
+        state_summary[state] = {
+            "intervals": total,
+            "correct": int(counter["correct"]),
+            "wrong_type": int(counter["wrong_type"]),
+            "unresolved": int(counter["unresolved"]),
+            "recall": round(counter["correct"] / max(total, 1), 4),
+            "unresolved_rate": round(counter["unresolved"] / max(total, 1), 4),
         }
 
-    pass_total = sum(confusion.get("pass_flight", Counter()).values())
-    shot_total = sum(confusion.get("shot_flight", Counter()).values())
-    core_states = ("possessed", "pass_flight", "shot_flight")
-    core_total = sum(sum(confusion.get(state, Counter()).values()) for state in core_states)
-    core_unknown = sum(confusion.get(state, Counter()).get("unknown", 0) for state in core_states)
-    loose_intervals = sum(
-        1 for c in clips for row in c["intervals"] if row.get("state") == "loose"
-    )
+    pass_total = state_summary["pass_flight"]["intervals"]
+    shot_total = state_summary["shot_flight"]["intervals"]
+    pass_as_shot = int(by_state["pass_flight"].get("predicted:shot_flight", 0))
+    shot_as_pass = int(by_state["shot_flight"].get("predicted:pass_flight", 0))
 
     return {
-        "ground_truth_labeled_frames": gt_frames,
-        "evaluated_frames": eval_frames,
-        "prediction_coverage": round(eval_frames / max(gt_frames, 1), 4),
-        "frame_accuracy": round(correct / max(eval_frames, 1), 4),
-        "evaluated_intervals": len(all_intervals),
-        "dominant_state_interval_accuracy": round(dominant_correct / max(len(all_intervals), 1), 4),
-        "mean_interval_matching_rate": (
-            None if not matching_values else round(sum(matching_values) / len(matching_values), 4)
-        ),
-        "state_recall": state_recall,
+        "prediction_coverage": round(observed_frames / max(gt_frames, 1), 4),
+        "core_intervals": core_total,
+        "correct_core_intervals": core_correct,
+        "core_interval_detection_recall": round(core_correct / max(core_total, 1), 4),
+        "core_unresolved_intervals": core_unresolved,
+        "core_unresolved_rate": round(core_unresolved / max(core_total, 1), 4),
+        "by_state": state_summary,
+        "semantic_transition_recall": round(transitions_correct / max(transitions_total, 1), 4),
+        "semantic_transitions": {"total": transitions_total, "correct": transitions_correct},
         "critical_confusions": {
-            "pass_flight_as_shot_flight": _safe_ratio(
-                int(confusion.get("pass_flight", Counter()).get("shot_flight", 0)), pass_total
-            ),
-            "shot_flight_as_pass_flight": _safe_ratio(
-                int(confusion.get("shot_flight", Counter()).get("pass_flight", 0)), shot_total
-            ),
-            "core_truth_predicted_unknown": _safe_ratio(core_unknown, core_total),
-        },
-        "loose_gt_intervals": loose_intervals,
-        "confusion": {
-            state: dict(sorted(counter.items())) for state, counter in sorted(confusion.items())
+            "pass_interval_as_shot": round(pass_as_shot / max(pass_total, 1), 4),
+            "shot_interval_as_pass": round(shot_as_pass / max(shot_total, 1), 4),
         },
     }
 
@@ -151,55 +417,38 @@ def _build_aggregate(clips: list[dict[str, Any]]) -> dict[str, Any]:
 def _gate_checks(clips: list[dict[str, Any]], aggregate: dict[str, Any]) -> dict[str, Any]:
     checks: list[dict[str, Any]] = []
 
-    def add(name: str, actual: Any, expected: str, passed: bool | None) -> None:
-        checks.append({"name": name, "actual": actual, "expected": expected, "passed": passed})
+    def add(name: str, actual: Any, expected: str, passed: bool) -> None:
+        checks.append({"name": name, "actual": actual, "expected": expected, "passed": bool(passed)})
 
     add("aggregate_prediction_coverage", aggregate["prediction_coverage"], f">= {COVERAGE_AGG_MIN}", aggregate["prediction_coverage"] >= COVERAGE_AGG_MIN)
-    add("aggregate_dominant_interval_accuracy", aggregate["dominant_state_interval_accuracy"], f">= {DOMINANT_AGG_MIN}", aggregate["dominant_state_interval_accuracy"] >= DOMINANT_AGG_MIN)
-    mean_match = aggregate["mean_interval_matching_rate"]
-    add("aggregate_mean_interval_matching_rate", mean_match, f">= {MATCHING_AGG_MIN}", mean_match is not None and mean_match >= MATCHING_AGG_MIN)
+    add("aggregate_core_interval_detection_recall", aggregate["core_interval_detection_recall"], f">= {CORE_INTERVAL_RECALL_MIN}", aggregate["core_interval_detection_recall"] >= CORE_INTERVAL_RECALL_MIN)
+    add("aggregate_possessed_interval_recall", aggregate["by_state"]["possessed"]["recall"], f">= {POSSESSED_INTERVAL_RECALL_MIN}", aggregate["by_state"]["possessed"]["recall"] >= POSSESSED_INTERVAL_RECALL_MIN)
+    add("aggregate_pass_interval_recall", aggregate["by_state"]["pass_flight"]["recall"], f">= {PASS_INTERVAL_RECALL_MIN}", aggregate["by_state"]["pass_flight"]["recall"] >= PASS_INTERVAL_RECALL_MIN)
+    add("aggregate_shot_interval_recall", aggregate["by_state"]["shot_flight"]["recall"], f">= {SHOT_INTERVAL_RECALL_MIN}", aggregate["by_state"]["shot_flight"]["recall"] >= SHOT_INTERVAL_RECALL_MIN)
+    add("aggregate_semantic_transition_recall", aggregate["semantic_transition_recall"], f">= {SEQUENCE_TRANSITION_RECALL_MIN}", aggregate["semantic_transition_recall"] >= SEQUENCE_TRANSITION_RECALL_MIN)
+    add("aggregate_core_unresolved_rate", aggregate["core_unresolved_rate"], f"<= {CORE_UNRESOLVED_MAX}", aggregate["core_unresolved_rate"] <= CORE_UNRESOLVED_MAX)
+    add("pass_interval_as_shot", aggregate["critical_confusions"]["pass_interval_as_shot"], f"<= {PASS_AS_SHOT_MAX}", aggregate["critical_confusions"]["pass_interval_as_shot"] <= PASS_AS_SHOT_MAX)
+    add("shot_interval_as_pass", aggregate["critical_confusions"]["shot_interval_as_pass"], f"<= {SHOT_AS_PASS_MAX}", aggregate["critical_confusions"]["shot_interval_as_pass"] <= SHOT_AS_PASS_MAX)
 
     for clip in clips:
+        timeline = clip["timeline"]
         add(f"{clip['clip']}_prediction_coverage", clip["prediction_coverage"], f">= {COVERAGE_CLIP_MIN}", clip["prediction_coverage"] >= COVERAGE_CLIP_MIN)
-        add(f"{clip['clip']}_dominant_interval_accuracy", clip["dominant_state_interval_accuracy"], f">= {DOMINANT_CLIP_MIN}", clip["dominant_state_interval_accuracy"] >= DOMINANT_CLIP_MIN)
-        clip_match = clip["mean_interval_matching_rate"]
-        add(f"{clip['clip']}_mean_interval_matching_rate", clip_match, f">= {MATCHING_CLIP_MIN}", clip_match is not None and clip_match >= MATCHING_CLIP_MIN)
+        add(f"{clip['clip']}_core_interval_detection_recall", timeline["core_interval_detection_recall"], f">= {CLIP_CORE_INTERVAL_RECALL_MIN}", timeline["core_interval_detection_recall"] >= CLIP_CORE_INTERVAL_RECALL_MIN)
+        add(f"{clip['clip']}_core_unresolved_rate", timeline["core_unresolved_rate"], f"<= {CLIP_CORE_UNRESOLVED_MAX}", timeline["core_unresolved_rate"] <= CLIP_CORE_UNRESOLVED_MAX)
 
-    for state, threshold in STATE_RECALL_MIN.items():
-        row = aggregate["state_recall"].get(state)
-        actual = None if row is None else row["recall"]
-        add(f"aggregate_{state}_recall", actual, f">= {threshold}", actual is not None and actual >= threshold)
-
-    loose_row = aggregate["state_recall"].get("loose")
-    if aggregate["loose_gt_intervals"] >= 2:
-        actual = None if loose_row is None else loose_row["recall"]
-        add("aggregate_loose_recall", actual, f">= {LOOSE_RECALL_MIN}", actual is not None and actual >= LOOSE_RECALL_MIN)
-    else:
-        add("aggregate_loose_recall", None if loose_row is None else loose_row["recall"], "insufficient GT (<2 loose intervals)", None)
-
-    critical = aggregate["critical_confusions"]
-    for key, limit in (
-        ("pass_flight_as_shot_flight", PASS_AS_SHOT_MAX),
-        ("shot_flight_as_pass_flight", SHOT_AS_PASS_MAX),
-        ("core_truth_predicted_unknown", CORE_UNKNOWN_MAX),
-    ):
-        actual = critical[key]
-        add(key, actual, f"<= {limit}", actual is not None and actual <= limit)
-
-    required = [row for row in checks if row["passed"] is not None]
     return {
-        "status": "PASS" if required and all(bool(row["passed"]) for row in required) else "FAIL",
+        "status": "PASS" if checks and all(row["passed"] for row in checks) else "FAIL",
         "checks": checks,
-        "required_checks": len(required),
-        "passed_checks": sum(1 for row in required if row["passed"] is True),
-        "failed_checks": sum(1 for row in required if row["passed"] is False),
+        "required_checks": len(checks),
+        "passed_checks": sum(1 for row in checks if row["passed"]),
+        "failed_checks": sum(1 for row in checks if not row["passed"]),
     }
 
 
 def parse_args() -> argparse.Namespace:
-    parser = argparse.ArgumentParser(description="Evaluate and aggregate P2 Gate A across V1-V5.")
-    for clip, default in DEFAULT_RUNS.items():
-        parser.add_argument(f"--{clip.lower()}-run", default=default)
+    parser = argparse.ArgumentParser(description="Evaluate P2 Gate A — P3 timeline readiness across V1-V5.")
+    for clip in CLIPS:
+        parser.add_argument(f"--{clip.lower()}-run", required=True)
     parser.add_argument("--tolerance-frames", type=int, default=8)
     parser.add_argument(
         "--output",
@@ -211,13 +460,15 @@ def parse_args() -> argparse.Namespace:
 
 def main() -> None:
     args = parse_args()
-    run_map = {clip: str(getattr(args, f"{clip.lower()}_run")) for clip in DEFAULT_RUNS}
-    clips = [_clip_metrics(clip, run_map[clip], args.tolerance_frames) for clip in DEFAULT_RUNS]
-    aggregate = _build_aggregate(clips)
+    run_map = {clip: str(getattr(args, f"{clip.lower()}_run")) for clip in CLIPS}
+    clips = [_clip_metrics(clip, run_map[clip], args.tolerance_frames) for clip in CLIPS]
+    aggregate = _aggregate(clips)
     gate = _gate_checks(clips, aggregate)
+
     result = {
-        "version": "courtflux_p2_gate_a_scoreboard_v1",
-        "contract": "live control_state; V1-V5 frozen human GT",
+        "version": "courtflux_p2_gate_a_p3_readiness_v2",
+        "contract": "interval/event semantics primary; frame/boundary metrics diagnostic; V1-V5 validation-only",
+        "tolerance_frames": int(args.tolerance_frames),
         "runs": run_map,
         "clips": clips,
         "aggregate": aggregate,
@@ -230,22 +481,29 @@ def main() -> None:
     output.parent.mkdir(parents=True, exist_ok=True)
     output.write_text(json.dumps(result, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
 
-    print(json.dumps({
-        "gate": gate,
-        "aggregate": aggregate,
-        "clips": [
+    print(
+        json.dumps(
             {
-                "clip": c["clip"],
-                "run_id": c["run_id"],
-                "prediction_coverage": c["prediction_coverage"],
-                "frame_accuracy": c["frame_accuracy"],
-                "dominant_state_interval_accuracy": c["dominant_state_interval_accuracy"],
-                "mean_interval_matching_rate": c["mean_interval_matching_rate"],
-            }
-            for c in clips
-        ],
-        "output": str(output),
-    }, indent=2, ensure_ascii=False))
+                "gate": gate,
+                "aggregate": aggregate,
+                "clips": [
+                    {
+                        "clip": c["clip"],
+                        "run_id": c["run_id"],
+                        "prediction_coverage": c["prediction_coverage"],
+                        "core_interval_detection_recall": c["timeline"]["core_interval_detection_recall"],
+                        "core_unresolved_rate": c["timeline"]["core_unresolved_rate"],
+                        "semantic_transition_recall": c["timeline"]["semantic_transitions"]["recall"],
+                        "frame_accuracy_diagnostic": c["frame_diagnostics"]["frame_accuracy"],
+                    }
+                    for c in clips
+                ],
+                "output": str(output),
+            },
+            indent=2,
+            ensure_ascii=False,
+        )
+    )
 
 
 if __name__ == "__main__":
