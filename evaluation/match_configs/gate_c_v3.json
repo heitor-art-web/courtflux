@@ -1,0 +1,15 @@
+{
+  "metadata": {
+    "home_team": "black",
+    "away_team": "white",
+    "active_kits": {
+      "black": "current",
+      "white": "current"
+    },
+    "evaluation_scope": "p2_gate_c_development_v3"
+  },
+  "teams": {
+    "black": {"kits": {"current": ["Black"]}, "roster": {}},
+    "white": {"kits": {"current": ["White"]}, "roster": {}}
+  }
+}
