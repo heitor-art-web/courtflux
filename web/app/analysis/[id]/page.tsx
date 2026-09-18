@@ -1,5 +1,6 @@
 import Link from "next/link";
 import { redirect } from "next/navigation";
+import { isP3FoundationEnabled } from "@/lib/p3/feature-flag";
 import { createClient } from "@/lib/supabase/server";
 import { AnalysisCancelControl } from "./analysis-cancel-control";
 import { AnalysisView } from "./analysis-view";
@@ -20,12 +21,16 @@ export default async function AnalysisPage({
   if (!user) redirect("/login");
 
   const { id } = await params;
+  const p3Enabled = isP3FoundationEnabled();
+
   return (
     <>
       <AnalysisView runId={id} />
-      <Link className={launcherStyles.launcher} href={`/analysis/${encodeURIComponent(id)}/review`}>
-        Review workspace
-      </Link>
+      {p3Enabled ? (
+        <Link className={launcherStyles.launcher} href={`/analysis/${encodeURIComponent(id)}/review`}>
+          Review workspace
+        </Link>
+      ) : null}
       <AnalysisCancelControl runId={id} />
     </>
   );

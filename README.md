@@ -17,7 +17,7 @@
 | **P0** | Vision Foundation | ✅ Complete |
 | **P1** | Perception + Tracking | ✅ Complete |
 | **P2** | Basketball Understanding + Game-Level Player Identity | 🧪 Engineering core complete; human GT + game-entity validation pending |
-| **P3** | Structured Analytics + Review | 🛠 Foundation may proceed concurrently; product exit depends on validated P2 |
+| **P3** | Structured Analytics + Review | ✅ Foundation complete and integrated behind a disabled feature flag; final product exit depends on validated P2 |
 | **P4** | Tactical Intelligence | ⏳ Future |
 | **P5** | Persistent Player Identity / Jersey Evidence | ⏳ Future |
 | **P6** | Mobile App | ⏳ Future |
@@ -39,25 +39,25 @@ calibrate only from measured error
 freeze the validated P2 baseline
 ```
 
-P3 foundation work may proceed concurrently against the stable P2→P3 contract:
+The concurrent P3 foundation is now complete and integrated into `main` behind a server-side feature flag. The foundation consumes the stable P2→P3 contract while P2 validation continues:
 
 ```text
-P2 validation                          P3 foundation
+P2 validation                         P3 foundation (complete)
      │                                      │
-human GT                              Game Record
+human GT                              Game Record foundation
 calibration                           persistence / provenance
 basketball correctness               physical clips
 player attribution                   review / corrections
-     │                               fixture-driven analytics
+     │                               organization / reopenability
      │                                      │
      └────────────── integration ───────────┘
                          ↓
                 validated P2 baseline
                          ↓
-                   P3 product freeze
+              resume final P3 product work
 ```
 
-The concurrency rule is strict: **P3 may advance structurally, while product decisions and derived outputs that depend on final P2 accuracy remain configurable, versioned and reprocessable until P2 passes its exit gate.**
+The concurrency rule remains strict: **P3 may be integrated structurally, while product decisions and derived outputs that depend on final P2 accuracy remain configurable, versioned and reprocessable until P2 passes its exit gate.**
 
 P3 must consume the P2 contract rather than import P2 engine internals, recreate possessions independently or tune P2 thresholds from P3 product behaviour.
 
@@ -170,11 +170,15 @@ P7 — Continuous Development / AI Coach
 
 Turn P2 events into a durable, reopenable game review product: possessions, game/player summaries, physical evidence clips, Things to Review, timelines, filters, conservative insights, human corrections and simple review actions.
 
-P3 foundation work may be developed concurrently with final P2 validation, provided that P2-dependent calculations remain versioned/reprocessable and the integration boundary remains the stable P2→P3 event contract.
+The **P3 foundation is complete** and lives in the integrated codebase. It includes the frozen `p3.source_event.v1` contract, versioned/reprocessable derivations, durable source events, physical evidence clips, Things to Review foundation, Human Review + Correction, and Save/Tag/Note/Collections with historical reopenability.
+
+P2-dependent calculations remain versioned/reprocessable and are deliberately not frozen before the P2 exit gate. Final possession truth, basketball rates, smart ranking, accuracy-dependent thresholds, composite inference quality, explainable basketball insights and final P3 validation resume after P2 is validated.
+
+The integrated product surface is **disabled by default** through `P3_FOUNDATION_ENABLED`; merge/integration does not mean product launch.
 
 **Exit idea:** a coach or player should no longer need to scrub manually through 60–90 minutes of video to find the moments that deserve attention.
 
-Detailed execution lives in [`docs/p3_roadmap.md`](docs/p3_roadmap.md).
+Detailed execution lives in [`docs/p3_roadmap.md`](docs/p3_roadmap.md). Foundation completion is recorded in [`docs/p3_foundation_completion.md`](docs/p3_foundation_completion.md).
 
 ### P4 — Tactical Intelligence
 
@@ -328,6 +332,18 @@ Open:
 http://localhost:3000/lab
 ```
 
+### P3 foundation feature flag
+
+The integrated P3 review product surface is fail-closed. If `P3_FOUNDATION_ENABLED` is unset or has an unrecognized value, the Review Workspace launcher is hidden and P3 review endpoints remain unavailable.
+
+Enable it only in an environment where the P3 Supabase migrations have been applied intentionally:
+
+```bash
+export P3_FOUNDATION_ENABLED=true
+```
+
+Accepted enabled values are `1`, `true`, `yes` and `on` (case-insensitive). Production should keep the flag unset/false until the P3 schema is deployed and the product surface is intentionally being exercised. The P2 exit gate is still required before treating P2-dependent P3 analytics/ranking/insights as final product truth.
+
 ---
 
 ## Status summary
@@ -335,10 +351,10 @@ http://localhost:3000/lab
 - ✅ P0 complete
 - ✅ P1 complete
 - 🧪 P2 engineering core integrated; reviewed human GT + game-level entity validation pending
-- 🛠 P3 structural foundation may proceed concurrently on an isolated branch; P2-dependent semantics remain versioned/reprocessable until P2 exit
+- ✅ P3 foundation complete and integrated; product surface disabled by default and final P2-dependent semantics remain reprocessable until P2 exit
 - ⏳ P4 Tactical Intelligence is future
 - ⏳ P5 Persistent Player Identity / Jersey Evidence is future
 - ⏳ P6 Mobile App is future
 - ⏳ P7 Continuous Development / AI Coach is future
 
-**Current engineering focus:** validate P2 basketball correctness and game-level player attribution against reviewed truth while allowing isolated P3 foundation work that consumes the stable P2 contract without treating unvalidated P2 output as final product truth.
+**Current engineering focus:** validate P2 basketball correctness and game-level player attribution against reviewed truth. P3 foundation remains integrated but gated off by default; after the P2 exit gate, resume final P3 possessions, analytics, ranking, insights and product validation on top of the frozen foundation.

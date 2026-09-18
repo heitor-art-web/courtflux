@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
+import { isP3FoundationEnabled } from "@/lib/p3/feature-flag";
 import { updateSession } from "@/lib/supabase/proxy";
 import {
   DEFAULT_LOCALE,
@@ -19,10 +20,45 @@ function copyResponseCookies(from: NextResponse, to: NextResponse) {
   from.cookies.getAll().forEach((cookie) => to.cookies.set(cookie));
 }
 
+function p3FoundationSurface(pathname: string): "review" | "api" | null {
+  if (/^\/analysis\/[^/]+\/review(?:\/|$)/.test(pathname)) return "review";
+  if (
+    /^\/api\/analyses\/[^/]+\/(?:things-to-review|review-actions|human-review)(?:\/|$)/.test(
+      pathname,
+    )
+  ) {
+    return "api";
+  }
+  return null;
+}
+
+function disabledP3Response(request: NextRequest, cleanPath: string, pathLocale: Locale | null) {
+  const surface = p3FoundationSurface(cleanPath);
+  if (!surface || isP3FoundationEnabled()) return null;
+
+  if (surface === "api") {
+    return NextResponse.json({ error: "Not found" }, { status: 404 });
+  }
+
+  const match = cleanPath.match(/^\/analysis\/([^/]+)\/review/);
+  const runId = match?.[1];
+  if (!runId) return NextResponse.redirect(new URL("/account", request.url));
+
+  const redirectUrl = request.nextUrl.clone();
+  redirectUrl.pathname = pathLocale
+    ? `/${pathLocale}/analysis/${runId}`
+    : `/analysis/${runId}`;
+  redirectUrl.search = "";
+  return NextResponse.redirect(redirectUrl);
+}
+
 export async function proxy(request: NextRequest) {
   const { pathname } = request.nextUrl;
   const pathLocale = localeFromPathname(pathname);
   const cleanPath = stripLocalePrefix(pathname);
+  const disabledResponse = disabledP3Response(request, cleanPath, pathLocale);
+  if (disabledResponse) return disabledResponse;
+
   const publicRequest = isPublicPath(pathname);
   const locale: Locale = pathLocale ?? (publicRequest ? DEFAULT_LOCALE : cookieLocale(request));
   const requestHeaders = new Headers(request.headers);
@@ -53,5 +89,8 @@ export async function proxy(request: NextRequest) {
 export const config = {
   matcher: [
     "/((?!api|_next/static|_next/image|favicon.ico|.*\\.(?:svg|png|jpg|jpeg|gif|webp|ico|webmanifest)$).*)",
+    "/api/analyses/:id/things-to-review",
+    "/api/analyses/:id/review-actions",
+    "/api/analyses/:id/human-review",
   ],
 };

@@ -1,5 +1,6 @@
 import Link from "next/link";
 import { redirect } from "next/navigation";
+import { isP3FoundationEnabled } from "@/lib/p3/feature-flag";
 import { createClient } from "@/lib/supabase/server";
 import { ReviewWorkspace } from "./review-workspace";
 import type { ViewMode } from "./review-workspace-types";
@@ -43,6 +44,10 @@ export default async function ReviewPage({
   if (!user) redirect("/login");
 
   const [{ id }, search] = await Promise.all([params, searchParams]);
+  if (!isP3FoundationEnabled()) {
+    redirect(`/analysis/${encodeURIComponent(id)}`);
+  }
+
   return (
     <main className={styles.page}>
       <nav className={styles.topbar} aria-label="Review workspace navigation">
