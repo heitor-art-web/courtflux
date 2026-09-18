@@ -114,6 +114,24 @@ class ContinuousTeamColourTest(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "#RRGGBB|rgb/hsv"):
             self._analyzer(["InfraredDream"], ["White"])
 
+    def test_all_audited_gate_c_configs_load_under_continuous_contract(self) -> None:
+        configs = [
+            "evaluation/match_configs/gate_c_v1.json",
+            "evaluation/match_configs/gate_c_v2.json",
+            "evaluation/match_configs/gate_c_v3.json",
+            "evaluation/match_configs/gate_c_v4_a.json",
+            "evaluation/match_configs/gate_c_v4_b.json",
+            "evaluation/match_configs/gate_c_v4_c.json",
+            "evaluation/match_configs/gate_c_v5.json",
+        ]
+
+        for config in configs:
+            with self.subTest(config=config):
+                analyzer = TeamOnlyAnalyzer(config)
+                self.assertEqual(set(analyzer.active_kits), {"team_a", "team_b"})
+                self.assertTrue(analyzer.active_kits["team_a"])
+                self.assertTrue(analyzer.active_kits["team_b"])
+
 
 if __name__ == "__main__":
     unittest.main()
