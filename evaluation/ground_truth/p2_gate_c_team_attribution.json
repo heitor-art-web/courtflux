@@ -5,8 +5,9 @@
     "prediction_blind": true,
     "original_gate_a_b_gt_unchanged": true,
     "unknown_preferred_over_guess": true,
-    "team_identity": "team_a/team_b are stable scoring slots inside each declared run context; colour names are evidence, not identity",
+    "team_identity": "team_a/team_b are local scoring slots inside each declared run context; they are not global team identities and must not be mapped across clips or runtime segments",
     "kit_feature_scope": "jersey torso body colours configure TeamOnlyAnalyzer; shorts and lettering are recorded in per-video human_kit_audit but are not automatically injected as classifier colours",
+    "real_team_names_in_scoring": false,
     "scoring_unit": "one human-attributable control/event window",
     "possessed_prediction_source": "modal non-unknown current_team_id on predicted possessed frames inside the human window",
     "pass_prediction_source": "matched pass_candidate.team_id",
@@ -25,11 +26,11 @@
         }
       },
       "samples": [
-        {"run_key": "V1", "state": "possessed", "frame_start": 0, "frame_end": 50, "team_id": "team_a", "human_note": "Sporting; jogador de verde e branco"},
-        {"run_key": "V1", "state": "possessed", "frame_start": 125, "frame_end": 150, "team_id": "team_b", "human_note": "Benfica; jogador de vermelho"},
-        {"run_key": "V1", "state": "pass_flight", "frame_start": 300, "frame_end": 325, "team_id": "team_b", "human_note": "pass flight; jogador vermelho"},
-        {"run_key": "V1", "state": "possessed", "frame_start": 350, "frame_end": 375, "team_id": "team_b", "human_note": "jogador vermelho"},
-        {"run_key": "V1", "state": "possessed", "frame_start": 625, "frame_end": 650, "team_id": "team_b", "human_note": "jogador vermelho"}
+        {"run_key": "V1", "state": "possessed", "frame_start": 0, "frame_end": 50, "team_id": "team_a", "human_note": "green/white side"},
+        {"run_key": "V1", "state": "possessed", "frame_start": 125, "frame_end": 150, "team_id": "team_b", "human_note": "red side"},
+        {"run_key": "V1", "state": "pass_flight", "frame_start": 300, "frame_end": 325, "team_id": "team_b", "human_note": "red side pass flight"},
+        {"run_key": "V1", "state": "possessed", "frame_start": 350, "frame_end": 375, "team_id": "team_b", "human_note": "red side"},
+        {"run_key": "V1", "state": "possessed", "frame_start": 625, "frame_end": 650, "team_id": "team_b", "human_note": "red side"}
       ]
     },
     "V2": {
@@ -42,14 +43,14 @@
         }
       },
       "samples": [
-        {"run_key": "V2", "state": "shot_flight", "frame_start": 400, "frame_end": 550, "team_id": "team_a", "human_note": "equipa visualmente vermelha"},
-        {"run_key": "V2", "state": "possessed", "frame_start": 600, "frame_end": 650, "team_id": "team_a", "human_note": "posse visualmente da equipa vermelha"},
-        {"run_key": "V2", "state": "shot_flight", "frame_start": 700, "frame_end": 800, "team_id": "team_a", "human_note": "equipa visualmente vermelha"},
-        {"run_key": "V2", "state": "pass_flight", "frame_start": 850, "frame_end": 900, "team_id": "team_a", "human_note": "equipa visualmente vermelha"},
-        {"run_key": "V2", "state": "shot_flight", "frame_start": 900, "frame_end": 1000, "team_id": "team_a", "human_note": "equipa visualmente vermelha"},
-        {"run_key": "V2", "state": "possessed", "frame_start": 1100, "frame_end": 1150, "team_id": "team_b", "human_note": "posse visualmente da equipa branca"},
-        {"run_key": "V2", "state": "shot_flight", "frame_start": 1200, "frame_end": 1300, "team_id": "team_b", "human_note": "equipa visualmente branca"},
-        {"run_key": "V2", "state": "possessed", "frame_start": 1350, "frame_end": 1450, "team_id": "team_a", "human_note": "posse visualmente da equipa vermelha"}
+        {"run_key": "V2", "state": "shot_flight", "frame_start": 400, "frame_end": 550, "team_id": "team_a", "human_note": "red side"},
+        {"run_key": "V2", "state": "possessed", "frame_start": 600, "frame_end": 650, "team_id": "team_a", "human_note": "red side possession"},
+        {"run_key": "V2", "state": "shot_flight", "frame_start": 700, "frame_end": 800, "team_id": "team_a", "human_note": "red side"},
+        {"run_key": "V2", "state": "pass_flight", "frame_start": 850, "frame_end": 900, "team_id": "team_a", "human_note": "red side pass flight"},
+        {"run_key": "V2", "state": "shot_flight", "frame_start": 900, "frame_end": 1000, "team_id": "team_a", "human_note": "red side"},
+        {"run_key": "V2", "state": "possessed", "frame_start": 1100, "frame_end": 1150, "team_id": "team_b", "human_note": "white side possession"},
+        {"run_key": "V2", "state": "shot_flight", "frame_start": 1200, "frame_end": 1300, "team_id": "team_b", "human_note": "white side"},
+        {"run_key": "V2", "state": "possessed", "frame_start": 1350, "frame_end": 1450, "team_id": "team_a", "human_note": "red side possession"}
       ]
     },
     "V3": {
@@ -63,7 +64,7 @@
         }
       },
       "samples": [
-        {"run_key": "V3", "state": "shot_flight", "frame_start": 120, "frame_end": 239, "team_id": "team_a", "human_note": "made shot; black/red side"},
+        {"run_key": "V3", "state": "shot_flight", "frame_start": 120, "frame_end": 239, "team_id": "team_a", "human_note": "black/red side"},
         {"run_key": "V3", "state": "possessed", "frame_start": 300, "frame_end": 389, "team_id": "team_a", "human_note": "black/red side possession"},
         {"run_key": "V3", "state": "possessed", "frame_start": 509, "frame_end": 658, "team_id": "team_b", "human_note": "white side possession after ball steal"},
         {"run_key": "V3", "state": "pass_flight", "frame_start": 689, "frame_end": 778, "team_id": "team_a", "human_note": "black side alley-oop sequence"},
@@ -113,12 +114,12 @@
         }
       },
       "samples": [
-        {"run_key": "V5", "state": "shot_flight", "frame_start": 0, "frame_end": 74, "team_id": "team_b", "human_note": "Sporting; green side shot in flight"},
-        {"run_key": "V5", "state": "possessed", "frame_start": 200, "frame_end": 224, "team_id": "team_b", "human_note": "Sporting; green side possessed"},
-        {"run_key": "V5", "state": "shot_flight", "frame_start": 275, "frame_end": 299, "team_id": "team_b", "human_note": "Sporting; green side shot made"},
-        {"run_key": "V5", "state": "pass_flight", "frame_start": 400, "frame_end": 424, "team_id": "team_a", "human_note": "FC Porto; blue/white side pass"},
-        {"run_key": "V5", "state": "possessed", "frame_start": 550, "frame_end": 550, "team_id": "team_a", "human_note": "FC Porto; blue/white side possessed"},
-        {"run_key": "V5", "state": "possessed", "frame_start": 750, "frame_end": 750, "team_id": "team_a", "human_note": "FC Porto; blue/white side possessed"}
+        {"run_key": "V5", "state": "shot_flight", "frame_start": 0, "frame_end": 74, "team_id": "team_b", "human_note": "green side shot in flight"},
+        {"run_key": "V5", "state": "possessed", "frame_start": 200, "frame_end": 224, "team_id": "team_b", "human_note": "green side possessed"},
+        {"run_key": "V5", "state": "shot_flight", "frame_start": 275, "frame_end": 299, "team_id": "team_b", "human_note": "green side shot made"},
+        {"run_key": "V5", "state": "pass_flight", "frame_start": 400, "frame_end": 424, "team_id": "team_a", "human_note": "blue/white side pass"},
+        {"run_key": "V5", "state": "possessed", "frame_start": 550, "frame_end": 550, "team_id": "team_a", "human_note": "blue/white side possessed"},
+        {"run_key": "V5", "state": "possessed", "frame_start": 750, "frame_end": 750, "team_id": "team_a", "human_note": "blue/white side possessed"}
       ]
     }
   }
