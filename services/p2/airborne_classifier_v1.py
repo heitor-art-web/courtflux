@@ -10,8 +10,8 @@ from typing import Any
 class AirborneClassifierV1:
     """Causal, trainable PASS/SHOT classifier for an active airborne hypothesis.
 
-    The feature contract intentionally mirrors fields already persisted in
-    ``p2_states.jsonl`` so development datasets can be built from ordinary probe runs.
+    The feature contract is FPS-normalized where time is involved so models trained on
+    mixed frame-rate clips can generalize by physical duration rather than raw frame count.
     No future frame is used. Without a trained JSON artifact the classifier only emits
     features and returns ``unresolved``; the caller may retain its existing fallback.
     """
@@ -20,8 +20,8 @@ class AirborneClassifierV1:
     CLASSES = ("unresolved", "pass_flight", "shot_flight")
     FEATURE_NAMES = (
         "flight_supported",
-        "flight_frames",
-        "flight_direct_observations",
+        "flight_duration_sec",
+        "flight_direct_observation_fraction",
         "flight_displacement_player_heights",
         "receiver_evidence",
         "raw_best_distinct_from_origin",
@@ -35,10 +35,10 @@ class AirborneClassifierV1:
         "shot_preflight_ball_to_rim_distance_norm",
         "shot_preflight_horizontal_distance_rim_widths",
         "shot_preflight_relative_y_rim_heights",
-        "shot_preflight_delta_distance_norm",
-        "shot_preflight_delta_relative_y",
-        "shot_preflight_approach_streak",
-        "shot_preflight_rising_streak",
+        "shot_preflight_distance_velocity_norm_per_sec",
+        "shot_preflight_vertical_velocity_heights_per_sec",
+        "shot_preflight_approach_duration_sec",
+        "shot_preflight_rising_duration_sec",
     )
 
     def __init__(self, model_path: str | Path | None = None) -> None:
@@ -94,6 +94,10 @@ class AirborneClassifierV1:
             return default
         return result if math.isfinite(result) else default
 
+    @classmethod
+    def _fps(cls, frame_state: Any) -> float:
+        return max(1.0, cls._float(getattr(frame_state, "fps", 30.0), 30.0))
+
     @staticmethod
     def _ball_position(frame_state: Any) -> tuple[float, float] | None:
         ball = getattr(frame_state, "ball_state", None)
@@ -139,7 +143,7 @@ class AirborneClassifierV1:
                 result.append((x1, y1, x2, y2))
         return result
 
-    def _preflight(self, frame_state: Any, frame_id: int) -> dict[str, float]:
+    def _preflight(self, frame_state: Any, frame_id: int, fps: float) -> dict[str, float]:
         position = self._ball_position(frame_state)
         rims = self._rims(frame_state)
         direct = self._direct_observed(frame_state)
@@ -153,10 +157,10 @@ class AirborneClassifierV1:
                 "shot_preflight_ball_to_rim_distance_norm": 0.0,
                 "shot_preflight_horizontal_distance_rim_widths": 0.0,
                 "shot_preflight_relative_y_rim_heights": 0.0,
-                "shot_preflight_delta_distance_norm": 0.0,
-                "shot_preflight_delta_relative_y": 0.0,
-                "shot_preflight_approach_streak": 0.0,
-                "shot_preflight_rising_streak": 0.0,
+                "shot_preflight_distance_velocity_norm_per_sec": 0.0,
+                "shot_preflight_vertical_velocity_heights_per_sec": 0.0,
+                "shot_preflight_approach_duration_sec": 0.0,
+                "shot_preflight_rising_duration_sec": 0.0,
             }
 
         bx, by = position
@@ -187,11 +191,13 @@ class AirborneClassifierV1:
             and self._last_distance_norm is not None
             and self._last_relative_y is not None
         )
-        delta_distance = 0.0
-        delta_relative_y = 0.0
+        distance_velocity = 0.0
+        vertical_velocity = 0.0
         if consecutive:
             delta_distance = distance - float(self._last_distance_norm)
             delta_relative_y = relative_y - float(self._last_relative_y)
+            distance_velocity = delta_distance * fps
+            vertical_velocity = delta_relative_y * fps
             self._approach_streak = self._approach_streak + 1 if delta_distance < 0.0 else 0
             self._rising_streak = self._rising_streak + 1 if delta_relative_y < 0.0 else 0
         else:
@@ -213,28 +219,41 @@ class AirborneClassifierV1:
             "shot_preflight_ball_to_rim_distance_norm": distance,
             "shot_preflight_horizontal_distance_rim_widths": horizontal,
             "shot_preflight_relative_y_rim_heights": relative_y,
-            "shot_preflight_delta_distance_norm": delta_distance,
-            "shot_preflight_delta_relative_y": delta_relative_y,
-            "shot_preflight_approach_streak": float(self._approach_streak),
-            "shot_preflight_rising_streak": float(self._rising_streak),
+            "shot_preflight_distance_velocity_norm_per_sec": distance_velocity,
+            "shot_preflight_vertical_velocity_heights_per_sec": vertical_velocity,
+            "shot_preflight_approach_duration_sec": float(self._approach_streak) / fps,
+            "shot_preflight_rising_duration_sec": float(self._rising_streak) / fps,
         }
 
     def features(self, *, frame_state: Any, p2: dict[str, Any]) -> dict[str, float]:
         frame_id = int(getattr(frame_state, "frame_id", 0))
+        fps = self._fps(frame_state)
         possession = dict(p2.get("possession", {}) or {})
         flight = dict(possession.get("flight", {}) or {})
         shot = dict(p2.get("shot", {}) or {})
+        flight_frames = max(0.0, self._float(flight.get("flight_frames"), 0.0))
+        direct_observations = max(
+            0.0, self._float(flight.get("flight_direct_observations"), 0.0)
+        )
         values = {
             "flight_supported": 1.0 if bool(flight.get("flight_supported", False)) else 0.0,
-            "flight_frames": self._float(flight.get("flight_frames"), 0.0),
-            "flight_direct_observations": self._float(flight.get("flight_direct_observations"), 0.0),
-            "flight_displacement_player_heights": self._float(flight.get("flight_displacement_player_heights"), 0.0),
-            "receiver_evidence": 1.0 if bool(possession.get("pass_flight_receiver_evidence", False)) else 0.0,
-            "raw_best_distinct_from_origin": 1.0 if bool(possession.get("raw_best_distinct_from_flight_origin", False)) else 0.0,
+            "flight_duration_sec": flight_frames / fps,
+            "flight_direct_observation_fraction": (
+                direct_observations / max(flight_frames, 1.0)
+            ),
+            "flight_displacement_player_heights": self._float(
+                flight.get("flight_displacement_player_heights"), 0.0
+            ),
+            "receiver_evidence": 1.0
+            if bool(possession.get("pass_flight_receiver_evidence", False))
+            else 0.0,
+            "raw_best_distinct_from_origin": 1.0
+            if bool(possession.get("raw_best_distinct_from_flight_origin", False))
+            else 0.0,
             "raw_best_score": self._float(possession.get("raw_best_score"), 0.0),
             "candidate_score": self._float(possession.get("candidate_score"), 0.0),
             "shot_active": 1.0 if bool(shot.get("active", False)) else 0.0,
-            **self._preflight(frame_state, frame_id),
+            **self._preflight(frame_state, frame_id, fps),
         }
         return {name: float(values[name]) for name in self.FEATURE_NAMES}
 
