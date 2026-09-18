@@ -2,7 +2,7 @@ name: Repository Python lint
 
 on:
   push:
-    branches: [main, p2-rebuilt]
+    branches: [main, p2-rebuilt, p3_foundation]
   pull_request:
     branches: [main]
 
@@ -37,6 +37,21 @@ jobs:
 
       - name: Run lightweight Python regression tests
         run: python -m pytest -q evaluation/smart_candidate_filter_test.py
+
+      - name: Run P3 foundation contract tests
+        run: >-
+          python -m pytest -q
+          evaluation/p3_source_contract_test.py
+          evaluation/p3_game_record_test.py
+          evaluation/p3_persistence_test.py
+          evaluation/p3_clip_planner_test.py
+          evaluation/p3_review_contract_test.py
+          evaluation/p3_review_builder_test.py
+          evaluation/p3_clip_generator_test.py
+          evaluation/p3_review_persistence_test.py
+          evaluation/p3_serialized_adapter_test.py
+          evaluation/p3_artifact_store_test.py
+          evaluation/p3_materializer_test.py
 
       - name: Run worker API contract tests
         run: python -m unittest -q evaluation.worker_api_contract_test
