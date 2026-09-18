@@ -124,6 +124,50 @@ class ShotEventTrackerV12(ShotEventTrackerV1):
         active_before = self._active is not None
         awaiting_rearm_before = bool(self._awaiting_rearm)
         can_start = bool(self._can_start(frame_id))
+
+        x_offset_rim_widths = None
+        y_offset_rim_heights = None
+        delta_y_offset_rim_heights = None
+        coherent_with_previous = False
+        geometry_consecutive = False
+
+        current_geometry = None
+        if self._direct_observed(ball_state) and ball_position is not None and rim is not None:
+            bx, by = ball_position
+            x1, y1, x2, y2 = rim
+            width = max(1.0, float(x2) - float(x1))
+            height = max(1.0, float(y2) - float(y1))
+            rim_x = (float(x1) + float(x2)) / 2.0
+            rim_y = (float(y1) + float(y2)) / 2.0
+            x_offset_rim_widths = abs(float(bx) - rim_x) / width
+            y_offset_rim_heights = (float(by) - rim_y) / height
+            current_geometry = {
+                "frame_id": int(frame_id),
+                "rim": rim,
+                "y_offset_rim_heights": y_offset_rim_heights,
+            }
+
+            previous = getattr(self, "_last_start_gate_geometry", None)
+            if isinstance(previous, dict):
+                previous_frame = int(previous.get("frame_id", -10**9))
+                previous_rim = previous.get("rim")
+                previous_y = previous.get("y_offset_rim_heights")
+                geometry_consecutive = previous_frame + 1 == int(frame_id)
+                coherent_with_previous = bool(
+                    geometry_consecutive
+                    and isinstance(previous_rim, tuple)
+                    and len(previous_rim) == 4
+                    and self._rim_boxes_overlap(previous_rim, rim)
+                )
+                if coherent_with_previous and previous_y is not None:
+                    delta_y_offset_rim_heights = (
+                        float(y_offset_rim_heights) - float(previous_y)
+                    )
+
+        # Diagnostic history is deliberately strict: any missing direct/rim geometry
+        # breaks the consecutive-motion chain rather than bridging evidence gaps.
+        self._last_start_gate_geometry = current_geometry
+
         return {
             "policy": "diagnostic_only_existing_start_gate_inputs",
             "frame_id": int(frame_id),
@@ -139,6 +183,11 @@ class ShotEventTrackerV12(ShotEventTrackerV1):
             "relative_rim_band": bool(relative["rim_band"]),
             "relative_below": bool(relative["below"]),
             "relative_inside_mouth": bool(relative["inside_mouth"]),
+            "x_offset_rim_widths": x_offset_rim_widths,
+            "y_offset_rim_heights": y_offset_rim_heights,
+            "delta_y_offset_rim_heights": delta_y_offset_rim_heights,
+            "rim_geometry_coherent_with_previous": coherent_with_previous,
+            "geometry_consecutive": geometry_consecutive,
             "semantic_jump_shot": bool(flags["jump_shot"]),
             "semantic_layup_dunk": bool(flags["layup_dunk"]),
             "semantic_start": semantic_start,
@@ -182,6 +231,10 @@ class ShotEventTrackerV12(ShotEventTrackerV1):
             self._promote_deferred_event_if_supported(event, frame_id=frame_id)
             for event in events
         ]
+
+    def reset(self, *, reason: str = "external_reset") -> None:
+        self._last_start_gate_geometry = None
+        super().reset(reason=reason)
 
     def diagnostics(self) -> dict[str, Any]:
         result = dict(super().diagnostics())
