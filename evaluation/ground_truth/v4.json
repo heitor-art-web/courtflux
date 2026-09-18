@@ -34,6 +34,64 @@
     "analysis_fps": 25.647,
     "note": "Metadata only. Human GT was authored blind from video and was not bootstrapped from P2 predictions."
   },
+  "human_kit_audit": {
+    "version": "courtflux_p2_human_kit_audit_v1",
+    "review_scope": "Gate C team-colour context only; does not rewrite frozen Gate A/B labels",
+    "prediction_blind": true,
+    "clip_context": "multiple equipment contexts inside one highlight clip; Gate C must score colour-stable runtime segments separately and aggregate them back to V4",
+    "classifier_feature_policy": "jersey_body colours are candidate team-classifier context; shorts and lettering are recorded as human context and are not automatically injected as torso colours",
+    "segments": [
+      {
+        "source_time_start_sec": 0.0,
+        "source_time_end_sec": 15.0,
+        "team_a": {
+          "name": null,
+          "shorts": ["White"],
+          "jersey_body": ["White"],
+          "lettering": ["Blue"]
+        },
+        "team_b": {
+          "name": null,
+          "shorts": ["Orange", "Blue"],
+          "jersey_body": ["Orange", "Blue"],
+          "lettering": ["Blue"]
+        }
+      },
+      {
+        "source_time_start_sec": 15.0,
+        "source_time_end_sec": 27.0,
+        "team_a": {
+          "name": null,
+          "shorts": ["Blue"],
+          "jersey_body": ["Blue", "White"],
+          "lettering": ["White"]
+        },
+        "team_b": {
+          "name": null,
+          "shorts": ["Yellow"],
+          "jersey_body": ["Yellow"],
+          "lettering": ["Black"]
+        }
+      },
+      {
+        "source_time_start_sec": 27.0,
+        "source_time_end_sec": 30.0,
+        "detail_status": "coarse_team_colour_only",
+        "team_a": {
+          "name": null,
+          "shorts": null,
+          "jersey_body": ["White"],
+          "lettering": null
+        },
+        "team_b": {
+          "name": null,
+          "shorts": null,
+          "jersey_body": ["Black"],
+          "lettering": null
+        }
+      }
+    ]
+  },
   "control_intervals": [
     {
       "state": "possessed",
@@ -226,9 +284,10 @@
   ],
   "notes": [
     "Pass A frozen from blind human video review.",
-    "Neutral V1-V5 policy: visual team colours are notes only; team_id remains null.",
+    "Neutral V1-V5 policy: visual team colours are notes only; event team_id remains null.",
     "The rebound at 27s is intentionally not converted into loose or possessed without an explicit human control-state label.",
     "The two passes in 15-18s remain one coarse pass_flight interval for Gate A; later gates may enrich individual pass timing without rewriting the frozen control-state observation.",
-    "Do not require frame-exact release or catch timing from the human reviewer."
+    "Do not require frame-exact release or catch timing from the human reviewer.",
+    "Detailed segmented Gate C equipment context is stored in human_kit_audit; the prior single static V4 match config is invalid for scoring."
   ]
 }
