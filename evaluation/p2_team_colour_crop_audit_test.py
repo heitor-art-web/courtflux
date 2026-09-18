@@ -19,7 +19,9 @@ class TeamColourCropAuditTest(unittest.TestCase):
 
     def test_torso_bounds_match_team_only_analyzer_primary_roi(self) -> None:
         player = np.zeros((100, 200, 3), dtype=np.uint8)
-        self.assertEqual(_team_torso_bounds(player), (44, 22, 156, 58))
+        # TeamOnlyAnalyzer uses int(h * 0.58), and 100 * 0.58 is represented
+        # just below 58.0 in binary floating point, so truncation yields 57.
+        self.assertEqual(_team_torso_bounds(player), (44, 22, 156, 57))
 
 
 if __name__ == "__main__":
