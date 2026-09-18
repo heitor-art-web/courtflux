@@ -3,6 +3,7 @@ from __future__ import annotations
 import argparse
 import json
 import sys
+from collections import Counter
 from pathlib import Path
 from typing import Any
 
@@ -82,6 +83,33 @@ def _same_gt_window_duplicates(
     }
 
 
+def _event_gt_readiness(gt: dict[str, Any], truth_shots: list[dict[str, Any]]) -> dict[str, Any]:
+    control_intervals = [
+        row
+        for row in list(gt.get("control_intervals", []) or [])
+        if isinstance(row, dict)
+    ]
+    shot_flight_intervals = sum(
+        1 for row in control_intervals if str(row.get("state") or "") == "shot_flight"
+    )
+    human_notes = " ".join(str(item) for item in list(gt.get("human_source_notes", []) or []))
+    human_notes_lower = human_notes.lower()
+    human_shot_signal = any(token in human_notes_lower for token in ("shot", "dunk", "free throw"))
+
+    # Gate B requires exhaustive shot-event GT. A clip with explicit human shot evidence
+    # but no shot_attempt events is not ready to contribute negative evidence/precision.
+    complete = not (len(truth_shots) == 0 and (shot_flight_intervals > 0 or human_shot_signal))
+    return {
+        "complete_for_gate_b": complete,
+        "shot_attempt_events": len(truth_shots),
+        "shot_flight_intervals": shot_flight_intervals,
+        "human_shot_signal": human_shot_signal,
+        "reason": None
+        if complete
+        else "human annotation contains shot evidence but events[] has no shot_attempt labels",
+    }
+
+
 def _clip_metrics(clip: str, run_id: str, tolerance_frames: int) -> dict[str, Any]:
     events_path = _run_events_path(run_id)
     gt_path = PROJECT_ROOT / "evaluation" / "ground_truth" / f"{clip.lower()}.json"
@@ -109,12 +137,29 @@ def _clip_metrics(clip: str, run_id: str, tolerance_frames: int) -> dict[str, An
         truth_shots,
         tolerance_frames=tolerance_frames,
     )
+    shot_matches = [
+        row
+        for row in list(event_eval.get("matches", []) or [])
+        if isinstance(row, dict) and str(row.get("event_type") or "") == SHOT_EVENT
+    ]
+    truth_outcomes = Counter(str(row.get("truth_outcome") or "unlabeled") for row in shot_matches)
+    predicted_outcomes = Counter(str(row.get("predicted_outcome") or "missing") for row in shot_matches)
+    outcome_pairs = Counter(
+        f"{str(row.get('truth_outcome') or 'unlabeled')}->{str(row.get('predicted_outcome') or 'missing')}"
+        for row in shot_matches
+    )
     return {
         "clip": clip,
         "run_id": run_id,
         "ground_truth_shots": len(truth_shots),
         "predicted_shots": len(predicted_shots),
+        "event_gt": _event_gt_readiness(gt, truth_shots),
         "shot": shot,
+        "outcome_diagnostics": {
+            "truth": dict(sorted(truth_outcomes.items())),
+            "predicted": dict(sorted(predicted_outcomes.items())),
+            "pairs": dict(sorted(outcome_pairs.items())),
+        },
         "duplicates": duplicates,
     }
 
@@ -124,6 +169,8 @@ def _aggregate(clips: list[dict[str, Any]]) -> dict[str, Any]:
     outcome_labeled = outcome_correct = 0
     duplicate_predictions = duplicate_windows = 0
     gt_shots = predicted_shots = 0
+    predicted_outcomes: Counter[str] = Counter()
+    outcome_pairs: Counter[str] = Counter()
 
     for clip in clips:
         shot = clip["shot"]
@@ -136,6 +183,8 @@ def _aggregate(clips: list[dict[str, Any]]) -> dict[str, Any]:
         duplicate_windows += int(clip["duplicates"]["duplicate_gt_windows"])
         gt_shots += int(clip["ground_truth_shots"])
         predicted_shots += int(clip["predicted_shots"])
+        predicted_outcomes.update(dict(clip["outcome_diagnostics"]["predicted"]))
+        outcome_pairs.update(dict(clip["outcome_diagnostics"]["pairs"]))
 
     precision = tp / max(tp + fp, 1)
     recall = tp / max(tp + fn, 1)
@@ -151,14 +200,27 @@ def _aggregate(clips: list[dict[str, Any]]) -> dict[str, Any]:
         "outcome_labeled_matches": outcome_labeled,
         "outcome_correct": outcome_correct,
         "outcome_accuracy": None if outcome_accuracy is None else round(outcome_accuracy, 4),
+        "predicted_outcomes_on_labeled_matches": dict(sorted(predicted_outcomes.items())),
+        "outcome_pairs": dict(sorted(outcome_pairs.items())),
         "same_gt_window_duplicate_predictions": duplicate_predictions,
         "duplicate_gt_windows": duplicate_windows,
     }
 
 
-def _gate_checks(aggregate: dict[str, Any]) -> dict[str, Any]:
+def _gate_checks(aggregate: dict[str, Any], clips: list[dict[str, Any]]) -> dict[str, Any]:
     outcome_accuracy = aggregate["outcome_accuracy"]
+    incomplete_gt = [
+        row["clip"]
+        for row in clips
+        if not bool(dict(row.get("event_gt", {}) or {}).get("complete_for_gate_b", False))
+    ]
     checks = [
+        {
+            "name": "development_event_gt_complete",
+            "actual": incomplete_gt,
+            "expected": "all development clips have exhaustive shot-event GT",
+            "passed": not incomplete_gt,
+        },
         {
             "name": "shot_attempt_recall",
             "actual": aggregate["recall"],
@@ -210,17 +272,18 @@ def main() -> None:
     challenge_clips = [row for row in clips if row["clip"] in CHALLENGE_CLIPS]
 
     aggregate = _aggregate(development)
-    gate = _gate_checks(aggregate)
+    gate = _gate_checks(aggregate, development)
     challenge_aggregate = _aggregate(challenge_clips)
-    challenge_gate = _gate_checks(challenge_aggregate)
+    challenge_gate = _gate_checks(challenge_aggregate, challenge_clips)
 
     result = {
-        "version": "courtflux_p2_gate_b_shot_event_v1",
+        "version": "courtflux_p2_gate_b_shot_event_v2",
         "contract": (
             "Gate B development blockers use V1/V3/V4/V5; V2 is challenge-only; "
             "shot existence is matched one-to-one to human windows; outcome is scored "
             "separately on matched labeled attempts; extra predictions associated with "
-            "one GT shot window are duplicate attempts"
+            "one GT shot window are duplicate attempts; development clips must have "
+            "exhaustive shot-event GT before Gate B can pass"
         ),
         "development_clips": list(DEVELOPMENT_CLIPS),
         "tolerance_frames": int(args.tolerance_frames),
