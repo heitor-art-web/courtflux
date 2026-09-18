@@ -21,6 +21,9 @@ class ShotEventTrackerV1(_BaseShotEventTrackerV1):
        of being emitted as UNKNOWN immediately. The candidate remains alive so later
        semantic/crossing evidence can resolve it; expiry without confirmation remains
        UNKNOWN.
+
+    Deferred-window diagnostics are observational only. They are exported to support
+    Gate-B analysis and do not participate in outcome decisions.
     """
 
     def __init__(
@@ -46,10 +49,130 @@ class ShotEventTrackerV1(_BaseShotEventTrackerV1):
         self.rim_exit_defer_frames = max(1, min(requested, self.reset_frames))
         self._deferred_rim_exit_frame: int | None = None
         self._deferred_rim_exit_deadline_frame: int | None = None
+        self._deferred_outcome_diagnostics: dict[str, Any] | None = None
 
     def _clear_deferred_rim_exit(self) -> None:
         self._deferred_rim_exit_frame = None
         self._deferred_rim_exit_deadline_frame = None
+        self._deferred_outcome_diagnostics = None
+
+    @staticmethod
+    def _normalized_x_offset(
+        ball_position: tuple[float, float],
+        rim: tuple[float, float, float, float],
+    ) -> float:
+        width = max(1.0, float(rim[2]) - float(rim[0]))
+        rim_x = (float(rim[0]) + float(rim[2])) / 2.0
+        return abs(float(ball_position[0]) - rim_x) / width
+
+    def _begin_deferred_outcome_diagnostics(self, candidate: Any) -> None:
+        previous_ball = candidate.last_geometry_ball_position
+        previous_rim = candidate.last_geometry_rim_bbox
+        previous_relative_y = None
+        if previous_ball is not None and previous_rim is not None:
+            previous_relative_y = float(previous_ball[1]) - self._rim_center_y(previous_rim)
+
+        self._deferred_outcome_diagnostics = {
+            "policy": "diagnostic_only_no_outcome_decision_effect",
+            "frames_seen": 0,
+            "direct_ball_observations": 0,
+            "rim_observations": 0,
+            "near_x_observations": 0,
+            "inside_mouth_observations": 0,
+            "below_rim_observations": 0,
+            "descending_steps": 0,
+            "ascending_steps": 0,
+            "flat_steps": 0,
+            "coherent_rim_steps": 0,
+            "incoherent_rim_steps": 0,
+            "ball_in_basket_semantic_frames": 0,
+            "min_abs_x_offset_rim_widths": None,
+            "last_abs_x_offset_rim_widths": None,
+            "previous_relative_y_px": previous_relative_y,
+            "previous_rim_bbox_px": None if previous_rim is None else list(previous_rim),
+        }
+
+    def _observe_deferred_outcome_frame(
+        self,
+        *,
+        ball_state: BallState | None,
+        court_state: CourtState | None,
+        semantic_evidence: list[dict[str, Any]] | None,
+    ) -> None:
+        diagnostics = self._deferred_outcome_diagnostics
+        if diagnostics is None:
+            return
+
+        diagnostics["frames_seen"] = int(diagnostics["frames_seen"]) + 1
+        flags = self._semantic_flags(list(semantic_evidence or []))
+        if flags["ball_in_basket"]:
+            diagnostics["ball_in_basket_semantic_frames"] = (
+                int(diagnostics["ball_in_basket_semantic_frames"]) + 1
+            )
+
+        if not self._direct_observed(ball_state):
+            return
+        ball_position = None if ball_state is None else ball_state.position()
+        if ball_position is None:
+            return
+
+        diagnostics["direct_ball_observations"] = (
+            int(diagnostics["direct_ball_observations"]) + 1
+        )
+        rim = self._nearest_rim(ball_position, self._rim_candidates(court_state))
+        if rim is None:
+            return
+
+        diagnostics["rim_observations"] = int(diagnostics["rim_observations"]) + 1
+        relative = self._relative_to_rim(ball_position, rim)
+        if relative["near_x"]:
+            diagnostics["near_x_observations"] = int(diagnostics["near_x_observations"]) + 1
+        if relative["inside_mouth"]:
+            diagnostics["inside_mouth_observations"] = (
+                int(diagnostics["inside_mouth_observations"]) + 1
+            )
+        if relative["below"]:
+            diagnostics["below_rim_observations"] = (
+                int(diagnostics["below_rim_observations"]) + 1
+            )
+
+        x_offset = self._normalized_x_offset(ball_position, rim)
+        diagnostics["last_abs_x_offset_rim_widths"] = x_offset
+        previous_min = diagnostics["min_abs_x_offset_rim_widths"]
+        if previous_min is None or x_offset < float(previous_min):
+            diagnostics["min_abs_x_offset_rim_widths"] = x_offset
+
+        previous_rim_raw = diagnostics["previous_rim_bbox_px"]
+        if isinstance(previous_rim_raw, list) and len(previous_rim_raw) >= 4:
+            previous_rim = tuple(float(value) for value in previous_rim_raw[:4])
+            if self._rim_boxes_overlap(previous_rim, rim):
+                diagnostics["coherent_rim_steps"] = int(diagnostics["coherent_rim_steps"]) + 1
+            else:
+                diagnostics["incoherent_rim_steps"] = int(diagnostics["incoherent_rim_steps"]) + 1
+
+        relative_y = float(ball_position[1]) - self._rim_center_y(rim)
+        previous_relative_y = diagnostics["previous_relative_y_px"]
+        if previous_relative_y is not None:
+            delta = relative_y - float(previous_relative_y)
+            if delta > 1e-6:
+                diagnostics["descending_steps"] = int(diagnostics["descending_steps"]) + 1
+            elif delta < -1e-6:
+                diagnostics["ascending_steps"] = int(diagnostics["ascending_steps"]) + 1
+            else:
+                diagnostics["flat_steps"] = int(diagnostics["flat_steps"]) + 1
+
+        diagnostics["previous_relative_y_px"] = relative_y
+        diagnostics["previous_rim_bbox_px"] = list(rim)
+
+    def _deferred_outcome_diagnostics_snapshot(self) -> dict[str, Any] | None:
+        diagnostics = self._deferred_outcome_diagnostics
+        if diagnostics is None:
+            return None
+        return {
+            key: value
+            for key, value in diagnostics.items()
+            if key not in {"previous_relative_y_px", "previous_rim_bbox_px"}
+        }
 
     def _record_current_direct_observation(
         self,
@@ -119,6 +242,9 @@ class ShotEventTrackerV1(_BaseShotEventTrackerV1):
             "continued_relative_descent_plus_coherent_rim_geometry_and_near_x"
         )
         event.provenance["rim_exit_after_gap_policy"] = "defer_then_confirm_or_unknown"
+        event.provenance["deferred_outcome_diagnostics_policy"] = (
+            "diagnostic_only_no_outcome_decision_effect"
+        )
         event.attributes["post_gap_motion_validated_for_outcome"] = (
             reason == "pending_bridge_post_gap_downward_motion_confirmed"
         )
@@ -126,6 +252,9 @@ class ShotEventTrackerV1(_BaseShotEventTrackerV1):
         event.attributes["rim_exit_deferred_frame"] = self._deferred_rim_exit_frame
         event.attributes["rim_exit_deferred_deadline_frame"] = (
             self._deferred_rim_exit_deadline_frame
+        )
+        event.attributes["deferred_outcome_diagnostics"] = (
+            self._deferred_outcome_diagnostics_snapshot()
         )
         return event
 
@@ -209,6 +338,13 @@ class ShotEventTrackerV1(_BaseShotEventTrackerV1):
         court_state: CourtState | None,
         semantic_evidence: list[dict[str, Any]] | None = None,
     ) -> list[BasketballEvent]:
+        if self._deferred_rim_exit_frame is not None:
+            self._observe_deferred_outcome_frame(
+                ball_state=ball_state,
+                court_state=court_state,
+                semantic_evidence=semantic_evidence,
+            )
+
         candidate_before = self._active
         last_resolved_before = self._last_resolved_frame
         awaiting_rearm_before = self._awaiting_rearm
@@ -245,6 +381,12 @@ class ShotEventTrackerV1(_BaseShotEventTrackerV1):
                         int(frame_id) + self.rim_exit_defer_frames
                     )
                     candidate_before.evidence.add("rim_exit_after_observation_gap_deferred")
+                    self._begin_deferred_outcome_diagnostics(candidate_before)
+                    self._observe_deferred_outcome_frame(
+                        ball_state=ball_state,
+                        court_state=court_state,
+                        semantic_evidence=semantic_evidence,
+                    )
 
                 self._restore_deferred_candidate(
                     candidate_before,
@@ -307,6 +449,7 @@ class ShotEventTrackerV1(_BaseShotEventTrackerV1):
                 "rim_exit_deferred": self._deferred_rim_exit_frame is not None,
                 "rim_exit_deferred_frame": self._deferred_rim_exit_frame,
                 "rim_exit_deferred_deadline_frame": self._deferred_rim_exit_deadline_frame,
+                "deferred_outcome_diagnostics": self._deferred_outcome_diagnostics_snapshot(),
             }
         )
         return result
