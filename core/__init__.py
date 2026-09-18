@@ -32,6 +32,19 @@ from .p3_contract import (
     validate_source_event_batch,
 )
 from .p3_review import HumanReviewState, P3HumanReview, ReviewCorrectionType
+from .p4_spatial_contract import (
+    P4_SPATIAL_CONTRACT_VERSION,
+    P4_SPATIAL_FORBIDDEN_SEMANTICS,
+    P4_SPATIAL_FRAME_FIELDS,
+    P4_SPATIAL_GEOMETRY_FIELDS,
+    P4_SPATIAL_PLAYER_FIELDS,
+    P4_UPSTREAM_COURT_COORDINATE_SYSTEM,
+    P4SpatialContractError,
+    SpatialFrame,
+    SpatialGeometryEvidence,
+    SpatialPlayerObservation,
+    p4_spatial_contract_manifest,
+)
 
 __all__ = [
     "FrameState",
@@ -65,4 +78,15 @@ __all__ = [
     "HumanReviewState",
     "P3HumanReview",
     "ReviewCorrectionType",
+    "P4_SPATIAL_CONTRACT_VERSION",
+    "P4_SPATIAL_FORBIDDEN_SEMANTICS",
+    "P4_SPATIAL_FRAME_FIELDS",
+    "P4_SPATIAL_GEOMETRY_FIELDS",
+    "P4_SPATIAL_PLAYER_FIELDS",
+    "P4_UPSTREAM_COURT_COORDINATE_SYSTEM",
+    "P4SpatialContractError",
+    "SpatialFrame",
+    "SpatialGeometryEvidence",
+    "SpatialPlayerObservation",
+    "p4_spatial_contract_manifest",
 ]
