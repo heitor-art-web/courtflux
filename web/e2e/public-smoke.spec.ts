@@ -44,6 +44,7 @@ test("language selector is embedded in the public header and switches locales", 
 test("public navigation separates global, contextual and mobile actions", async ({ page }) => {
   await page.goto("/basketball-video-analysis");
 
+  const header = page.locator("header");
   const primary = page.getByRole("navigation", { name: "Primary navigation" });
   await expect(primary.getByRole("link", { name: "Product" })).toBeVisible();
   await expect(primary.getByRole("link", { name: "How it works" })).toBeVisible();
@@ -53,17 +54,51 @@ test("public navigation separates global, contextual and mobile actions", async 
   await expect(contextual.getByRole("link", { name: "How it works" })).toBeVisible();
   await expect(contextual.getByRole("link", { name: "Capabilities" })).toBeVisible();
 
-  await expect(page.getByRole("link", { name: "Sign in", exact: true })).toBeVisible();
-  await expect(page.getByRole("link", { name: "Analyze your first game free", exact: true })).toBeVisible();
+  const signIn = header.getByRole("link", { name: "Sign in", exact: true });
+  const cta = header.getByRole("link", { name: "Analyze your first game free", exact: true });
+  await expect(signIn).toBeVisible();
+  await expect(cta).toBeVisible();
+
+  for (const width of [320, 430, 820]) {
+    await page.setViewportSize({ width, height: 844 });
+    const menuButton = header.getByRole("button", { name: "Open navigation" });
+    const language = header.locator("select[aria-label]");
+
+    for (const control of [menuButton, language, signIn, cta]) {
+      await expect(control).toBeVisible();
+      const box = await control.boundingBox();
+      expect(box).not.toBeNull();
+      expect(box!.x).toBeGreaterThanOrEqual(0);
+      expect(box!.x + box!.width).toBeLessThanOrEqual(width + 1);
+    }
+  }
 
   await page.setViewportSize({ width: 390, height: 844 });
-  await expect(page.getByRole("link", { name: "Sign in", exact: true })).toBeVisible();
-  await expect(page.getByRole("link", { name: "Analyze your first game free", exact: true })).toBeVisible();
-  await page.getByRole("button", { name: "Open navigation" }).click().catch(async () => {
-    await page.getByText("Menu", { exact: true }).click();
-  });
+  await header.getByRole("button", { name: "Open navigation" }).click();
+  const closeButton = header.getByRole("button", { name: "Close navigation" });
+  await expect(closeButton).toHaveAttribute("aria-expanded", "true");
+
   const mobile = page.getByRole("navigation", { name: "Mobile primary navigation" });
   await expect(mobile.getByRole("link", { name: "Product" })).toBeVisible();
+
+  await page.keyboard.press("Escape");
+  const reopenedButton = header.getByRole("button", { name: "Open navigation" });
+  await expect(reopenedButton).toHaveAttribute("aria-expanded", "false");
+  await expect(reopenedButton).toBeFocused();
+});
+
+test("mobile menu closes after same-page anchor navigation", async ({ page }) => {
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.goto("/");
+
+  const header = page.locator("header");
+  await header.getByRole("button", { name: "Open navigation" }).click();
+  const mobile = page.getByRole("navigation", { name: "Mobile primary navigation" });
+  await mobile.getByRole("link", { name: "How it works" }).click();
+
+  await expect(page).toHaveURL(/\/#how$/);
+  await expect(header.getByRole("button", { name: "Open navigation" })).toHaveAttribute("aria-expanded", "false");
+  await expect(mobile).not.toBeVisible();
 });
 
 test("skip link moves focus to main content", async ({ page }) => {

@@ -1,0 +1,16 @@
+.menuIcon i {
+  transform-origin: center;
+  transition: transform 160ms ease, opacity 120ms ease;
+}
+
+.menuIconOpen i:first-child {
+  transform: translateY(4.5px) rotate(45deg);
+}
+
+.menuIconOpen i:nth-child(2) {
+  opacity: 0;
+}
+
+.menuIconOpen i:last-child {
+  transform: translateY(-4.5px) rotate(-45deg);
+}

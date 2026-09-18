@@ -5,6 +5,7 @@ import homeSource from "@/data/pages/home.json";
 import { localeFromPathname, type Locale } from "@/lib/i18n/config";
 import { localizeContent } from "@/lib/i18n/public-content";
 import { LanguageSwitcher } from "./language-switcher";
+import { PublicMobileMenu } from "./public-mobile-menu";
 import design from "./public-design-system.module.css";
 import styles from "./public-marketing-shell.module.css";
 
@@ -53,7 +54,9 @@ function navigationLabels(locale: Locale) {
       primary: "Navegação principal",
       mobile: "Navegação principal móvel",
       menu: "Menu",
+      close: "Fechar",
       openMenu: "Abrir navegação",
+      closeMenu: "Fechar navegação",
     };
   }
   if (locale === "es-ES") {
@@ -61,14 +64,18 @@ function navigationLabels(locale: Locale) {
       primary: "Navegación principal",
       mobile: "Navegación principal móvil",
       menu: "Menú",
+      close: "Cerrar",
       openMenu: "Abrir navegación",
+      closeMenu: "Cerrar navegación",
     };
   }
   return {
     primary: "Primary navigation",
     mobile: "Mobile primary navigation",
     menu: "Menu",
+    close: "Close",
     openMenu: "Open navigation",
+    closeMenu: "Close navigation",
   };
 }
 
@@ -108,17 +115,14 @@ export function PublicHeader({
 
         <div className={styles.utilities}>
           <LanguageSwitcher tone="light" />
-          <details className={styles.mobileMenu}>
-            <summary aria-label={labels.openMenu}>
-              <span aria-hidden="true" className={styles.menuIcon}><i /><i /><i /></span>
-              <span>{labels.menu}</span>
-            </summary>
-            <nav aria-label={labels.mobile}>
-              {primary.map((item) => (
-                <Link href={item.href} key={`mobile-${item.href}-${item.label}`}>{item.label}</Link>
-              ))}
-            </nav>
-          </details>
+          <PublicMobileMenu
+            items={primary}
+            navigationLabel={labels.mobile}
+            menuLabel={labels.menu}
+            closeLabel={labels.close}
+            openNavigationLabel={labels.openMenu}
+            closeNavigationLabel={labels.closeMenu}
+          />
         </div>
 
         <div className={styles.headerActions}>
