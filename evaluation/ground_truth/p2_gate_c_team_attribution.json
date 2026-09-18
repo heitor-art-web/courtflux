@@ -1,0 +1,79 @@
+{
+  "version": "courtflux_p2_gate_c_team_gt_v1",
+  "policy": {
+    "source": "transcription of explicit human visual-team colour notes already frozen in V1-V5 GT",
+    "prediction_blind": true,
+    "original_gate_a_b_gt_unchanged": true,
+    "unknown_preferred_over_guess": true,
+    "scoring_unit": "one human-attributable control/event window",
+    "possessed_prediction_source": "modal non-unknown current_team_id on predicted possessed frames inside the human window",
+    "pass_prediction_source": "matched pass_candidate.team_id",
+    "shot_prediction_source": "matched shot_attempt.team_id",
+    "development_clips": ["V1", "V3", "V4", "V5"],
+    "challenge_clips": ["V2"]
+  },
+  "clips": {
+    "V1": {
+      "match_config": "evaluation/match_configs/gate_c_v1.json",
+      "teams": ["green_white", "red"],
+      "samples": [
+        {"state": "possessed", "frame_start": 0, "frame_end": 50, "team_id": "green_white", "human_note": "jogador de verde e branco"},
+        {"state": "possessed", "frame_start": 125, "frame_end": 150, "team_id": "red", "human_note": "jogador de vermelho"},
+        {"state": "pass_flight", "frame_start": 300, "frame_end": 325, "team_id": "red", "human_note": "pass flight; jogador vermelho"},
+        {"state": "possessed", "frame_start": 350, "frame_end": 375, "team_id": "red", "human_note": "jogador vermelho"},
+        {"state": "possessed", "frame_start": 625, "frame_end": 650, "team_id": "red", "human_note": "jogador vermelho"}
+      ]
+    },
+    "V2": {
+      "match_config": "evaluation/match_configs/gate_c_v2.json",
+      "teams": ["red", "white"],
+      "samples": [
+        {"state": "shot_flight", "frame_start": 400, "frame_end": 550, "team_id": "red", "human_note": "shot flight; made; equipa visualmente vermelha"},
+        {"state": "possessed", "frame_start": 600, "frame_end": 650, "team_id": "red", "human_note": "posse visualmente da equipa vermelha"},
+        {"state": "shot_flight", "frame_start": 700, "frame_end": 800, "team_id": "red", "human_note": "shot flight; made; equipa visualmente vermelha"},
+        {"state": "pass_flight", "frame_start": 850, "frame_end": 900, "team_id": "red", "human_note": "pass flight; equipa visualmente vermelha"},
+        {"state": "shot_flight", "frame_start": 900, "frame_end": 1000, "team_id": "red", "human_note": "shot flight; made; equipa visualmente vermelha"},
+        {"state": "possessed", "frame_start": 1100, "frame_end": 1150, "team_id": "white", "human_note": "posse visualmente da equipa branca"},
+        {"state": "shot_flight", "frame_start": 1200, "frame_end": 1300, "team_id": "white", "human_note": "shot/dunk flight; made; equipa visualmente branca"},
+        {"state": "possessed", "frame_start": 1350, "frame_end": 1450, "team_id": "red", "human_note": "posse visualmente da equipa vermelha"}
+      ]
+    },
+    "V3": {
+      "match_config": "evaluation/match_configs/gate_c_v3.json",
+      "teams": ["black", "white"],
+      "samples": [
+        {"state": "shot_flight", "frame_start": 120, "frame_end": 239, "team_id": "black", "human_note": "made shot; black team"},
+        {"state": "possessed", "frame_start": 300, "frame_end": 389, "team_id": "black", "human_note": "black team possession"},
+        {"state": "possessed", "frame_start": 509, "frame_end": 658, "team_id": "white", "human_note": "white team possession after ball steal"},
+        {"state": "pass_flight", "frame_start": 689, "frame_end": 778, "team_id": "black", "human_note": "black team alley-oop sequence"},
+        {"state": "pass_flight", "frame_start": 779, "frame_end": 808, "team_id": "black", "human_note": "black team pass flight"},
+        {"state": "possessed", "frame_start": 809, "frame_end": 899, "team_id": "black", "human_note": "black team possession"}
+      ]
+    },
+    "V4": {
+      "match_config": "evaluation/match_configs/gate_c_v4.json",
+      "teams": ["white", "blue"],
+      "samples": [
+        {"state": "possessed", "frame_start": 0, "frame_end": 299, "team_id": "white", "human_note": "white team possessed"},
+        {"state": "pass_flight", "frame_start": 360, "frame_end": 419, "team_id": "white", "human_note": "white team pass flight"},
+        {"state": "possessed", "frame_start": 480, "frame_end": 599, "team_id": "white", "human_note": "white team possessed"},
+        {"state": "shot_flight", "frame_start": 660, "frame_end": 839, "team_id": "white", "human_note": "white team shot; made"},
+        {"state": "pass_flight", "frame_start": 900, "frame_end": 1079, "team_id": "blue", "human_note": "blue team; two successful passes"},
+        {"state": "possessed", "frame_start": 1140, "frame_end": 1259, "team_id": "blue", "human_note": "blue team possessed"},
+        {"state": "possessed", "frame_start": 1680, "frame_end": 1799, "team_id": "white", "human_note": "white team possessed"}
+      ]
+    },
+    "V5": {
+      "match_config": "evaluation/match_configs/gate_c_v5.json",
+      "teams": ["green", "blue"],
+      "samples": [
+        {"state": "shot_flight", "frame_start": 0, "frame_end": 74, "team_id": "green", "human_note": "shot in flight; made; green team"},
+        {"state": "possessed", "frame_start": 200, "frame_end": 224, "team_id": "green", "human_note": "green team possessed"},
+        {"state": "shot_flight", "frame_start": 275, "frame_end": 299, "team_id": "green", "human_note": "shot made; green team"},
+        {"state": "pass_flight", "frame_start": 400, "frame_end": 424, "team_id": "blue", "human_note": "pass in flight; made; blue team"},
+        {"state": "possessed", "frame_start": 550, "frame_end": 550, "team_id": "blue", "human_note": "blue team possessed"},
+        {"state": "possessed", "frame_start": 750, "frame_end": 750, "team_id": "blue", "human_note": "blue team possessed"}
+      ]
+    }
+  }
+}
