@@ -15,18 +15,19 @@ class TeamOnlyAnalyzer:
 
     Team identity is independent from colour names. Active kits are represented as one
     or more colour prototypes in CIELAB space and player crops are scored by continuous
-    distance to those prototypes. Arbitrary colours can be supplied as ``#RRGGBB``,
+    affinity to those prototypes. Arbitrary colours can be supplied as ``#RRGGBB``,
     ``{"rgb": [r, g, b]}`` or ``{"hsv": [degrees, saturation_0_1, value_0_1]}``.
 
     Legacy colour-name strings remain supported as configuration aliases only. They are
     converted to numeric prototypes before inference; no named hard-mask participates
     in the team decision.
 
-    Team scoring is discriminative per pixel: every torso pixel compares all teams on
-    the same evidence. Only pixels with enough absolute affinity and a clear relative
-    winner cast a vote. This prevents different teams from cherry-picking different
-    top-k pixels from the same crop and naturally leaves background/skin/ambiguous
-    colours unattributed.
+    Chromatic prototypes use hue/chroma-dominant affinity with deliberately weak
+    lightness dependence so shadows, compression and exposure changes do not turn one
+    kit colour into another. Near-neutral prototypes (white/grey/black) instead require
+    low chroma plus compatible lightness. Team scoring remains discriminative per pixel:
+    every torso pixel compares all teams on the same evidence and ambiguous pixels can
+    abstain.
     """
 
     # These are classifier-internal development parameters, not Gate-C thresholds.
@@ -36,7 +37,17 @@ class TeamOnlyAnalyzer:
     PIXEL_MIN_AFFINITY = 0.20
     PIXEL_MIN_MARGIN = 0.04
 
+    # LAB_SIGMA is retained as a compatibility/diagnostic reference for older tooling.
+    # Team affinity no longer uses isotropic 3-D Lab distance.
     LAB_SIGMA = 34.0
+    CHROMATIC_PROTOTYPE_MIN_CHROMA = 18.0
+    CHROMATIC_HUE_SIGMA_RAD = 0.62
+    CHROMATIC_CHROMA_SIGMA = 70.0
+    CHROMATIC_LIGHTNESS_SIGMA = 110.0
+    CHROMATIC_PIXEL_RELIABLE_CHROMA = 18.0
+    NEUTRAL_CHROMA_SIGMA = 20.0
+    NEUTRAL_LIGHTNESS_SIGMA = 55.0
+
     TOP_PIXEL_FRACTION = 0.35
     SHARED_COLOUR_FLOOR = 0.12
     DISTINCTIVENESS_SIGMA = 38.0
@@ -67,9 +78,8 @@ class TeamOnlyAnalyzer:
         "Silver": (185, 185, 185),
     }
 
-    # Identity-v2 already consumes these keys as a fixed-length vector. They now form a
-    # continuous anchor basis: every crop is softly projected onto the anchors in Lab
-    # space. An arbitrary colour therefore still has a meaningful temporal embedding.
+    # Identity-v2 already consumes these keys as a fixed-length vector. They remain a
+    # continuous anchor basis: every crop is softly projected onto numeric prototypes.
     CONTINUOUS_BASIS = ("Black", "Grey", "White", "Blue", "Navy", "Red", "Green", "Yellow")
 
     def __init__(self, profiling_path: str):
@@ -240,20 +250,72 @@ class TeamOnlyAnalyzer:
 
     @classmethod
     def _affinity(cls, lab_pixels: np.ndarray, prototype_lab: np.ndarray) -> np.ndarray:
-        distance = np.linalg.norm(lab_pixels - prototype_lab.reshape(1, 3), axis=1)
-        return np.exp(-0.5 * np.square(distance / max(cls.LAB_SIGMA, 1e-6)))
+        """Continuous Lab affinity robust to illumination for chromatic colours.
+
+        OpenCV stores Lab channels in 0..255 with neutral a=b=128. For chromatic
+        prototypes we compare hue direction strongly, chroma magnitude softly, and
+        lightness very softly. Near-neutral prototypes use a separate low-chroma plus
+        lightness model so white/grey/black cannot win merely because a coloured jersey
+        is dark or desaturated by the camera.
+        """
+        pixels = lab_pixels.astype(np.float32)
+        prototype = prototype_lab.astype(np.float32).reshape(3)
+
+        pixel_l = pixels[:, 0]
+        pixel_ab = pixels[:, 1:3] - 128.0
+        pixel_chroma = np.linalg.norm(pixel_ab, axis=1)
+
+        prototype_ab = prototype[1:3] - 128.0
+        prototype_chroma = float(np.linalg.norm(prototype_ab))
+        lightness_delta = np.abs(pixel_l - float(prototype[0]))
+
+        if prototype_chroma < cls.CHROMATIC_PROTOTYPE_MIN_CHROMA:
+            chroma_affinity = np.exp(
+                -0.5 * np.square(pixel_chroma / max(cls.NEUTRAL_CHROMA_SIGMA, 1e-6))
+            )
+            lightness_affinity = np.exp(
+                -0.5
+                * np.square(
+                    lightness_delta / max(cls.NEUTRAL_LIGHTNESS_SIGMA, 1e-6)
+                )
+            )
+            return chroma_affinity * lightness_affinity
+
+        denominator = np.maximum(pixel_chroma * prototype_chroma, 1e-6)
+        cosine = np.sum(pixel_ab * prototype_ab.reshape(1, 2), axis=1) / denominator
+        cosine = np.clip(cosine, -1.0, 1.0)
+        hue_delta = np.arccos(cosine)
+        hue_affinity = np.exp(
+            -0.5
+            * np.square(
+                hue_delta / max(cls.CHROMATIC_HUE_SIGMA_RAD, 1e-6)
+            )
+        )
+        chroma_delta = np.abs(pixel_chroma - prototype_chroma)
+        chroma_affinity = np.exp(
+            -0.5
+            * np.square(
+                chroma_delta / max(cls.CHROMATIC_CHROMA_SIGMA, 1e-6)
+            )
+        )
+        lightness_affinity = np.exp(
+            -0.5
+            * np.square(
+                lightness_delta / max(cls.CHROMATIC_LIGHTNESS_SIGMA, 1e-6)
+            )
+        )
+        chroma_reliability = np.clip(
+            pixel_chroma / max(cls.CHROMATIC_PIXEL_RELIABLE_CHROMA, 1e-6),
+            0.0,
+            1.0,
+        )
+        return hue_affinity * chroma_affinity * lightness_affinity * chroma_reliability
 
     def _team_scores(
         self,
         lab_pixels: np.ndarray,
     ) -> tuple[dict[str, float], dict[str, float], float, int]:
-        """Score teams from one shared discriminative pixel pool.
-
-        Each pixel first gets one affinity per team (the strongest weighted kit-colour
-        prototype for that team). A pixel contributes only when the strongest team has
-        enough absolute affinity and enough margin over the runner-up. Team raw scores
-        are then normalized winning evidence mass, making them directly comparable.
-        """
+        """Score teams from one shared discriminative pixel pool."""
         team_names = [str(team) for team in self.active_colour_prototypes]
         prototype_affinity: dict[str, float] = {}
         if not team_names or lab_pixels.size == 0:
@@ -347,6 +409,7 @@ class TeamOnlyAnalyzer:
 
     def score_teams(self, crop: np.ndarray) -> dict:
         """Return selective team evidence using continuous discriminative CIELAB affinity."""
+        colour_space = "CIELAB_continuous_chroma_luminance_v3"
         empty = {
             "scores": {},
             "raw_scores": {str(team): 0.0 for team in self.rosters},
@@ -361,7 +424,7 @@ class TeamOnlyAnalyzer:
             "prototype_affinity": {},
             "active_kits": self.active_kits,
             "active_colour_prototypes": self._public_prototypes(),
-            "colour_space": "CIELAB_continuous_discriminative_v2",
+            "colour_space": colour_space,
         }
         if crop is None or crop.size == 0 or not self.rosters:
             return empty
@@ -417,7 +480,7 @@ class TeamOnlyAnalyzer:
             },
             "active_kits": self.active_kits,
             "active_colour_prototypes": self._public_prototypes(),
-            "colour_space": "CIELAB_continuous_discriminative_v2",
+            "colour_space": colour_space,
         }
 
     def get_team_color(self, crop: np.ndarray) -> Optional[str]:
