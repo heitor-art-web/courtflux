@@ -45,17 +45,39 @@ class PhysicalClipArtifact:
     size_bytes: int
     checksum_sha256: str
     content_type: str
-    generation_version: str
+    game_id: str
+    analysis_run_id: str
+    source_video_ref: str
+    review_type: str
+    source_start_ms: int
+    source_end_ms: int
     clip_start_ms: int
     clip_end_ms: int
     source_event_ids: tuple[str, ...]
+    source_possession_id: str | None
+    game_player_ids: tuple[str, ...]
+    context_policy_version: str
+    request_contract_version: str
+    request_fingerprint: str
+    generation_version: str
 
     def metadata(self) -> dict[str, Any]:
         return {
-            "generation_version": self.generation_version,
+            "game_id": self.game_id,
+            "analysis_run_id": self.analysis_run_id,
+            "source_video_ref": self.source_video_ref,
+            "review_type": self.review_type,
+            "source_start_ms": self.source_start_ms,
+            "source_end_ms": self.source_end_ms,
             "clip_start_ms": self.clip_start_ms,
             "clip_end_ms": self.clip_end_ms,
             "source_event_ids": list(self.source_event_ids),
+            "source_possession_id": self.source_possession_id,
+            "game_player_ids": list(self.game_player_ids),
+            "context_policy_version": self.context_policy_version,
+            "request_contract_version": self.request_contract_version,
+            "request_fingerprint": self.request_fingerprint,
+            "generation_version": self.generation_version,
         }
 
 
@@ -69,6 +91,53 @@ def resolve_ffmpeg_executable() -> str:
         return str(imageio_ffmpeg.get_ffmpeg_exe())
     except Exception as exc:  # pragma: no cover - environment-specific dependency path
         raise ClipGenerationError("ffmpeg is unavailable") from exc
+
+
+def probe_video_duration_ms(
+    source_path: str | Path,
+    *,
+    ffprobe_path: str | None = None,
+    runner: Callable[..., Any] = subprocess.run,
+) -> int | None:
+    """Best-effort source duration probe used to clamp planned review clips."""
+
+    source = Path(source_path)
+    if not source.exists() or not source.is_file() or source.stat().st_size <= 0:
+        raise ClipGenerationError(f"source video is missing or empty: {source}")
+
+    executable = ffprobe_path or shutil.which("ffprobe")
+    if not executable:
+        return None
+
+    try:
+        result = runner(
+            [
+                str(executable),
+                "-v",
+                "error",
+                "-show_entries",
+                "format=duration",
+                "-of",
+                "default=noprint_wrappers=1:nokey=1",
+                str(source),
+            ],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+    except Exception:
+        return None
+
+    if int(getattr(result, "returncode", 1)) != 0:
+        return None
+    raw = str(getattr(result, "stdout", "") or "").strip()
+    try:
+        seconds = float(raw)
+    except (TypeError, ValueError):
+        return None
+    if seconds <= 0 or seconds != seconds or seconds == float("inf"):
+        return None
+    return max(1, int(round(seconds * 1000.0)))
 
 
 def build_ffmpeg_command(
@@ -96,8 +165,6 @@ def build_ffmpeg_command(
         "-y",
         "-loglevel",
         "error",
-        # Input seeking is fast for long game videos. Because the output is transcoded,
-        # ffmpeg's accurate-seek path discards frames before the requested timestamp.
         "-ss",
         f"{start_seconds:.3f}",
         "-i",
@@ -144,12 +211,7 @@ def generate_physical_clip(
     ffmpeg_path: str | None = None,
     runner: Callable[..., Any] = subprocess.run,
 ) -> PhysicalClipArtifact:
-    """Generate one H.264/AAC MP4 evidence clip and atomically publish the file.
-
-    This function only materializes bytes. Durable upload/`analysis_artifacts` linkage is
-    intentionally a separate persistence step so a failed upload cannot be confused with
-    a successfully generated local clip.
-    """
+    """Generate one H.264/AAC MP4 evidence clip and atomically publish the file."""
 
     config = config or PhysicalClipConfig()
     source = Path(source_path)
@@ -187,7 +249,9 @@ def generate_physical_clip(
 
     if int(getattr(result, "returncode", 1)) != 0:
         working.unlink(missing_ok=True)
-        detail = str(getattr(result, "stderr", "") or "ffmpeg returned no error output").strip()
+        detail = str(
+            getattr(result, "stderr", "") or "ffmpeg returned no error output"
+        ).strip()
         raise ClipGenerationError(f"ffmpeg clip generation failed: {detail}")
     if not working.exists() or working.stat().st_size <= 0:
         working.unlink(missing_ok=True)
@@ -199,8 +263,19 @@ def generate_physical_clip(
         size_bytes=output.stat().st_size,
         checksum_sha256=_checksum(output),
         content_type="video/mp4",
-        generation_version=config.version,
+        game_id=request.game_id,
+        analysis_run_id=request.analysis_run_id,
+        source_video_ref=request.source_video_ref,
+        review_type=request.review_type,
+        source_start_ms=request.source_start_ms,
+        source_end_ms=request.source_end_ms,
         clip_start_ms=request.clip_start_ms,
         clip_end_ms=request.clip_end_ms,
         source_event_ids=tuple(request.source_event_ids),
+        source_possession_id=request.source_possession_id,
+        game_player_ids=tuple(request.game_player_ids),
+        context_policy_version=request.context_policy_version,
+        request_contract_version=request.contract_version,
+        request_fingerprint=request.fingerprint(),
+        generation_version=config.version,
     )

@@ -10,6 +10,7 @@ from services.p3.clip_generator import (
     PhysicalClipConfig,
     build_ffmpeg_command,
     generate_physical_clip,
+    probe_video_duration_ms,
 )
 
 
@@ -17,12 +18,14 @@ def _request() -> P3ClipRequest:
     return P3ClipRequest(
         game_id="game-1",
         analysis_run_id="run-1",
+        source_video_ref="analysis-run:run-1",
         review_type="shot",
         source_start_ms=10_000,
         source_end_ms=10_500,
         clip_start_ms=4_000,
         clip_end_ms=14_500,
         source_event_ids=("shot-1",),
+        source_possession_id="possession-4",
         game_player_ids=("game_player_03",),
     )
 
@@ -44,7 +47,7 @@ def test_ffmpeg_command_uses_versioned_transcode_profile_and_source_time() -> No
     assert command[-1] == "clip.mp4"
 
 
-def test_generator_atomically_materializes_clip_and_returns_checksum() -> None:
+def test_generator_atomically_materializes_clip_and_returns_full_lineage() -> None:
     class _Result:
         returncode = 0
         stderr = ""
@@ -72,7 +75,11 @@ def test_generator_atomically_materializes_clip_and_returns_checksum() -> None:
         assert artifact.size_bytes == len(b"courtflux-clip")
         assert artifact.checksum_sha256 == sha256(b"courtflux-clip").hexdigest()
         assert artifact.content_type == "video/mp4"
+        assert artifact.analysis_run_id == "run-1"
+        assert artifact.source_video_ref == "analysis-run:run-1"
+        assert artifact.source_possession_id == "possession-4"
         assert artifact.metadata()["source_event_ids"] == ["shot-1"]
+        assert artifact.metadata()["request_fingerprint"] == _request().fingerprint()
 
 
 def test_generator_failure_does_not_publish_partial_clip() -> None:
@@ -123,13 +130,29 @@ def test_generator_refuses_version_mismatch() -> None:
         raise AssertionError("version mismatch must not silently produce a clip")
 
 
-def main() -> None:
-    test_ffmpeg_command_uses_versioned_transcode_profile_and_source_time()
-    test_generator_atomically_materializes_clip_and_returns_checksum()
-    test_generator_failure_does_not_publish_partial_clip()
-    test_generator_refuses_version_mismatch()
-    print("p3_clip_generator_test: PASS")
+def test_duration_probe_converts_ffprobe_seconds_to_ms() -> None:
+    class _Result:
+        returncode = 0
+        stdout = "61.234\n"
+
+    def fake_runner(command, **kwargs):
+        del command, kwargs
+        return _Result()
+
+    with TemporaryDirectory() as temp_dir:
+        source = Path(temp_dir) / "game.mp4"
+        source.write_bytes(b"source-video")
+        assert probe_video_duration_ms(
+            source,
+            ffprobe_path="ffprobe-test",
+            runner=fake_runner,
+        ) == 61_234
 
 
 if __name__ == "__main__":
-    main()
+    test_ffmpeg_command_uses_versioned_transcode_profile_and_source_time()
+    test_generator_atomically_materializes_clip_and_returns_full_lineage()
+    test_generator_failure_does_not_publish_partial_clip()
+    test_generator_refuses_version_mismatch()
+    test_duration_probe_converts_ffprobe_seconds_to_ms()
+    print("p3_clip_generator_test: PASS")

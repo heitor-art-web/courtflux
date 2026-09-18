@@ -1,17 +1,26 @@
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from hashlib import sha256
 import json
 from pathlib import Path
 from typing import Any, Callable, Iterable
 
+from core.p3_clip import (
+    P3_CLIP_REQUEST_CONTRACT_VERSION,
+    analysis_run_source_ref,
+)
 from core.p3_contract import P3DerivationSpec, P3SourceEvent
-from services.p3.artifact_store import P3ArtifactStore, StoredClipArtifact
+from services.p3.artifact_store import (
+    P3ArtifactStore,
+    P3_CLIP_STORAGE_CONTRACT_VERSION,
+    StoredClipArtifact,
+)
 from services.p3.clip_generator import (
     PhysicalClipArtifact,
     PhysicalClipConfig,
     generate_physical_clip,
+    probe_video_duration_ms,
 )
 from services.p3.p2_adapter import adapt_p2_event_rows
 from services.p3.persistence import P3PersistenceStore, clip_plan_id
@@ -30,10 +39,25 @@ class P3MaterializationResult:
     clip_ready_count: int
     clip_failed_count: int
     clip_reused_count: int
+    clip_generation_attempted_count: int
+    clip_generation_succeeded_count: int
+    clip_generation_deferred_count: int
     counts_by_type: dict[str, int]
     counts_by_support_state: dict[str, int]
     excluded_by_policy: dict[str, int]
     errors: tuple[str, ...] = ()
+
+    @property
+    def clip_ready_rate(self) -> float | None:
+        if self.clip_planned_count <= 0:
+            return None
+        return self.clip_ready_count / self.clip_planned_count
+
+    @property
+    def clip_attempt_success_rate(self) -> float | None:
+        if self.clip_generation_attempted_count <= 0:
+            return None
+        return self.clip_generation_succeeded_count / self.clip_generation_attempted_count
 
     def as_dict(self) -> dict[str, Any]:
         return {
@@ -44,6 +68,11 @@ class P3MaterializationResult:
             "clip_ready_count": self.clip_ready_count,
             "clip_failed_count": self.clip_failed_count,
             "clip_reused_count": self.clip_reused_count,
+            "clip_generation_attempted_count": self.clip_generation_attempted_count,
+            "clip_generation_succeeded_count": self.clip_generation_succeeded_count,
+            "clip_generation_deferred_count": self.clip_generation_deferred_count,
+            "clip_ready_rate": self.clip_ready_rate,
+            "clip_attempt_success_rate": self.clip_attempt_success_rate,
             "counts_by_type": dict(self.counts_by_type),
             "counts_by_support_state": dict(self.counts_by_support_state),
             "excluded_by_policy": dict(self.excluded_by_policy),
@@ -73,8 +102,6 @@ def _canonical_source_fingerprint(events: Iterable[P3SourceEvent]) -> str:
 
 
 def load_p2_event_rows(path: str | Path) -> list[dict[str, Any]]:
-    """Load the canonical P2 JSONL export without changing event semantics."""
-
     source = Path(path)
     if not source.exists() or not source.is_file():
         raise FileNotFoundError(f"P2 event JSONL does not exist: {source}")
@@ -100,12 +127,6 @@ def load_p2_event_rows(path: str | Path) -> list[dict[str, Any]]:
 
 
 class P3Materializer:
-    """Materialize Things to Review and durable physical evidence from P3 source events.
-
-    The source-event truth is immutable. Re-running with the same source events and
-    versioned policy reuses the same derivation and already-ready clip artifacts.
-    """
-
     def __init__(
         self,
         client: Any | None = None,
@@ -113,6 +134,7 @@ class P3Materializer:
         persistence: P3PersistenceStore | Any | None = None,
         artifact_store: P3ArtifactStore | Any | None = None,
         clip_generator: Callable[..., PhysicalClipArtifact] = generate_physical_clip,
+        duration_probe: Callable[[str | Path], int | None] = probe_video_duration_ms,
     ) -> None:
         if persistence is None:
             if client is None:
@@ -125,6 +147,7 @@ class P3Materializer:
         self.persistence = persistence
         self.artifact_store = artifact_store
         self.clip_generator = clip_generator
+        self.duration_probe = duration_probe
 
     def materialize(
         self,
@@ -135,6 +158,8 @@ class P3Materializer:
         analysis_run_id: str,
         source_video_path: str | Path,
         output_dir: str | Path,
+        source_video_ref: str | None = None,
+        source_duration_ms: int | None = None,
         policy: ReviewBuildPolicy | None = None,
         clip_config: PhysicalClipConfig | None = None,
         cleanup_local_after_upload: bool = True,
@@ -148,6 +173,35 @@ class P3Materializer:
                 raise ValueError(
                     "P3 source event analysis_run_id does not match materialization run"
                 )
+
+        source_video = Path(source_video_path)
+        if not source_video.exists() or not source_video.is_file() or source_video.stat().st_size <= 0:
+            raise ValueError(f"source video is missing or empty: {source_video}")
+
+        resolved_source_ref = (
+            str(source_video_ref).strip()
+            if source_video_ref is not None
+            else analysis_run_source_ref(str(analysis_run_id))
+        )
+        if not resolved_source_ref:
+            raise ValueError("source_video_ref must be non-empty")
+
+        resolved_duration_ms = source_duration_ms
+        duration_probe_status = "provided" if source_duration_ms is not None else "unknown"
+        if resolved_duration_ms is None:
+            try:
+                resolved_duration_ms = self.duration_probe(source_video)
+                duration_probe_status = (
+                    "probed" if resolved_duration_ms is not None else "unavailable"
+                )
+            except Exception:
+                resolved_duration_ms = None
+                duration_probe_status = "failed"
+        if resolved_duration_ms is not None and int(resolved_duration_ms) <= 0:
+            raise ValueError("source_duration_ms must be positive when provided")
+        resolved_duration_ms = (
+            int(resolved_duration_ms) if resolved_duration_ms is not None else None
+        )
 
         policy = policy or ReviewBuildPolicy()
         clip_config = clip_config or PhysicalClipConfig()
@@ -177,10 +231,14 @@ class P3Materializer:
             source_versions={
                 "p2_events_sha256": source_fingerprint,
                 "p2_runtime_versions": ",".join(runtime_versions) or "unknown",
+                "source_video_ref": resolved_source_ref,
             },
             configuration={
                 "review_policy": policy.as_dict(),
                 "clip_generation": clip_config.as_dict(),
+                "clip_request_contract_version": P3_CLIP_REQUEST_CONTRACT_VERSION,
+                "clip_storage_contract_version": P3_CLIP_STORAGE_CONTRACT_VERSION,
+                "source_duration_ms": resolved_duration_ms,
                 "artifact_bucket": getattr(
                     self.artifact_store, "bucket", "analysis-artifacts"
                 ),
@@ -191,6 +249,8 @@ class P3Materializer:
             spec=spec,
             provenance={
                 "materializer_version": P3_THINGS_TO_REVIEW_DERIVATION_VERSION,
+                "source_video_ref": resolved_source_ref,
+                "source_duration_probe": duration_probe_status,
                 **dict(provenance or {}),
             },
         )
@@ -203,9 +263,19 @@ class P3Materializer:
         snapshot = build_things_to_review(
             rows,
             policy=policy,
+            source_duration_ms=resolved_duration_ms,
             game_id=str(game_id),
             analysis_run_id=str(analysis_run_id),
         )
+
+        for result in snapshot.items:
+            request = result.clip_request
+            if request is None:
+                continue
+            request.source_video_ref = resolved_source_ref
+            request.source_possession_id = result.item.source_possession_id
+            request.generation_version = clip_config.version
+
         self.persistence.persist_review_snapshot(
             workspace_id=str(workspace_id),
             derivation_id=derivation_id,
@@ -219,13 +289,15 @@ class P3Materializer:
         ]
         existing = self.persistence.get_clip_states(clip_ids)
 
-        source_video = Path(source_video_path)
         output_root = Path(output_dir)
         output_root.mkdir(parents=True, exist_ok=True)
 
         ready = 0
         failed = 0
         reused = 0
+        attempted = 0
+        succeeded = 0
+        deferred = 0
         errors: list[str] = []
 
         for result in snapshot.items:
@@ -240,7 +312,12 @@ class P3Materializer:
                 reused += 1
                 continue
 
-            self.persistence.mark_clip_generating(clip_id)
+            acquired = bool(self.persistence.mark_clip_generating(clip_id))
+            if not acquired:
+                deferred += 1
+                continue
+            attempted += 1
+
             output_path = output_root / f"{clip_id}.mp4"
             try:
                 physical = self.clip_generator(
@@ -255,11 +332,14 @@ class P3Materializer:
                     clip_id=clip_id,
                     artifact=physical,
                 )
-                self.persistence.mark_clip_ready(
+                completed = self.persistence.mark_clip_ready(
                     clip_id,
                     artifact_id=stored.artifact_id,
                 )
+                if completed is False:
+                    raise RuntimeError("clip generation completion lease was not accepted")
                 ready += 1
+                succeeded += 1
                 if cleanup_local_after_upload:
                     output_path.unlink(missing_ok=True)
             except Exception as exc:
@@ -276,6 +356,9 @@ class P3Materializer:
             clip_ready_count=ready,
             clip_failed_count=failed,
             clip_reused_count=reused,
+            clip_generation_attempted_count=attempted,
+            clip_generation_succeeded_count=succeeded,
+            clip_generation_deferred_count=deferred,
             counts_by_type=snapshot.counts_by_type(),
             counts_by_support_state=snapshot.counts_by_support_state(),
             excluded_by_policy=dict(snapshot.excluded_by_policy),
@@ -288,6 +371,11 @@ class P3Materializer:
                 "review_policy_version": policy.version,
                 "clip_context_policy_version": policy.clip_context_policy.version,
                 "clip_generation_version": clip_config.version,
+                "clip_request_contract_version": P3_CLIP_REQUEST_CONTRACT_VERSION,
+                "clip_storage_contract_version": P3_CLIP_STORAGE_CONTRACT_VERSION,
+                "source_video_ref": resolved_source_ref,
+                "source_duration_ms": resolved_duration_ms,
+                "source_duration_probe": duration_probe_status,
                 "source_events_sha256": source_fingerprint,
                 "ranking_applied": False,
                 "accuracy_thresholds_applied": bool(
@@ -306,6 +394,8 @@ class P3Materializer:
         analysis_run_id: str,
         source_video_path: str | Path,
         output_dir: str | Path,
+        source_video_ref: str | None = None,
+        source_duration_ms: int | None = None,
         p2_contract_version: str = "core.basketball_event.v1",
         p2_runtime_version: str | None = None,
         policy: ReviewBuildPolicy | None = None,
@@ -328,6 +418,8 @@ class P3Materializer:
             analysis_run_id=analysis_run_id,
             source_video_path=source_video_path,
             output_dir=output_dir,
+            source_video_ref=source_video_ref,
+            source_duration_ms=source_duration_ms,
             policy=policy,
             clip_config=clip_config,
             cleanup_local_after_upload=cleanup_local_after_upload,

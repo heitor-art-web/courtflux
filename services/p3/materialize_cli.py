@@ -32,6 +32,20 @@ def main() -> None:
     )
     parser.add_argument("--events", required=True, help="Canonical P2 events JSONL")
     parser.add_argument("--source-video", required=True, help="Local source-video path")
+    parser.add_argument(
+        "--source-video-ref",
+        default=None,
+        help=(
+            "Stable logical source reference stored with P3 clips. Defaults to "
+            "analysis-run:<analysis-run-id>, which resolves through analysis_runs.video_source."
+        ),
+    )
+    parser.add_argument(
+        "--source-duration-ms",
+        type=int,
+        default=None,
+        help="Optional known full source-video duration in milliseconds; otherwise ffprobe is best-effort.",
+    )
     parser.add_argument("--workspace-id", required=True)
     parser.add_argument("--game-id", required=True)
     parser.add_argument("--analysis-run-id", required=True)
@@ -55,6 +69,8 @@ def main() -> None:
         analysis_run_id=args.analysis_run_id,
         source_video_path=Path(args.source_video),
         output_dir=Path(args.output_dir),
+        source_video_ref=args.source_video_ref,
+        source_duration_ms=args.source_duration_ms,
         p2_runtime_version=args.p2_runtime_version,
         cleanup_local_after_upload=not args.keep_local_clips,
         provenance={"entrypoint": "services.p3.materialize_cli"},

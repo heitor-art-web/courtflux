@@ -1,6 +1,10 @@
 from __future__ import annotations
 
-from core.p3_clip import ClipContextPolicy, plan_evidence_clip
+from core.p3_clip import (
+    P3_CLIP_REQUEST_CONTRACT_VERSION,
+    ClipContextPolicy,
+    plan_evidence_clip,
+)
 from core.p3_contract import P3SourceEvent
 
 
@@ -36,6 +40,7 @@ def test_default_shot_context_is_regenerable_from_source_time() -> None:
         source_duration_ms=60_000,
     )
 
+    assert request.source_video_ref == "analysis-run:run-1"
     assert request.source_start_ms == 10_000
     assert request.source_end_ms == 10_500
     assert request.clip_start_ms == 4_000
@@ -43,6 +48,8 @@ def test_default_shot_context_is_regenerable_from_source_time() -> None:
     assert request.source_event_ids == ("shot-1",)
     assert request.game_player_ids == ("game_player_03",)
     assert request.context_policy_version == "p3.clip_context.v1"
+    assert request.contract_version == P3_CLIP_REQUEST_CONTRACT_VERSION
+    assert len(request.fingerprint()) == 64
 
 
 def test_policy_change_changes_context_without_changing_source_interval() -> None:
@@ -54,8 +61,10 @@ def test_policy_change_changes_context_without_changing_source_interval() -> Non
         [_event("shot-1", 10_000, 10_500)],
         review_type="shot",
         policy=policy,
+        source_video_ref="upload:game-1",
     )
 
+    assert request.source_video_ref == "upload:game-1"
     assert request.source_start_ms == 10_000
     assert request.source_end_ms == 10_500
     assert request.clip_start_ms == 8_000
@@ -73,6 +82,19 @@ def test_clip_bounds_are_clamped_to_source_video() -> None:
     assert request.clip_end_ms == 60_000
 
 
+def test_source_interval_outside_video_is_rejected() -> None:
+    try:
+        plan_evidence_clip(
+            [_event("event-1", 59_500, 60_500)],
+            review_type="shot",
+            source_duration_ms=60_000,
+        )
+    except ValueError as exc:
+        assert "outside the source-video duration" in str(exc)
+    else:
+        raise AssertionError("invalid source interval must not produce a clip plan")
+
+
 def test_multiple_events_preserve_all_evidence_ids_and_players() -> None:
     request = plan_evidence_clip(
         [
@@ -86,33 +108,35 @@ def test_multiple_events_preserve_all_evidence_ids_and_players() -> None:
             ),
         ],
         review_type="alley_oop",
+        source_possession_id="possession-12",
     )
     assert request.source_start_ms == 20_000
     assert request.source_end_ms == 21_400
     assert request.source_event_ids == ("pass-1", "shot-1")
+    assert request.source_possession_id == "possession-12"
     assert request.game_player_ids == ("game_player_03", "game_player_05")
 
 
-def test_clip_requires_timestamped_evidence() -> None:
+def test_clip_requires_timestamped_evidence_for_every_source_event() -> None:
     try:
         plan_evidence_clip(
-            [_event("event-1", None, None)],
+            [
+                _event("event-1", 10_000, 10_500),
+                _event("event-2", None, None),
+            ],
             review_type="shot",
         )
     except ValueError as exc:
-        assert "requires source-video timestamps" in str(exc)
+        assert "every source event" in str(exc)
     else:
-        raise AssertionError("untimestamped evidence must not produce a physical clip")
-
-
-def main() -> None:
-    test_default_shot_context_is_regenerable_from_source_time()
-    test_policy_change_changes_context_without_changing_source_interval()
-    test_clip_bounds_are_clamped_to_source_video()
-    test_multiple_events_preserve_all_evidence_ids_and_players()
-    test_clip_requires_timestamped_evidence()
-    print("p3_clip_planner_test: PASS")
+        raise AssertionError("partial timestamps must not produce a physical clip")
 
 
 if __name__ == "__main__":
-    main()
+    test_default_shot_context_is_regenerable_from_source_time()
+    test_policy_change_changes_context_without_changing_source_interval()
+    test_clip_bounds_are_clamped_to_source_video()
+    test_source_interval_outside_video_is_rejected()
+    test_multiple_events_preserve_all_evidence_ids_and_players()
+    test_clip_requires_timestamped_evidence_for_every_source_event()
+    print("p3_clip_planner_test: PASS")

@@ -33,6 +33,8 @@ class _Query:
                 "on_conflict": self.on_conflict,
             }
         )
+        if self.operation.startswith("rpc:"):
+            return _Result(True)
         return _Result([])
 
 
@@ -45,9 +47,6 @@ class _Table:
         query = _Query(self.client, f"upsert:{self.name}", payload)
         query.on_conflict = on_conflict
         return query
-
-    def update(self, payload: Any) -> _Query:
-        return _Query(self.client, f"update:{self.name}", payload)
 
 
 class _Client:
@@ -75,11 +74,13 @@ def _event() -> P3SourceEvent:
         start_ms=10_000,
         end_ms=10_500,
         actor_game_player_id="game_player_03",
+        attributes={"possession_id": "possession-4"},
     )
 
 
 def test_review_snapshot_persistence_is_idempotent_by_deterministic_ids() -> None:
     snapshot = build_things_to_review([_event()])
+    snapshot.items[0].clip_request.source_possession_id = "possession-4"
     client = _Client()
     store = P3PersistenceStore(client)
     derivation_id = "11111111-1111-1111-1111-111111111111"
@@ -100,6 +101,10 @@ def test_review_snapshot_persistence_is_idempotent_by_deterministic_ids() -> Non
     clip = clip_call["payload"][0]
     item = review_call["payload"][0]
     assert item["clip_id"] == clip["id"]
+    assert clip["source_video_ref"] == "analysis-run:run-1"
+    assert clip["source_possession_id"] == "possession-4"
+    assert clip["request_contract_version"] == "p3.clip_request.v1"
+    assert len(clip["request_fingerprint"]) == 64
     assert "status" not in clip
     assert "artifact_id" not in clip
     assert "error" not in clip
@@ -107,29 +112,27 @@ def test_review_snapshot_persistence_is_idempotent_by_deterministic_ids() -> Non
     assert item["id"] == review_item_id(derivation_id, snapshot.items[0].item)
 
 
-def test_clip_status_transitions_are_separate_from_generation() -> None:
+def test_clip_status_transitions_use_generation_lifecycle_rpcs() -> None:
     client = _Client()
     store = P3PersistenceStore(client)
 
-    store.mark_clip_generating("clip-1")
-    store.mark_clip_ready("clip-1", artifact_id="artifact-1")
-    store.mark_clip_failed("clip-2", error="upload failed")
+    assert store.mark_clip_generating("clip-1") is True
+    assert store.mark_clip_ready("clip-1", artifact_id="artifact-1") is True
+    assert store.mark_clip_failed("clip-2", error="upload failed") is True
 
-    assert client.calls[0]["payload"] == {"status": "generating", "error": None}
+    assert client.calls[0]["operation"] == "rpc:begin_p3_clip_generation"
+    assert client.calls[0]["payload"]["p_clip_id"] == "clip-1"
+    assert client.calls[0]["payload"]["p_lease_seconds"] == 900
+    assert client.calls[1]["operation"] == "rpc:complete_p3_clip_generation"
     assert client.calls[1]["payload"] == {
-        "status": "ready",
-        "artifact_id": "artifact-1",
-        "error": None,
+        "p_clip_id": "clip-1",
+        "p_artifact_id": "artifact-1",
     }
-    assert client.calls[2]["payload"]["status"] == "failed"
-    assert client.calls[2]["filters"] == [("id", "clip-2")]
-
-
-def main() -> None:
-    test_review_snapshot_persistence_is_idempotent_by_deterministic_ids()
-    test_clip_status_transitions_are_separate_from_generation()
-    print("p3_review_persistence_test: PASS")
+    assert client.calls[2]["operation"] == "rpc:fail_p3_clip_generation"
+    assert client.calls[2]["payload"]["p_error"] == "upload failed"
 
 
 if __name__ == "__main__":
-    main()
+    test_review_snapshot_persistence_is_idempotent_by_deterministic_ids()
+    test_clip_status_transitions_use_generation_lifecycle_rpcs()
+    print("p3_review_persistence_test: PASS")

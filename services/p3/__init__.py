@@ -3,12 +3,14 @@ from .artifact_store import (
     StoredClipArtifact,
     P3_ARTIFACT_BUCKET,
     P3_CLIP_ARTIFACT_KIND,
+    P3_CLIP_STORAGE_CONTRACT_VERSION,
 )
 from .clip_generator import (
     ClipGenerationError,
     PhysicalClipArtifact,
     PhysicalClipConfig,
     generate_physical_clip,
+    probe_video_duration_ms,
 )
 from .game_record import GameRecordSnapshot, build_game_record_snapshot
 from .materializer import (
@@ -43,10 +45,12 @@ __all__ = [
     "StoredClipArtifact",
     "P3_ARTIFACT_BUCKET",
     "P3_CLIP_ARTIFACT_KIND",
+    "P3_CLIP_STORAGE_CONTRACT_VERSION",
     "ClipGenerationError",
     "PhysicalClipArtifact",
     "PhysicalClipConfig",
     "generate_physical_clip",
+    "probe_video_duration_ms",
     "GameRecordSnapshot",
     "build_game_record_snapshot",
     "P3MaterializationResult",

@@ -10,6 +10,7 @@ from services.p3.clip_generator import PhysicalClipArtifact
 
 P3_ARTIFACT_BUCKET = "analysis-artifacts"
 P3_CLIP_ARTIFACT_KIND = "p3_evidence_clip"
+P3_CLIP_STORAGE_CONTRACT_VERSION = "p3.clip_storage.v1"
 
 
 @dataclass(slots=True)
@@ -81,6 +82,11 @@ class P3ArtifactStore:
         clip_id: str,
         artifact: PhysicalClipArtifact,
     ) -> StoredClipArtifact:
+        if artifact.analysis_run_id != str(analysis_run_id):
+            raise RuntimeError("physical clip analysis_run_id does not match artifact destination")
+        if artifact.content_type != "video/mp4":
+            raise RuntimeError("P3 evidence clips must be stored as video/mp4")
+
         path = Path(artifact.path)
         if not path.exists() or not path.is_file() or path.stat().st_size <= 0:
             raise RuntimeError(f"physical clip is missing or empty: {path}")
@@ -119,7 +125,7 @@ class P3ArtifactStore:
             "clip_id": str(clip_id),
             "workspace_id": str(workspace_id),
             "checksum_algorithm": "sha256",
-            "storage_contract_version": "p3.clip_storage.v1",
+            "storage_contract_version": P3_CLIP_STORAGE_CONTRACT_VERSION,
         }
         row = {
             "run_id": str(analysis_run_id),

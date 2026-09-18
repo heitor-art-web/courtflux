@@ -13,8 +13,14 @@ from services.p3.persistence import clip_plan_id
 
 
 class _Persistence:
-    def __init__(self, clip_states: dict[str, dict[str, Any]] | None = None) -> None:
+    def __init__(
+        self,
+        clip_states: dict[str, dict[str, Any]] | None = None,
+        *,
+        acquire: bool = True,
+    ) -> None:
         self.clip_states = dict(clip_states or {})
+        self.acquire = acquire
         self.persisted_events: list[P3SourceEvent] = []
         self.snapshot = None
         self.generating: list[str] = []
@@ -54,16 +60,23 @@ class _Persistence:
         return {"clips": snapshot.clip_plannable_count, "review_items": snapshot.total_items}
 
     def get_clip_states(self, clip_ids: list[str]) -> dict[str, dict[str, Any]]:
-        return {clip_id: self.clip_states[clip_id] for clip_id in clip_ids if clip_id in self.clip_states}
+        return {
+            clip_id: self.clip_states[clip_id]
+            for clip_id in clip_ids
+            if clip_id in self.clip_states
+        }
 
-    def mark_clip_generating(self, clip_id: str) -> None:
+    def mark_clip_generating(self, clip_id: str) -> bool:
         self.generating.append(clip_id)
+        return self.acquire
 
-    def mark_clip_ready(self, clip_id: str, *, artifact_id: str) -> None:
+    def mark_clip_ready(self, clip_id: str, *, artifact_id: str) -> bool:
         self.ready.append((clip_id, artifact_id))
+        return True
 
-    def mark_clip_failed(self, clip_id: str, *, error: str) -> None:
+    def mark_clip_failed(self, clip_id: str, *, error: str) -> bool:
         self.failed.append((clip_id, error))
+        return True
 
     def set_output_summary(self, derivation_id: str, summary: dict[str, Any]) -> None:
         assert derivation_id == "derivation-1"
@@ -118,6 +131,7 @@ def _event() -> P3SourceEvent:
         actor_track_id=7,
         evidence=("shot_flight",),
         provenance={"version": "shot_tracker_v1"},
+        attributes={"possession_id": "possession-7"},
         source_runtime_version="p2_engine_v1",
     )
 
@@ -139,16 +153,27 @@ def _generator_calls(calls: list[dict[str, Any]]):
             size_bytes=Path(output_path).stat().st_size,
             checksum_sha256=checksum,
             content_type="video/mp4",
-            generation_version=config.version,
+            game_id=request.game_id,
+            analysis_run_id=request.analysis_run_id,
+            source_video_ref=request.source_video_ref,
+            review_type=request.review_type,
+            source_start_ms=request.source_start_ms,
+            source_end_ms=request.source_end_ms,
             clip_start_ms=request.clip_start_ms,
             clip_end_ms=request.clip_end_ms,
             source_event_ids=tuple(request.source_event_ids),
+            source_possession_id=request.source_possession_id,
+            game_player_ids=tuple(request.game_player_ids),
+            context_policy_version=request.context_policy_version,
+            request_contract_version=request.contract_version,
+            request_fingerprint=request.fingerprint(),
+            generation_version=config.version,
         )
 
     return _generate
 
 
-def test_materializer_persists_review_items_clips_and_summary() -> None:
+def test_materializer_persists_durable_clip_lineage_and_metrics() -> None:
     with TemporaryDirectory() as tmp:
         source = Path(tmp) / "game.mp4"
         source.write_bytes(b"source")
@@ -159,6 +184,7 @@ def test_materializer_persists_review_items_clips_and_summary() -> None:
             persistence=persistence,
             artifact_store=artifacts,
             clip_generator=_generator_calls(generator_calls),
+            duration_probe=lambda _path: 60_000,
         )
 
         result = materializer.materialize(
@@ -175,14 +201,18 @@ def test_materializer_persists_review_items_clips_and_summary() -> None:
         assert result.clip_ready_count == 1
         assert result.clip_failed_count == 0
         assert result.clip_reused_count == 0
-        assert len(persistence.persisted_events) == 1
-        assert persistence.snapshot is not None
-        assert len(generator_calls) == 1
-        assert len(artifacts.calls) == 1
-        assert len(persistence.ready) == 1
-        assert persistence.summary is not None
-        assert persistence.spec.source_versions["p2_events_sha256"]
-        assert persistence.spec.source_versions["p2_runtime_versions"] == "p2_engine_v1"
+        assert result.clip_generation_attempted_count == 1
+        assert result.clip_generation_succeeded_count == 1
+        assert result.clip_generation_deferred_count == 0
+        assert result.clip_ready_rate == 1.0
+        request = persistence.snapshot.items[0].clip_request
+        assert request.source_video_ref == "analysis-run:run-1"
+        assert request.source_possession_id == "possession-7"
+        assert request.clip_end_ms <= 60_000
+        assert persistence.spec.source_versions["source_video_ref"] == "analysis-run:run-1"
+        assert persistence.spec.configuration["source_duration_ms"] == 60_000
+        assert persistence.summary["clip_request_contract_version"] == "p3.clip_request.v1"
+        assert persistence.summary["clip_storage_contract_version"] == "p3.clip_storage.v1"
         assert not generator_calls[0]["output_path"].exists()
 
 
@@ -190,16 +220,14 @@ def test_materializer_reuses_already_ready_durable_clip() -> None:
     with TemporaryDirectory() as tmp:
         source = Path(tmp) / "game.mp4"
         source.write_bytes(b"source")
-
-        first_persistence = _Persistence()
-        first_artifacts = _ArtifactStore()
-        materializer = P3Materializer(
-            persistence=first_persistence,
-            artifact_store=first_artifacts,
+        first = _Persistence()
+        first_materializer = P3Materializer(
+            persistence=first,
+            artifact_store=_ArtifactStore(),
             clip_generator=_generator_calls([]),
+            duration_probe=lambda _path: 60_000,
         )
-        # Build once only to obtain the deterministic clip id for this derivation.
-        materializer.materialize(
+        first_materializer.materialize(
             [_event()],
             workspace_id="workspace-1",
             game_id="game-1",
@@ -207,8 +235,7 @@ def test_materializer_reuses_already_ready_durable_clip() -> None:
             source_video_path=source,
             output_dir=Path(tmp) / "first",
         )
-        request = first_persistence.snapshot.items[0].clip_request
-        assert request is not None
+        request = first.snapshot.items[0].clip_request
         clip_id = clip_plan_id("derivation-1", request)
 
         persistence = _Persistence(
@@ -226,6 +253,7 @@ def test_materializer_reuses_already_ready_durable_clip() -> None:
             persistence=persistence,
             artifact_store=artifacts,
             clip_generator=_generator_calls(generator_calls),
+            duration_probe=lambda _path: 60_000,
         ).materialize(
             [_event()],
             workspace_id="workspace-1",
@@ -237,11 +265,35 @@ def test_materializer_reuses_already_ready_durable_clip() -> None:
 
         assert result.clip_ready_count == 1
         assert result.clip_reused_count == 1
-        assert result.clip_failed_count == 0
+        assert result.clip_generation_attempted_count == 0
         assert generator_calls == []
         assert artifacts.calls == []
         assert persistence.generating == []
-        assert persistence.ready == []
+
+
+def test_materializer_defers_when_generation_lease_is_held_elsewhere() -> None:
+    with TemporaryDirectory() as tmp:
+        source = Path(tmp) / "game.mp4"
+        source.write_bytes(b"source")
+        persistence = _Persistence(acquire=False)
+        calls: list[dict[str, Any]] = []
+        result = P3Materializer(
+            persistence=persistence,
+            artifact_store=_ArtifactStore(),
+            clip_generator=_generator_calls(calls),
+            duration_probe=lambda _path: 60_000,
+        ).materialize(
+            [_event()],
+            workspace_id="workspace-1",
+            game_id="game-1",
+            analysis_run_id="run-1",
+            source_video_path=source,
+            output_dir=Path(tmp) / "clips",
+        )
+        assert result.clip_generation_deferred_count == 1
+        assert result.clip_generation_attempted_count == 0
+        assert result.clip_ready_count == 0
+        assert calls == []
 
 
 def test_materializer_records_clip_failure_without_losing_review_item() -> None:
@@ -249,15 +301,15 @@ def test_materializer_records_clip_failure_without_losing_review_item() -> None:
         source = Path(tmp) / "game.mp4"
         source.write_bytes(b"source")
         persistence = _Persistence()
-        artifacts = _ArtifactStore()
 
         def fail_generator(*_args: Any, **_kwargs: Any):
             raise RuntimeError("ffmpeg unavailable")
 
         result = P3Materializer(
             persistence=persistence,
-            artifact_store=artifacts,
+            artifact_store=_ArtifactStore(),
             clip_generator=fail_generator,
+            duration_probe=lambda _path: 60_000,
         ).materialize(
             [_event()],
             workspace_id="workspace-1",
@@ -270,7 +322,16 @@ def test_materializer_records_clip_failure_without_losing_review_item() -> None:
         assert result.review_item_count == 1
         assert result.clip_failed_count == 1
         assert result.clip_ready_count == 0
-        assert len(result.errors) == 1
+        assert result.clip_generation_attempted_count == 1
+        assert result.clip_generation_succeeded_count == 0
         assert "ffmpeg unavailable" in result.errors[0]
         assert len(persistence.failed) == 1
         assert persistence.snapshot.total_items == 1
+
+
+if __name__ == "__main__":
+    test_materializer_persists_durable_clip_lineage_and_metrics()
+    test_materializer_reuses_already_ready_durable_clip()
+    test_materializer_defers_when_generation_lease_is_held_elsewhere()
+    test_materializer_records_clip_failure_without_losing_review_item()
+    print("p3_materializer_test: PASS")

@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import json
 from typing import Any, Iterable
 from uuid import UUID, uuid5
 
@@ -18,8 +17,6 @@ def source_event_row(
     workspace_id: str,
     derivation_id: str,
 ) -> dict[str, Any]:
-    """Convert the stable P3 source contract into a durable database row."""
-
     return {
         "workspace_id": str(workspace_id),
         "game_id": event.game_id,
@@ -56,10 +53,7 @@ def _stable_uuid(kind: str, derivation_id: str, identity: str) -> str:
 
 
 def clip_plan_id(derivation_id: str, request: P3ClipRequest) -> str:
-    identity = json.dumps(
-        request.as_dict(), sort_keys=True, separators=(",", ":"), ensure_ascii=True
-    )
-    return _stable_uuid("clip", str(derivation_id), identity)
+    return _stable_uuid("clip", str(derivation_id), request.fingerprint())
 
 
 def review_item_id(derivation_id: str, item: ReviewItemDraft) -> str:
@@ -78,15 +72,19 @@ def clip_plan_row(
         "game_id": request.game_id,
         "analysis_run_id": request.analysis_run_id,
         "derivation_id": str(derivation_id),
+        "source_video_ref": request.source_video_ref,
         "review_type": request.review_type,
         "source_start_ms": request.source_start_ms,
         "source_end_ms": request.source_end_ms,
         "clip_start_ms": request.clip_start_ms,
         "clip_end_ms": request.clip_end_ms,
         "source_event_ids": list(request.source_event_ids),
+        "source_possession_id": request.source_possession_id,
         "game_player_ids": list(request.game_player_ids),
         "context_policy_version": request.context_policy_version,
         "generation_version": request.generation_version,
+        "request_contract_version": request.contract_version,
+        "request_fingerprint": request.fingerprint(),
     }
 
 
@@ -116,13 +114,20 @@ def review_item_row(
     }
 
 
-class P3PersistenceStore:
-    """Small Supabase adapter for P3 foundation persistence.
+def _rpc_boolean(data: Any) -> bool:
+    if isinstance(data, bool):
+        return data
+    if isinstance(data, list):
+        return _rpc_boolean(data[0]) if data else False
+    if isinstance(data, dict):
+        for value in data.values():
+            if isinstance(value, bool):
+                return value
+    return False
 
-    The service-role client remains the authority for model/derived writes. Starting a
-    derivation is delegated to the database RPC so current/stale/superseded transitions
-    happen transactionally. Human reviews remain a separate authenticated-user surface.
-    """
+
+class P3PersistenceStore:
+    """Supabase adapter for versioned, reprocessable P3 persistence."""
 
     def __init__(self, client: Any) -> None:
         self.client = client
@@ -157,7 +162,10 @@ class P3PersistenceStore:
         if isinstance(derivation_id, list):
             derivation_id = derivation_id[0] if derivation_id else None
         if isinstance(derivation_id, dict):
-            derivation_id = derivation_id.get("start_analysis_derivation") or derivation_id.get("id")
+            derivation_id = (
+                derivation_id.get("start_analysis_derivation")
+                or derivation_id.get("id")
+            )
         if not derivation_id:
             raise RuntimeError("start_analysis_derivation returned no derivation id")
         return str(derivation_id)
@@ -215,9 +223,9 @@ class P3PersistenceStore:
             )
 
         if clip_rows:
-            # Do not include status/artifact/error in the upsert payload. Re-running the
-            # same derivation must never turn an already-ready clip back into planned.
-            self.client.table("p3_clips").upsert(clip_rows, on_conflict="id").execute()
+            self.client.table("p3_clips").upsert(
+                clip_rows, on_conflict="id"
+            ).execute()
         if item_rows:
             self.client.table("p3_review_items").upsert(
                 item_rows,
@@ -231,7 +239,10 @@ class P3PersistenceStore:
             return {}
         result = (
             self.client.table("p3_clips")
-            .select("id,status,artifact_id,error")
+            .select(
+                "id,status,artifact_id,error,generation_attempts,"
+                "last_generation_started_at,last_generation_finished_at,ready_at"
+            )
             .in_("id", ids)
             .execute()
         )
@@ -241,25 +252,44 @@ class P3PersistenceStore:
                 "status": row.get("status"),
                 "artifact_id": row.get("artifact_id"),
                 "error": row.get("error"),
+                "generation_attempts": row.get("generation_attempts"),
+                "last_generation_started_at": row.get("last_generation_started_at"),
+                "last_generation_finished_at": row.get("last_generation_finished_at"),
+                "ready_at": row.get("ready_at"),
             }
             for row in rows
             if isinstance(row, dict) and row.get("id")
         }
 
-    def mark_clip_generating(self, clip_id: str) -> None:
-        self.client.table("p3_clips").update(
-            {"status": "generating", "error": None}
-        ).eq("id", str(clip_id)).execute()
+    def mark_clip_generating(self, clip_id: str, *, lease_seconds: int = 900) -> bool:
+        result = self.client.rpc(
+            "begin_p3_clip_generation",
+            {
+                "p_clip_id": str(clip_id),
+                "p_lease_seconds": max(60, int(lease_seconds)),
+            },
+        ).execute()
+        return _rpc_boolean(getattr(result, "data", None))
 
-    def mark_clip_ready(self, clip_id: str, *, artifact_id: str) -> None:
-        self.client.table("p3_clips").update(
-            {"status": "ready", "artifact_id": str(artifact_id), "error": None}
-        ).eq("id", str(clip_id)).execute()
+    def mark_clip_ready(self, clip_id: str, *, artifact_id: str) -> bool:
+        result = self.client.rpc(
+            "complete_p3_clip_generation",
+            {
+                "p_clip_id": str(clip_id),
+                "p_artifact_id": str(artifact_id),
+            },
+        ).execute()
+        return _rpc_boolean(getattr(result, "data", None))
 
-    def mark_clip_failed(self, clip_id: str, *, error: str) -> None:
-        self.client.table("p3_clips").update(
-            {"status": "failed", "error": str(error)[:2000]}
-        ).eq("id", str(clip_id)).execute()
+    def mark_clip_failed(self, clip_id: str, *, error: str) -> bool:
+        result = self.client.rpc(
+            "fail_p3_clip_generation",
+            {
+                "p_clip_id": str(clip_id),
+                "p_error": str(error)[:2000],
+            },
+        ).execute()
+        return _rpc_boolean(getattr(result, "data", None))
 
     def set_output_summary(
         self,

@@ -5,7 +5,10 @@ from pathlib import Path
 from tempfile import TemporaryDirectory
 from typing import Any
 
-from services.p3.artifact_store import P3ArtifactStore
+from services.p3.artifact_store import (
+    P3ArtifactStore,
+    P3_CLIP_STORAGE_CONTRACT_VERSION,
+)
 from services.p3.clip_generator import PhysicalClipArtifact
 
 
@@ -98,14 +101,25 @@ def _artifact(path: Path) -> PhysicalClipArtifact:
         size_bytes=path.stat().st_size,
         checksum_sha256=checksum,
         content_type="video/mp4",
-        generation_version="p3.clip_generation.v1",
-        clip_start_ms=1000,
-        clip_end_ms=5000,
+        game_id="game-1",
+        analysis_run_id="run-1",
+        source_video_ref="analysis-run:run-1",
+        review_type="shot",
+        source_start_ms=10_000,
+        source_end_ms=10_500,
+        clip_start_ms=4_000,
+        clip_end_ms=14_500,
         source_event_ids=("shot-1",),
+        source_possession_id="possession-4",
+        game_player_ids=("game_player_03",),
+        context_policy_version="p3.clip_context.v1",
+        request_contract_version="p3.clip_request.v1",
+        request_fingerprint="a" * 64,
+        generation_version="p3.clip_generation.v1",
     )
 
 
-def test_clip_upload_is_content_addressed_and_registered() -> None:
+def test_clip_upload_is_content_addressed_and_registered_with_lineage() -> None:
     with TemporaryDirectory() as tmp:
         path = Path(tmp) / "clip.mp4"
         path.write_bytes(b"courtflux-clip-bytes")
@@ -132,7 +146,9 @@ def test_clip_upload_is_content_addressed_and_registered() -> None:
         assert row["kind"] == "p3_evidence_clip"
         assert row["checksum"] == result.checksum_sha256
         assert row["metadata"]["clip_id"] == "clip-1"
-        assert row["metadata"]["storage_contract_version"] == "p3.clip_storage.v1"
+        assert row["metadata"]["source_video_ref"] == "analysis-run:run-1"
+        assert row["metadata"]["source_possession_id"] == "possession-4"
+        assert row["metadata"]["storage_contract_version"] == P3_CLIP_STORAGE_CONTRACT_VERSION
 
 
 def test_tampered_clip_is_rejected_before_upload() -> None:
@@ -159,6 +175,25 @@ def test_tampered_clip_is_rejected_before_upload() -> None:
         assert client.uploads == []
 
 
+def test_artifact_run_mismatch_is_rejected() -> None:
+    with TemporaryDirectory() as tmp:
+        path = Path(tmp) / "clip.mp4"
+        path.write_bytes(b"clip")
+        client = _Client()
+        store = P3ArtifactStore(client)
+        try:
+            store.persist_clip(
+                workspace_id="workspace-1",
+                analysis_run_id="run-2",
+                clip_id="clip-1",
+                artifact=_artifact(path),
+            )
+        except RuntimeError as exc:
+            assert "analysis_run_id" in str(exc)
+        else:
+            raise AssertionError("cross-run clip lineage must be rejected")
+
+
 def test_storage_path_components_are_not_user_paths() -> None:
     try:
         P3ArtifactStore.object_path(
@@ -171,3 +206,11 @@ def test_storage_path_components_are_not_user_paths() -> None:
         assert "safe Storage path component" in str(exc)
     else:
         raise AssertionError("unsafe path components must be rejected")
+
+
+if __name__ == "__main__":
+    test_clip_upload_is_content_addressed_and_registered_with_lineage()
+    test_tampered_clip_is_rejected_before_upload()
+    test_artifact_run_mismatch_is_rejected()
+    test_storage_path_components_are_not_user_paths()
+    print("p3_artifact_store_test: PASS")

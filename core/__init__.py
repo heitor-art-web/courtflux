@@ -8,7 +8,13 @@ from .basketball_event import (
     EventDecision,
     ShotOutcome,
 )
-from .p3_clip import ClipContextPolicy, P3ClipRequest, plan_evidence_clip
+from .p3_clip import (
+    ClipContextPolicy,
+    P3ClipRequest,
+    P3_CLIP_REQUEST_CONTRACT_VERSION,
+    analysis_run_source_ref,
+    plan_evidence_clip,
+)
 from .p3_contract import (
     DerivationState,
     P3ContractValidationError,
@@ -39,6 +45,8 @@ __all__ = [
     "ShotOutcome",
     "ClipContextPolicy",
     "P3ClipRequest",
+    "P3_CLIP_REQUEST_CONTRACT_VERSION",
+    "analysis_run_source_ref",
     "plan_evidence_clip",
     "DerivationState",
     "P3ContractValidationError",
