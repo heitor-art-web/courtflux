@@ -1,5 +1,5 @@
 {
-  "version": "courtflux_p2_gate_c_team_gt_v2",
+  "version": "courtflux_p2_gate_c_team_gt_v3",
   "policy": {
     "source": "prediction-blind human team/kit review; Gate A/B event and control GT remain unchanged",
     "prediction_blind": true,
@@ -8,8 +8,10 @@
     "team_identity": "team_a/team_b are local scoring slots inside each declared run context; they are not global team identities and must not be mapped across clips or runtime segments",
     "kit_feature_scope": "jersey torso body colours configure TeamOnlyAnalyzer; shorts and lettering are recorded in per-video human_kit_audit but are not automatically injected as classifier colours",
     "real_team_names_in_scoring": false,
-    "scoring_unit": "one human-attributable control/event window",
-    "possessed_prediction_source": "modal non-unknown current_team_id on predicted possessed frames inside the human window",
+    "scoring_unit": "one human-attributable event window or one human-verified possession interval",
+    "possessed_prediction_source": "for clips without explicit possession_intervals, modal non-unknown current_team_id inside the human window; when possession_intervals are present, only those intervals are possession scoring truth",
+    "possession_interval_policy": "possession interval boundaries and team side must come from human review; model predictions must never define or expand ground-truth possession intervals",
+    "raw_colour_policy": "raw colour validation uses only scoring possession intervals; an optional verified_holder_track_id may pin a human-verified holder for an exact interval and must not be inferred from colour predictions",
     "pass_prediction_source": "matched pass_candidate.team_id",
     "shot_prediction_source": "matched shot_attempt.team_id",
     "development_clips": ["V1", "V3", "V4", "V5"],
@@ -94,14 +96,46 @@
           "kit_context": "team_a White; team_b Black"
         }
       },
+      "possession_gt_status": "partial_human_verified_intervals; expand only by prediction-blind human review",
+      "possession_intervals": [
+        {
+          "run_key": "V4_B",
+          "frame_start": 245,
+          "frame_end": 245,
+          "original_frame_start": 1145,
+          "original_frame_end": 1145,
+          "team_id": "team_b",
+          "verified_holder_track_id": 24,
+          "human_note": "yellow side has ball; visually confirmed holder",
+          "verification": "human_visual_review_2026-09-18"
+        }
+      ],
+      "possession_exclusions": [
+        {
+          "run_key": "V4_A",
+          "frame_start": 549,
+          "frame_end": 549,
+          "original_frame_start": 549,
+          "original_frame_end": 549,
+          "reason": "no ball with scored holder; human visual review"
+        },
+        {
+          "run_key": "V4_C",
+          "frame_start": 170,
+          "frame_end": 170,
+          "original_frame_start": 1790,
+          "original_frame_end": 1790,
+          "reason": "no ball with scored holder; human visual review"
+        }
+      ],
       "samples": [
-        {"run_key": "V4_A", "state": "possessed", "frame_start": 0, "frame_end": 299, "original_frame_start": 0, "original_frame_end": 299, "team_id": "team_a", "human_note": "white side possessed"},
+        {"run_key": "V4_A", "state": "possessed", "frame_start": 0, "frame_end": 299, "original_frame_start": 0, "original_frame_end": 299, "team_id": "team_a", "human_note": "historical broad white-side possession window", "scoring_status": "historical_broad_window_not_scored"},
         {"run_key": "V4_A", "state": "pass_flight", "frame_start": 360, "frame_end": 419, "original_frame_start": 360, "original_frame_end": 419, "team_id": "team_a", "human_note": "white side pass flight"},
-        {"run_key": "V4_A", "state": "possessed", "frame_start": 480, "frame_end": 599, "original_frame_start": 480, "original_frame_end": 599, "team_id": "team_a", "human_note": "white side possessed"},
+        {"run_key": "V4_A", "state": "possessed", "frame_start": 480, "frame_end": 599, "original_frame_start": 480, "original_frame_end": 599, "team_id": "team_a", "human_note": "historical broad white-side possession window", "scoring_status": "historical_broad_window_not_scored"},
         {"run_key": "V4_A", "state": "shot_flight", "frame_start": 660, "frame_end": 839, "original_frame_start": 660, "original_frame_end": 839, "team_id": "team_a", "human_note": "white side shot; made"},
         {"run_key": "V4_B", "state": "pass_flight", "frame_start": 0, "frame_end": 179, "original_frame_start": 900, "original_frame_end": 1079, "team_id": "team_a", "human_note": "blue/white side; two successful passes"},
-        {"run_key": "V4_B", "state": "possessed", "frame_start": 240, "frame_end": 359, "original_frame_start": 1140, "original_frame_end": 1259, "team_id": "team_a", "human_note": "blue/white side possessed"},
-        {"run_key": "V4_C", "state": "possessed", "frame_start": 60, "frame_end": 179, "original_frame_start": 1680, "original_frame_end": 1799, "team_id": "team_a", "human_note": "white side possessed"}
+        {"run_key": "V4_B", "state": "possessed", "frame_start": 240, "frame_end": 359, "original_frame_start": 1140, "original_frame_end": 1259, "team_id": "team_a", "human_note": "historical broad possession window; known to cross possession sides", "scoring_status": "historical_broad_window_not_scored"},
+        {"run_key": "V4_C", "state": "possessed", "frame_start": 60, "frame_end": 179, "original_frame_start": 1680, "original_frame_end": 1799, "team_id": "team_a", "human_note": "historical broad white-side possession window", "scoring_status": "historical_broad_window_not_scored"}
       ]
     },
     "V5": {
