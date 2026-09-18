@@ -22,8 +22,9 @@ def _install_probe(analyzer_module: Any, p2_pipeline_cls: Any) -> None:
     instantiate a second metrics collector.
 
     For validation diagnostics only, the probe wraps the analyzer's collector class so
-    each exported state row can include the shot tracker's current start-gate inputs.
-    The canonical collector implementation and basketball decisions remain unchanged.
+    each exported state row can include the shot tracker's current start-gate inputs and
+    Identity-v2 team prediction evidence. The canonical collector implementation and
+    basketball decisions remain unchanged.
     """
 
     base_attach_p2_metrics = analyzer_module._attach_p2_metrics
@@ -40,7 +41,17 @@ def _install_probe(analyzer_module: Any, p2_pipeline_cls: Any) -> None:
             p2 = dict(diagnostics.get("p2", {}) or {})
             shot = dict(p2.get("shot", {}) or {})
             start_gate = dict(shot.get("start_gate_diagnostics", {}) or {})
+            detector = dict(diagnostics.get("detector", {}) or {})
+            team_predictions = [
+                dict(row)
+                for row in list(detector.get("team_predictions", []) or [])
+                if isinstance(row, dict)
+            ]
+            team_runtime = dict(detector.get("team_runtime", {}) or {})
+
             self.state_rows[-1]["shot_start_gate"] = start_gate
+            self.state_rows[-1]["team_predictions"] = team_predictions
+            self.state_rows[-1]["team_runtime"] = team_runtime
 
     def _attach_probe_artifacts(
         summary_path: Path,
