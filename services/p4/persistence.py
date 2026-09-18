@@ -6,7 +6,11 @@ import json
 from typing import Any, Iterable, Mapping
 from uuid import UUID, uuid5
 
-from core.p4_spatial_contract import P4_SPATIAL_CONTRACT_VERSION, SpatialFrame
+from core.p4_spatial_contract import P4_SPATIAL_CONTRACT_VERSION
+from core.p4_spatial_snapshot import (
+    P4_SPATIAL_SNAPSHOT_CONTRACT_VERSION,
+    SpatialSnapshot,
+)
 
 
 _P4_SPATIAL_ID_NAMESPACE = UUID("0c31cbaa-2118-4b89-87b3-a6df26779c9a")
@@ -140,7 +144,7 @@ def spatial_snapshot_id(spatial_run_id_value: str, frame_id: int) -> str:
 
 
 def spatial_snapshot_row(
-    frame: SpatialFrame,
+    snapshot: SpatialSnapshot,
     *,
     workspace_id: str,
     spatial_run_id_value: str,
@@ -148,21 +152,23 @@ def spatial_snapshot_row(
     game_id: str | None,
     snapshot_kind: str = "materialized",
 ) -> dict[str, Any]:
-    payload = frame.as_dict()
+    if not isinstance(snapshot, SpatialSnapshot):
+        raise ValueError("snapshot must be SpatialSnapshot")
+    payload = snapshot.as_dict()
     return {
-        "id": spatial_snapshot_id(spatial_run_id_value, frame.frame_id),
+        "id": spatial_snapshot_id(spatial_run_id_value, snapshot.frame_id),
         "workspace_id": _nonempty(workspace_id, "workspace_id"),
         "game_id": None if game_id is None else _nonempty(game_id, "game_id"),
         "analysis_run_id": _nonempty(analysis_run_id, "analysis_run_id"),
         "spatial_run_id": _nonempty(spatial_run_id_value, "spatial_run_id"),
-        "frame_id": frame.frame_id,
-        "timestamp_ms": frame.timestamp_ms,
+        "frame_id": snapshot.frame_id,
+        "timestamp_ms": snapshot.timestamp_ms,
         "snapshot_kind": _nonempty(snapshot_kind, "snapshot_kind"),
-        "contract_version": frame.contract_version,
-        "source_runtime_version": frame.source_runtime_version,
-        "geometry_valid": frame.geometry.geometry_valid,
-        "court_visible": frame.geometry.court_visible,
-        "player_count": len(frame.players),
+        "contract_version": snapshot.contract_version,
+        "source_runtime_version": snapshot.source_runtime_version,
+        "geometry_valid": snapshot.geometry.geometry_valid,
+        "court_visible": snapshot.geometry.court_visible,
+        "player_count": len(snapshot.players),
         "payload": payload,
     }
 
@@ -198,9 +204,14 @@ def spatial_artifact_link_row(
     player_observation_count: int | None = None,
     metadata: Mapping[str, Any] | None = None,
 ) -> dict[str, Any]:
-    if content_contract_version != P4_SPATIAL_CONTRACT_VERSION:
+    allowed_contract_versions = {
+        P4_SPATIAL_CONTRACT_VERSION,
+        P4_SPATIAL_SNAPSHOT_CONTRACT_VERSION,
+    }
+    if content_contract_version not in allowed_contract_versions:
         raise ValueError(
-            f"content_contract_version must be {P4_SPATIAL_CONTRACT_VERSION!r}"
+            "content_contract_version must be a supported P4 spatial contract "
+            f"({sorted(allowed_contract_versions)})"
         )
     normalized_counts: dict[str, int | None] = {}
     for name, value in {
@@ -300,19 +311,19 @@ class P4SpatialPersistenceStore:
         spatial_run_id_value: str,
         analysis_run_id: str,
         game_id: str | None,
-        frames: Iterable[SpatialFrame],
+        snapshots: Iterable[SpatialSnapshot],
         snapshot_kind: str = "materialized",
     ) -> int:
         rows = [
             spatial_snapshot_row(
-                frame,
+                snapshot,
                 workspace_id=workspace_id,
                 spatial_run_id_value=spatial_run_id_value,
                 analysis_run_id=analysis_run_id,
                 game_id=game_id,
                 snapshot_kind=snapshot_kind,
             )
-            for frame in frames
+            for snapshot in snapshots
         ]
         if not rows:
             return 0

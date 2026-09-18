@@ -1,5 +1,9 @@
 -- P4 Spatial Foundation task 2: durable P1-only spatial persistence.
 --
+-- Task 12 upgrades snapshot payloads from raw SpatialFrame serialization to the
+-- materialized p4.spatial_snapshot.v1 contract while keeping the spatial run
+-- rooted in p4.spatial_frame.v1.
+--
 -- This migration intentionally depends only on platform-level CourtFlux records:
 -- workspaces, games, analysis_runs and analysis_artifacts. It does not reference
 -- P2 events, P3 derivations/review/clips, possessions or tactical semantics.
@@ -81,7 +85,7 @@ create table if not exists public.p4_spatial_snapshots (
   unique (spatial_run_id, frame_id),
 
   check (length(trim(snapshot_kind)) > 0),
-  check (contract_version = 'p4.spatial_frame.v1'),
+  check (contract_version = 'p4.spatial_snapshot.v1'),
   check (source_runtime_version is null or length(trim(source_runtime_version)) > 0),
   check (jsonb_typeof(payload) = 'object')
 );
@@ -120,7 +124,12 @@ create table if not exists public.p4_spatial_artifacts (
   unique (spatial_run_id, artifact_id, artifact_kind),
 
   check (length(trim(artifact_kind)) > 0),
-  check (content_contract_version = 'p4.spatial_frame.v1'),
+  check (
+    content_contract_version in (
+      'p4.spatial_frame.v1',
+      'p4.spatial_snapshot.v1'
+    )
+  ),
   check (content_format is null or length(trim(content_format)) > 0),
   check (jsonb_typeof(metadata) = 'object')
 );
@@ -182,6 +191,7 @@ declare
   parent_game_id uuid;
   parent_analysis_run_id uuid;
   parent_contract_version text;
+  eligibility_state text;
 begin
   select sr.workspace_id, sr.game_id, sr.analysis_run_id, sr.contract_version
     into parent_workspace_id, parent_game_id, parent_analysis_run_id, parent_contract_version
@@ -198,12 +208,13 @@ begin
     raise exception 'p4_spatial_snapshots lineage must match p4_spatial_runs';
   end if;
 
-  if new.contract_version is distinct from parent_contract_version then
-    raise exception 'p4_spatial_snapshots.contract_version must match p4_spatial_runs';
-  end if;
-
   if new.payload ->> 'contract_version' is distinct from new.contract_version then
     raise exception 'snapshot payload contract_version must match indexed contract_version';
+  end if;
+
+  if new.payload ->> 'source_spatial_contract_version'
+       is distinct from parent_contract_version then
+    raise exception 'snapshot source_spatial_contract_version must match p4_spatial_runs';
   end if;
 
   if (new.payload ->> 'frame_id')::bigint is distinct from new.frame_id then
@@ -214,12 +225,32 @@ begin
     raise exception 'snapshot payload timestamp_ms must match indexed timestamp_ms';
   end if;
 
+  if (new.payload #>> '{geometry_quality,frame_id}')::bigint
+       is distinct from new.frame_id
+     or (new.payload #>> '{geometry_quality,timestamp_ms}')::bigint
+       is distinct from new.timestamp_ms then
+    raise exception 'snapshot geometry_quality must match indexed frame/time';
+  end if;
+
+  if (new.payload #>> '{spatial_eligibility,frame_id}')::bigint
+       is distinct from new.frame_id
+     or (new.payload #>> '{spatial_eligibility,timestamp_ms}')::bigint
+       is distinct from new.timestamp_ms then
+    raise exception 'snapshot spatial_eligibility must match indexed frame/time';
+  end if;
+
   if jsonb_typeof(new.payload -> 'players') is distinct from 'array' then
     raise exception 'snapshot payload players must be an array';
   end if;
 
   if jsonb_array_length(new.payload -> 'players') is distinct from new.player_count then
     raise exception 'snapshot payload player count must match indexed player_count';
+  end if;
+
+  if jsonb_typeof(new.payload -> 'relationships') is distinct from 'array'
+     or jsonb_typeof(new.payload -> 'team_shapes') is distinct from 'array'
+     or jsonb_typeof(new.payload -> 'motion_primitives') is distinct from 'array' then
+    raise exception 'snapshot derived collections must be arrays';
   end if;
 
   if (new.payload #>> '{geometry,geometry_valid}')::boolean
@@ -235,6 +266,16 @@ begin
   if new.payload ->> 'source_runtime_version'
        is distinct from new.source_runtime_version then
     raise exception 'snapshot payload source_runtime_version must match indexed value';
+  end if;
+
+  eligibility_state := new.payload #>> '{spatial_eligibility,state}';
+  if eligibility_state = 'invalid'
+     and (
+       jsonb_array_length(new.payload -> 'relationships') > 0
+       or jsonb_array_length(new.payload -> 'team_shapes') > 0
+       or jsonb_array_length(new.payload -> 'motion_primitives') > 0
+     ) then
+    raise exception 'INVALID spatial snapshot cannot persist derived metric truth';
   end if;
 
   return new;
@@ -516,8 +557,8 @@ create trigger p4_spatial_runs_set_updated_at
 comment on table public.p4_spatial_runs is
   'Versioned P1-only P4 spatial materialization runs. No P2/P3/tactical semantics are permitted.';
 comment on table public.p4_spatial_snapshots is
-  'Sparse/queryable SpatialFrame v1 snapshots. Dense frame timelines should normally live in analysis_artifacts and be linked through p4_spatial_artifacts.';
+  'Sparse/queryable p4.spatial_snapshot.v1 materializations. Raw p4.spatial_frame.v1 remains the source contract; dense timelines may live in analysis_artifacts.';
 comment on table public.p4_spatial_artifacts is
-  'Lineage links from a P4 spatial run to dense or diagnostic analysis_artifacts belonging to the same base analysis_run.';
+  'Lineage links from a P4 spatial run to raw-frame or materialized-snapshot analysis_artifacts belonging to the same base analysis_run.';
 comment on column public.p4_spatial_runs.fingerprint is
   'Deterministic fingerprint of the base analysis run, P4 spatial contract/runtime, source versions and configuration.';

@@ -1,111 +1,63 @@
 # P4 Spatial Persistence Model
 
-**Status:** complete for P4 Spatial Foundation task 2  
+**Status:** complete for P4 Spatial Foundation task 2; snapshot payload upgraded by task 12  
 **Source contract:** `p4.spatial_frame.v1`  
+**Materialized snapshot contract:** `p4.spatial_snapshot.v1`  
 **Dependency boundary:** platform base + P1/P4 only; no P2 or P3 tables are referenced.
 
 ## Purpose
 
-Task 1 froze the in-memory/serialized `SpatialFrame` contract. Task 2 gives that contract durable lineage without making P4 depend on P2 basketball semantics or the P3 Game Record.
+Task 1 froze the P1→P4 `SpatialFrame` contract. Task 2 gives P4 durable lineage without making it depend on P2 basketball semantics or the P3 Game Record.
 
-The persistence chain is:
+Task 12 adds materialized spatial state without changing that source boundary:
 
 ```text
 analysis_runs
       ↓
-p4_spatial_runs
-      ├── p4_spatial_snapshots
+p4_spatial_runs                     contract = p4.spatial_frame.v1
+      ├── p4_spatial_snapshots      contract = p4.spatial_snapshot.v1
       └── p4_spatial_artifacts ──→ analysis_artifacts
 ```
 
-`analysis_runs` and `analysis_artifacts` are platform-level records that pre-date P3. P4 does not use `analysis_derivations`, `p3_source_events`, review items, clips or possession records.
+`analysis_runs` and `analysis_artifacts` are platform-level records that pre-date P3. P4 does not use `analysis_derivations`, P3 review/clip records or possession records.
 
 ## Hybrid storage policy
 
-A full spatial timeline can contain many frames and player observations. The database should not be forced to store every 25/30 FPS observation as a normalized row merely because the source video is dense.
+Postgres stores run/version lineage, status/provenance, sparse or selected materialized snapshots, artifact references and summary/diagnostic data. Dense timelines may live as `analysis_artifacts` linked through `p4_spatial_artifacts`.
 
-The persistence model therefore separates:
+Supported artifact contracts are explicit:
 
-### Queryable Postgres state
-
-Postgres stores:
-
-- spatial run/version lineage;
-- status and provenance;
-- sparse or selected `SpatialFrame` snapshots;
-- artifact references and time/frame ranges;
-- summary counts and diagnostics.
-
-### Dense artifacts
-
-Full-resolution timelines should normally be written as an `analysis_artifact` (for example JSONL/Parquet in a later materialization task) and linked through `p4_spatial_artifacts`.
-
-This keeps the foundation queryable without making database row volume proportional to video FPS × player count.
+```text
+p4.spatial_frame.v1
+p4.spatial_snapshot.v1
+```
 
 ## `p4_spatial_runs`
 
 One row represents one deterministic P4 spatial materialization configuration over one base `analysis_run`.
 
-Important fields:
+The run remains rooted in:
 
 ```text
-id
-workspace_id
-game_id
-analysis_run_id
-
-contract_version
-spatial_runtime_version
-configuration_version
-fingerprint
-
-source_versions
-configuration
-provenance
-output_summary
-
-status
-supersedes_id
-error
-started_at
-completed_at
+p4.spatial_frame.v1
 ```
 
-### Fingerprint
+because that is the frozen upstream P1→P4 source boundary.
 
-The application fingerprint includes:
+The fingerprint includes the base analysis run, optional game, source contract, P4 runtime/config versions, source versions and configuration. Repeating the same request therefore resolves to the same run identity.
 
-- base `analysis_run_id`;
-- optional `game_id`;
-- `p4.spatial_frame.v1`;
-- P4 spatial runtime version;
-- configuration version;
-- P1/source versions;
-- materialization configuration.
-
-The run id is a deterministic UUID derived from the base run + fingerprint. Repeating the same request therefore resolves to the same spatial run instead of creating duplicate truth.
-
-### Lifecycle
+Lifecycle remains:
 
 ```text
-building
-   ↓
-current
-   ↓
-superseded
-
-building
-   ↓
-failed
+building → current → superseded
+building → failed
 ```
 
-Only one spatial run may be `current` for an `analysis_run`.
-
-`complete_p4_spatial_run(...)` performs the current/superseded transition under a Postgres advisory transaction lock. Historical spatial runs remain addressable.
+Only one run may be current per `analysis_run`.
 
 ## `p4_spatial_snapshots`
 
-Snapshots are exact serialized `SpatialFrame` payloads plus a small index:
+The table now stores exact serialized `p4.spatial_snapshot.v1` payloads plus a small query index:
 
 ```text
 frame_id
@@ -119,40 +71,21 @@ player_count
 payload
 ```
 
-Database triggers fail closed when the denormalized index disagrees with the payload, including:
+Each materialized snapshot declares:
 
-- frame id;
-- source timestamp;
-- contract version;
-- player count;
-- geometry validity;
-- court visibility;
-- source runtime version.
+```text
+source_spatial_contract_version = p4.spatial_frame.v1
+```
 
-Task 2 creates the persistence boundary only. Which frames are materialized, sampling policies and radar-oriented snapshot strategy belong to later Spatial Foundation tasks.
+The database validates rather than repairs the denormalized index. It checks payload/index contract, source contract vs parent run, frame/timestamp, geometry-quality and eligibility alignment, player count, geometry validity, court visibility, source runtime version and array shape of derived collections.
+
+For `INVALID` eligibility, persisted relationships, team shapes and motion primitives must be empty. The Python contract additionally prevents derived per-player smoothed/velocity/speed truth on invalid frames.
 
 ## `p4_spatial_artifacts`
 
-This table links a spatial run to an existing platform `analysis_artifact`.
-
-It records:
-
-```text
-artifact_kind
-content_contract_version
-content_format
-frame range
-timestamp range
-record count
-player-observation count
-metadata
-```
-
-A trigger requires the linked artifact and P4 spatial run to belong to the same base `analysis_run`.
+Artifacts can explicitly carry either raw `p4.spatial_frame.v1` or materialized `p4.spatial_snapshot.v1` content. A trigger still requires artifact and spatial run to belong to the same base `analysis_run`.
 
 ## Parent-lineage invariants
-
-The database validates rather than repairs lineage:
 
 ```text
 p4_spatial_run.workspace/game
@@ -160,37 +93,19 @@ p4_spatial_run.workspace/game
 analysis_run.workspace/game
 ```
 
-and child rows must match their parent spatial run.
-
-Mismatched lineage fails the write. It is never silently reassigned.
+Child rows must match the parent run. Snapshot and parent run have different contracts by design, so the snapshot's `source_spatial_contract_version` must equal the parent run contract.
 
 ## Security model
 
-All three tables are in `public`, so RLS is enabled explicitly.
+All three tables are in `public` with RLS enabled. Authenticated users receive `SELECT` only when `private.is_workspace_member(workspace_id)` succeeds. Derived writes remain service-owned.
 
-Authenticated users receive:
+Lifecycle RPCs remain `SECURITY INVOKER`; execution is revoked from `PUBLIC`, `anon` and `authenticated`, with `service_role` as the trusted caller.
 
-```text
-SELECT
-```
-
-only when:
-
-```text
-private.is_workspace_member(workspace_id)
-```
-
-Derived spatial truth is worker-owned. `INSERT`, `UPDATE` and `DELETE` are not granted to authenticated product clients.
-
-`service_role` receives the required CRUD privileges for trusted worker/server materialization.
-
-The lifecycle RPC functions are `SECURITY INVOKER`, not `SECURITY DEFINER`, and execution is revoked from `PUBLIC`, `anon` and `authenticated`; only `service_role` may call them.
-
-The migration includes explicit grants because Supabase no longer guarantees that new `public` tables are automatically reachable through the Data API.
+Explicit grants remain intentional because Supabase is moving public-schema Data API exposure to an opt-in grant model.
 
 ## Dependency boundary
 
-Allowed persistence parents:
+Allowed parents:
 
 ```text
 workspaces
@@ -199,24 +114,10 @@ analysis_runs
 analysis_artifacts
 ```
 
-Forbidden dependencies:
-
-```text
-P2 events
-possessions
-game-player identity
-analysis_derivations
-p3_source_events
-p3_review_items
-p3_clips
-p3_reviews
-tactical actions
-```
-
-This means the spatial layer can be produced, persisted, inspected and reprocessed while P2 and the final P3 product remain under validation.
+Forbidden dependencies include P2 events, possessions, game-player identity, P3 derivations/review/clips and tactical actions.
 
 ## Production status
 
-The migration is source-controlled as part of the P4 Spatial Foundation but is **not applied to the production Supabase project by this task**.
+The migration remains source-controlled on `p4_spatial_foundation` and is **not applied to production by this task**.
 
-Production rollout remains a separate explicit action.
+Because the P4 schema has not yet been deployed to production, task 12 updates the branch migration in place so the eventual first deployment creates the final foundation snapshot schema directly.
