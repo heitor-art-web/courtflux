@@ -33,6 +33,30 @@
     "engine_eligible_frames": 720,
     "note": "Metadata only. Human GT was authored blind from video and was not bootstrapped from P2 predictions."
   },
+  "human_kit_audit": {
+    "version": "courtflux_p2_human_kit_audit_v1",
+    "review_scope": "Gate C team-colour context only; does not rewrite frozen Gate A/B labels",
+    "prediction_blind": true,
+    "classifier_feature_policy": "jersey_body colours are candidate team-classifier context; shorts and lettering are recorded as human context and are not automatically injected as torso colours",
+    "segments": [
+      {
+        "source_time_start_sec": 10.0,
+        "source_time_end_sec": 40.0,
+        "team_a": {
+          "name": "Sporting",
+          "shorts": ["Black"],
+          "jersey_body": ["Green", "White"],
+          "lettering": ["White"]
+        },
+        "team_b": {
+          "name": "Benfica",
+          "shorts": ["Red"],
+          "jersey_body": ["Red"],
+          "lettering": ["White"]
+        }
+      }
+    ]
+  },
   "control_intervals": [
     {
       "state": "possessed",
@@ -242,6 +266,6 @@
     "Two pass-flight observations previously grouped in 30-31s are separated at human markers 30s and 31s.",
     "Do not require exact release frames from the reviewer.",
     "Pass B actor-to-track alignment is optional for event existence/outcome scoring and can add attribution constraints later.",
-    "For this neutral V1 clip, team_id remains null."
+    "For this neutral V1 clip, event team_id remains null; Gate C kit context is stored separately in human_kit_audit."
   ]
 }
