@@ -1,25 +1,25 @@
-# AirborneClassifierV1 development protocol
+# AirborneClassifierV1.1 development protocol
 
-V1–V5 are the development/training corpus for AirborneClassifierV1. Their reviewed human GT and existing no-model `p2_states.jsonl` runs are reused directly.
-
-V6–V7 will be two new videos reserved exclusively for final validation.
+V1–V5 are the development/training corpus. Their reviewed human GT and existing no-model `p2_states.jsonl` runs are reused directly. V6–V7 remain reserved exclusively for final validation.
 
 ## Development contract
 
 The five development clips are video-disjoint. Model quality is estimated with leave-one-video-out grouped cross-validation:
 
 1. train on four videos;
-2. evaluate on the held-out fifth video;
+2. replay the held-out fifth video as episode examples and causal prefixes;
 3. repeat for all five videos;
-4. inspect Stage 1, Stage 2 and end-to-end out-of-fold metrics;
+4. inspect Stage 1, Stage 2, terminal episode and causal episode metrics;
 5. once development choices are frozen, fit the final artefact on all V1–V5.
 
 ## Model contract
 
-AirborneClassifierV1 is causal and separate from event generation:
+AirborneClassifierV1.1 is causal and separate from event generation:
 
 ```text
 active P2 flight hypothesis
+        ↓
+causal episode accumulator
         ↓
 Stage 1: AIRBORNE vs CONTINUITY
         ↓ AIRBORNE
@@ -28,28 +28,54 @@ Stage 2: PASS vs SHOT
 PASS_FLIGHT / SHOT_FLIGHT
 ```
 
-For training:
+### Training unit
 
-- GT `pass_flight` and `shot_flight` are positive AIRBORNE examples for Stage 1;
-- other human-labelled frames inside an active engine flight are CONTINUITY/not-airborne examples for Stage 1;
-- Stage 2 trains only on GT `pass_flight` and `shot_flight` rows;
-- Stage 2 may abstain when PASS-vs-SHOT confidence is below the frozen probability threshold.
+One contiguous P2 flight hypothesis is one training example. Hundreds of frames from one physical hypothesis no longer become hundreds of statistically independent examples.
 
-Training weighting is interval-balanced, then video-balanced, then class-balanced independently for each binary stage.
+For each episode the builder stores:
 
-## 1. Build the dataset from existing runs
+- one terminal causal feature summary used for fitting;
+- every cumulative prefix summary, used only to replay runtime behavior during cross-validation;
+- overlap with human `possessed`, `pass_flight` and `shot_flight` intervals.
+
+Stage-1 target:
+
+- `airborne` when the flight episode overlaps any human PASS or SHOT interval;
+- `continuity` when it does not overlap PASS/SHOT but overlaps human POSSESSED;
+- episodes without useful core GT are excluded.
+
+Stage-2 target:
+
+- `pass_flight` when an airborne episode overlaps PASS but not SHOT;
+- `shot_flight` when it overlaps SHOT but not PASS;
+- an episode spanning both PASS and SHOT remains useful for Stage 1 but is excluded from Stage-2 fitting because its type target is ambiguous.
+
+## Causal runtime equivalence
+
+At runtime the episode accumulator sees only current and past frames. After each frame it recomputes the same episode feature vector used in training. The resolver latches the first confident PASS/SHOT decision for the physical flight.
+
+Cross-validation therefore reports both:
+
+- `terminal_episode_end_to_end`: classification using the completed episode summary;
+- `causal_episode_end_to_end`: prefix replay using the first decision that runtime would have committed.
+
+The causal metric is the more important development metric.
+
+## 1. Build the episode dataset
 
 ```bash
+rm -f evaluation/airborne_dev/airborne_dataset.jsonl
 python3 evaluation/p2_airborne_build_dataset.py
 ```
 
-The builder uses only human-labelled, engine-eligible frames with an active P2 flight and writes:
+This writes:
 
 ```text
 evaluation/airborne_dev/airborne_dataset.jsonl
+evaluation/airborne_dev/airborne_dataset_summary.json
 ```
 
-Temporal features are FPS-normalized so clips at different frame rates use comparable physical-time features.
+Temporal frame features are FPS-normalized before episode aggregation.
 
 ## 2. Train + grouped cross-validation
 
@@ -67,16 +93,17 @@ The report contains, for every held-out video and in aggregate:
 
 - `stage1_airborne_vs_continuity`;
 - `stage2_pass_vs_shot`;
-- `end_to_end`.
+- `terminal_episode_end_to_end`;
+- `causal_episode_end_to_end`, including correct airborne decision latency.
 
-The final JSON artefact is then fitted on all V1–V5 using the same frozen feature/model contract.
+Each episode is one statistical training unit. Weighting then equalizes source-video mass and balances the two classes independently per stage.
 
 ## 3. Freeze development
 
 Before V6–V7 are evaluated, freeze:
 
-- feature contract;
-- two-stage model family;
+- episode feature contract;
+- model family;
 - learned weights;
 - confidence threshold;
 - live resolver integration;
