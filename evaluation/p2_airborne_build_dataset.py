@@ -2,61 +2,18 @@ from __future__ import annotations
 
 import argparse
 import json
+import sys
+from collections import Counter
 from pathlib import Path
 from typing import Any
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
+if str(PROJECT_ROOT) not in sys.path:
+    sys.path.insert(0, str(PROJECT_ROOT))
 
-FEATURE_FIELDS = (
-    "flight_supported",
-    "flight_frames",
-    "flight_direct_observations",
-    "flight_displacement_player_heights",
-    "pass_flight_receiver_evidence",
-    "raw_best_distinct_from_flight_origin",
-    "raw_best_score",
-    "candidate_score",
-    "shot_active",
-    "shot_preflight_available",
-    "shot_preflight_direct_observed",
-    "shot_preflight_near_x",
-    "shot_preflight_above",
-    "shot_preflight_ball_to_rim_distance_norm",
-    "shot_preflight_horizontal_distance_rim_widths",
-    "shot_preflight_relative_y_rim_heights",
-    "shot_preflight_delta_distance_norm",
-    "shot_preflight_delta_relative_y",
-    "shot_preflight_approach_streak",
-    "shot_preflight_rising_streak",
-)
+from services.p2.airborne_classifier_v1 import AirborneClassifierV1
 
-MODEL_FEATURE_NAMES = (
-    "flight_supported",
-    "flight_frames",
-    "flight_direct_observations",
-    "flight_displacement_player_heights",
-    "receiver_evidence",
-    "raw_best_distinct_from_origin",
-    "raw_best_score",
-    "candidate_score",
-    "shot_active",
-    "shot_preflight_available",
-    "shot_preflight_direct_observed",
-    "shot_preflight_near_x",
-    "shot_preflight_above",
-    "shot_preflight_ball_to_rim_distance_norm",
-    "shot_preflight_horizontal_distance_rim_widths",
-    "shot_preflight_relative_y_rim_heights",
-    "shot_preflight_delta_distance_norm",
-    "shot_preflight_delta_relative_y",
-    "shot_preflight_approach_streak",
-    "shot_preflight_rising_streak",
-)
-
-FIELD_MAP = {
-    "receiver_evidence": "pass_flight_receiver_evidence",
-    "raw_best_distinct_from_origin": "raw_best_distinct_from_flight_origin",
-}
+FEATURES = AirborneClassifierV1.FEATURE_NAMES
 
 
 def _load_json(path: Path) -> dict[str, Any]:
@@ -72,19 +29,24 @@ def _load_jsonl(path: Path) -> list[dict[str, Any]]:
         line = line.strip()
         if not line:
             continue
-        row = json.loads(line)
-        if isinstance(row, dict):
-            rows.append(row)
+        payload = json.loads(line)
+        if isinstance(payload, dict):
+            rows.append(payload)
     return rows
 
 
-def _validation_video_ids() -> set[str]:
-    manifest = _load_json(PROJECT_ROOT / "evaluation" / "ground_truth" / "manifest.json")
-    return {
-        str(row.get("video_id"))
-        for row in list(manifest.get("clips", []) or [])
-        if isinstance(row, dict) and str(row.get("id") or "").upper() in {"V1", "V2", "V3", "V4", "V5"}
-    }
+def _float(value: Any, default: float = 0.0) -> float:
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return default
+
+
+def _int(value: Any) -> int | None:
+    try:
+        return None if value is None else int(value)
+    except (TypeError, ValueError):
+        return None
 
 
 def _truth_by_frame(gt: dict[str, Any]) -> dict[int, str]:
@@ -110,122 +72,191 @@ def _label(state: str) -> str:
     return "unresolved"
 
 
-def _feature_value(row: dict[str, Any], model_name: str) -> float:
-    source_name = FIELD_MAP.get(model_name, model_name)
-    value = row.get(source_name)
-    if isinstance(value, bool):
-        return 1.0 if value else 0.0
-    try:
-        return float(value or 0.0)
-    except (TypeError, ValueError):
-        return 0.0
+def _receiver_track(row: dict[str, Any]) -> int | None:
+    candidate = _int(row.get("candidate_track_id"))
+    if candidate is not None:
+        return candidate
+    raw = _int(row.get("raw_best_track_id"))
+    origin = _int(row.get("flight_origin_track_id"))
+    if raw is not None and raw != origin:
+        return raw
+    return None
+
+
+def _features_from_existing_row(
+    row: dict[str, Any],
+    *,
+    receiver_streak: int,
+) -> dict[str, float]:
+    delta_distance = _float(row.get("shot_preflight_delta_distance_norm"), 0.0)
+    delta_relative_y = _float(row.get("shot_preflight_delta_relative_y"), 0.0)
+    values = {
+        "flight_supported": 1.0 if bool(row.get("flight_supported", False)) else 0.0,
+        "flight_frames": _float(row.get("flight_frames"), 0.0),
+        "flight_direct_observations": _float(row.get("flight_direct_observations"), 0.0),
+        "flight_displacement_player_heights": _float(
+            row.get("flight_displacement_player_heights"), 0.0
+        ),
+        "receiver_evidence": 1.0 if bool(row.get("pass_flight_receiver_evidence", False)) else 0.0,
+        "receiver_thresholded": 1.0 if row.get("candidate_track_id") is not None else 0.0,
+        "raw_best_distinct_from_origin": 1.0
+        if bool(row.get("raw_best_distinct_from_flight_origin", False))
+        else 0.0,
+        "raw_best_score": _float(row.get("raw_best_score"), 0.0),
+        "candidate_score": _float(row.get("candidate_score"), 0.0),
+        "receiver_same_track_streak": float(receiver_streak),
+        # These two receiver-geometry features were not persisted in the existing
+        # V1-V5 runs. Keep them neutral; constant training columns produce zero weight.
+        "receiver_approach_delta_heights": 0.0,
+        "receiver_motion_cosine": 0.0,
+        "shot_active": 1.0 if bool(row.get("shot_active", False)) else 0.0,
+        # Semantic shot evidence was not persisted in the historical state rows. Strong
+        # semantic shot evidence still has runtime precedence outside the classifier.
+        "semantic_shot_signal": 0.0,
+        "rim_available": 1.0 if bool(row.get("shot_preflight_available", False)) else 0.0,
+        "rim_above": 1.0 if bool(row.get("shot_preflight_above", False)) else 0.0,
+        "rim_distance_norm": _float(row.get("shot_preflight_ball_to_rim_distance_norm"), 0.0),
+        # Runtime classifier expresses approach/rise as positive progress. Existing
+        # diagnostics store current-minus-previous, so invert the sign here.
+        "rim_approach_delta_norm": -delta_distance,
+        "rim_rising_delta_heights": -delta_relative_y,
+        "direct_ball_observed": 1.0
+        if bool(row.get("shot_preflight_direct_observed", False))
+        else 0.0,
+        # Not persisted in the existing V1-V5 runs; neutral and therefore zero-weighted.
+        "recent_owner_age_frames": 0.0,
+    }
+    return {name: float(values[name]) for name in FEATURES}
 
 
 def build(manifest_path: Path) -> tuple[list[dict[str, Any]], dict[str, Any]]:
     manifest = _load_json(manifest_path)
-    if str(manifest.get("version") or "") != "courtflux_airborne_dev_manifest_v1":
-        raise ValueError("development manifest version must be courtflux_airborne_dev_manifest_v1")
+    if str(manifest.get("version") or "") != "courtflux_airborne_dev_manifest_v2":
+        raise ValueError("development manifest version must be courtflux_airborne_dev_manifest_v2")
 
-    forbidden = _validation_video_ids()
     rows_out: list[dict[str, Any]] = []
     clip_summary: list[dict[str, Any]] = []
-    train_video_ids: set[str] = set()
-    calibration_video_ids: set[str] = set()
+    video_ids: set[str] = set()
 
     for clip in list(manifest.get("clips", []) or []):
         if not isinstance(clip, dict):
             continue
         clip_id = str(clip.get("id") or "")
-        split = str(clip.get("split") or "")
         video_id = str(clip.get("video_id") or "")
-        run_id = clip.get("run_id")
+        run_id = str(clip.get("run_id") or "")
         gt_rel = str(clip.get("gt_file") or "")
-        if split not in {"train", "calibration"}:
-            raise ValueError(f"{clip_id}: split must be train or calibration")
-        if video_id in forbidden:
-            raise ValueError(f"{clip_id}: validation video {video_id} is forbidden in development data")
-        if not run_id:
-            raise ValueError(f"{clip_id}: run_id is required after the development probe is generated")
-        if not gt_rel:
-            raise ValueError(f"{clip_id}: gt_file is required")
+        if not clip_id or not video_id or not run_id or not gt_rel:
+            raise ValueError(f"invalid development clip entry: {clip}")
+        if video_id in video_ids:
+            raise ValueError(
+                f"{clip_id}: each development clip must use a distinct video for grouped CV"
+            )
+        video_ids.add(video_id)
 
-        (train_video_ids if split == "train" else calibration_video_ids).add(video_id)
-        run_path = PROJECT_ROOT / "evaluation" / "runs" / str(run_id) / "p2_states.jsonl"
+        states_path = PROJECT_ROOT / "evaluation" / "runs" / run_id / "p2_states.jsonl"
         gt_path = PROJECT_ROOT / gt_rel
-        if not run_path.exists():
-            raise FileNotFoundError(f"{clip_id}: missing {run_path}")
+        if not states_path.exists():
+            raise FileNotFoundError(f"{clip_id}: missing {states_path}")
         if not gt_path.exists():
-            raise FileNotFoundError(f"{clip_id}: missing human GT {gt_path}")
+            raise FileNotFoundError(f"{clip_id}: missing {gt_path}")
 
         gt = _load_json(gt_path)
         truth = _truth_by_frame(gt)
-        state_rows = _load_jsonl(run_path)
-        counts = {"unresolved": 0, "pass_flight": 0, "shot_flight": 0}
+        state_rows = sorted(
+            _load_jsonl(states_path), key=lambda row: int(row.get("frame_id", -1))
+        )
+        counts: Counter[str] = Counter()
         included = 0
+        previous_receiver: int | None = None
+        previous_frame: int | None = None
+        receiver_streak = 0
+
         for state_row in state_rows:
             try:
                 frame_id = int(state_row.get("frame_id", -1))
             except (TypeError, ValueError):
                 continue
+
+            receiver = _receiver_track(state_row)
+            if (
+                receiver is not None
+                and receiver == previous_receiver
+                and previous_frame is not None
+                and frame_id == previous_frame + 1
+            ):
+                receiver_streak += 1
+            elif receiver is not None:
+                receiver_streak = 1
+            else:
+                receiver_streak = 0
+            previous_receiver = receiver
+            previous_frame = frame_id
+
             if frame_id not in truth:
-                continue
-            if not bool(state_row.get("flight_active", False)):
                 continue
             if not bool(state_row.get("engine_eligible", False)):
                 continue
+            if not bool(state_row.get("flight_active", False)):
+                continue
+
             label = _label(truth[frame_id])
-            feature_values = {
-                name: _feature_value(state_row, name)
-                for name in MODEL_FEATURE_NAMES
-            }
             rows_out.append(
                 {
                     "clip_id": clip_id,
                     "video_id": video_id,
-                    "split": split,
-                    "run_id": str(run_id),
+                    "run_id": run_id,
                     "frame_id": frame_id,
                     "truth_state": truth[frame_id],
                     "label": label,
-                    "features": feature_values,
+                    "features": _features_from_existing_row(
+                        state_row, receiver_streak=receiver_streak
+                    ),
                 }
             )
             counts[label] += 1
             included += 1
+
         clip_summary.append(
             {
                 "clip_id": clip_id,
-                "split": split,
                 "video_id": video_id,
-                "run_id": str(run_id),
+                "run_id": run_id,
                 "rows": included,
-                "labels": counts,
+                "labels": dict(sorted(counts.items())),
             }
         )
 
-    overlap = train_video_ids & calibration_video_ids
-    if overlap:
-        raise ValueError(f"train/calibration must be video-disjoint; overlap={sorted(overlap)}")
+    if len(video_ids) < 3:
+        raise ValueError("grouped cross-validation requires at least three development videos")
     if not rows_out:
         raise ValueError("development dataset contains no eligible airborne rows")
 
+    label_counts = Counter(str(row["label"]) for row in rows_out)
+    missing = [label for label in AirborneClassifierV1.CLASSES if label_counts.get(label, 0) == 0]
+    if missing:
+        raise ValueError(f"development dataset missing classifier classes: {missing}")
+
     summary = {
-        "version": "courtflux_airborne_dataset_v1",
+        "version": "courtflux_airborne_dataset_v2",
+        "policy": "V1-V5 development corpus; grouped leave-one-video-out CV; V6-V7 reserved for final Gate A",
         "rows": len(rows_out),
-        "features": list(MODEL_FEATURE_NAMES),
+        "features": list(FEATURES),
+        "label_counts": dict(sorted(label_counts.items())),
+        "development_video_ids": sorted(video_ids),
         "clips": clip_summary,
-        "train_video_ids": sorted(train_video_ids),
-        "calibration_video_ids": sorted(calibration_video_ids),
-        "forbidden_validation_video_ids": sorted(forbidden),
     }
     return rows_out, summary
 
 
 def parse_args() -> argparse.Namespace:
-    parser = argparse.ArgumentParser(description="Build AirborneClassifierV1 development dataset.")
+    parser = argparse.ArgumentParser(
+        description="Build AirborneClassifierV1 dataset from existing V1-V5 state runs."
+    )
     parser.add_argument("--manifest", default="evaluation/airborne_dev/manifest.json")
     parser.add_argument("--output", default="evaluation/airborne_dev/airborne_dataset.jsonl")
-    parser.add_argument("--summary", default="evaluation/airborne_dev/airborne_dataset_summary.json")
+    parser.add_argument(
+        "--summary", default="evaluation/airborne_dev/airborne_dataset_summary.json"
+    )
     return parser.parse_args()
 
 
@@ -243,8 +274,13 @@ def main() -> None:
 
     rows, summary = build(manifest)
     output.parent.mkdir(parents=True, exist_ok=True)
-    output.write_text("\n".join(json.dumps(row, ensure_ascii=False) for row in rows) + "\n", encoding="utf-8")
-    summary_path.write_text(json.dumps(summary, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
+    output.write_text(
+        "\n".join(json.dumps(row, ensure_ascii=False) for row in rows) + "\n",
+        encoding="utf-8",
+    )
+    summary_path.write_text(
+        json.dumps(summary, indent=2, ensure_ascii=False) + "\n", encoding="utf-8"
+    )
     print(json.dumps(summary, indent=2, ensure_ascii=False))
 
 
