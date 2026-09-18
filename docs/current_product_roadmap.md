@@ -1,20 +1,24 @@
 # CourtFlux — Current Product Roadmap
 
 > [!IMPORTANT]
-> This document is the current product-level roadmap and phase boundary reference.
+> This document is the current product-level roadmap and phase-boundary reference.
 >
-> Historical implementation documents such as `docs/p1_roadmap.md`, `docs/p1_jersey_exit_gate.md` and detailed P2 experiment notes remain preserved as technical history. Where older wording treats Jersey recognition or real-world player naming as a P1/P2 exit gate, the current boundary in `docs/p1_p2_identity_boundary.md` supersedes that phase interpretation.
+> Historical implementation and experiment documents remain preserved as technical history. When historical wording conflicts with the phase ownership or numbering below, this roadmap and the dedicated current-phase roadmaps take precedence.
 
-## Product direction
+---
 
-CourtFlux is being built around a progression from understanding a real basketball game to helping players and teams improve over time:
+# Product direction
+
+CourtFlux progresses from understanding a real basketball game to helping players and teams improve over time:
 
 ```text
 video
   ↓
-understanding
+perception + tracking
   ↓
-structured analysis
+basketball understanding
+  ↓
+structured review
   ↓
 tactical intelligence
   ↓
@@ -31,7 +35,7 @@ The product loop remains:
 Insight → Evidence → Improvement
 ```
 
-Every important insight should remain connected to the source video evidence that supports it.
+Every important conclusion should remain connected to the source evidence that supports it. `UNKNOWN` is preferable to unsupported certainty.
 
 ---
 
@@ -41,11 +45,11 @@ Every important insight should remain connected to the source video evidence tha
 P0 — Vision Foundation                                      ✅ COMPLETE
 P1 — Perception + Tracking                                  ✅ COMPLETE
 P2 — Basketball Understanding + Game-Level Player Identity  🧪 ENGINEERING COMPLETE / GT VALIDATION PENDING
-P3 — Structured Analytics + Actions                         ⏳ NEXT
+P3 — Structured Analytics + Review                          🛠 FOUNDATION MAY PROCEED CONCURRENTLY
 P4 — Tactical Intelligence                                  ⏳ FUTURE
-P4.5 — Persistent Player Identity                           ⏳ FUTURE
-P5 — Mobile App                                             ⏳ FUTURE
-P6 — Continuous Development / AI Coach                      ⏳ FUTURE
+P5 — Persistent Player Identity / Jersey Evidence           ⏳ FUTURE
+P6 — Mobile App                                             ⏳ FUTURE
+P7 — Continuous Development / AI Coach                      ⏳ FUTURE
 ```
 
 The identity distinction is fundamental:
@@ -58,24 +62,69 @@ Game Player Entity
   = stable identity for the same player inside one game
 
 Persistent Player Identity
-  = real roster/person identity across games
+  = canonical real-world player identity across games
 ```
 
-P1/P2 do not require CourtFlux to know that a game entity is “João Silva #7”. They do require enough game-level continuity for events and later analytics to belong to the correct player entity inside that game.
+P1/P2 do not require CourtFlux to know that a game entity is `João Silva #7`. P2 requires enough game-level continuity for events and later analytics to belong to the correct game player. Persistent real-world identity is a P5 responsibility.
+
+---
+
+# Active execution policy — P2 + P3 foundation
+
+P2 architecture is sufficiently mature for P3 structural work to begin without waiting for final P2 accuracy calibration.
+
+The two tracks may run concurrently:
+
+```text
+P2 VALIDATION                         P3 FOUNDATION
+      │                                     │
+reviewed human GT                    P2→P3 adapter / contract
+basketball correctness               persistent Game Record
+player attribution                   provenance / versioning
+measured calibration                 physical clip pipeline
+      │                              review / corrections
+      │                              fixtures / deterministic analytics
+      │                                     │
+      └──────────── integration ────────────┘
+                         ↓
+                validated P2 baseline
+                         ↓
+                   P3 product freeze
+```
+
+Concurrency rules:
+
+- P3 consumes a stable, versioned P2 event contract;
+- P3 must not import P2 engine internals as product dependencies;
+- P3 must not create a second possession/event engine to compensate for P2;
+- P3 must not tune P2 thresholds from product intuition;
+- calculations whose correctness depends on final P2 calibration remain configurable and reprocessable;
+- historical `analysis_run` provenance must identify which P1/P2/P3 versions produced each output;
+- when P2 passes its exit gate, P3 fixtures/integration are rerun against the frozen baseline before P3 semantics are frozen.
+
+This allows useful engineering parallelism without turning unvalidated P2 output into irreversible product truth.
 
 ---
 
 # P0 — Vision Foundation
 
-## Purpose
+## Question
 
-Establish the core video-processing and computer-vision foundation required by the rest of CourtFlux.
+> Can CourtFlux process basketball video through a measurable, repeatable computer-vision foundation?
+
+## Owns
+
+- video-processing foundation;
+- detector/evaluation infrastructure;
+- court geometry foundations;
+- explicit confidence and diagnostics;
+- repeatable experimentation and baseline comparison.
 
 ## Status
 
 Complete.
 
-Historical implementation details remain documented elsewhere and are not redefined here.
+Historical implementation details remain in the P0/P1 technical documents and are not redefined here.
 
 ---
 
@@ -87,7 +136,7 @@ Historical implementation details remain documented elsewhere and are not redefi
 
 ## Owns
 
-- player, ball and court perception;
+- player, referee, ball and court perception;
 - raw player tracking and temporal continuity;
 - team evidence;
 - `PlayerState`, `BallState` and `CourtState`;
@@ -100,13 +149,13 @@ Historical implementation details remain documented elsewhere and are not redefi
 - reliable Jersey OCR;
 - cross-game person identity.
 
-Raw `track_id` is a technical tracking identifier only.
+A `track_id` is a technical tracking identifier only.
 
 ## Exit definition
 
 P1 is complete when perception and tracking expose stable, confidence-aware state suitable for basketball reasoning.
 
-See `docs/p1_p2_identity_boundary.md` for the current identity boundary. Historical P1 execution remains in `docs/p1_roadmap.md`.
+See `docs/p1_p2_identity_boundary.md` for the current identity boundary. Historical P1 execution remains documented separately.
 
 ---
 
@@ -132,8 +181,6 @@ See `docs/p1_p2_identity_boundary.md` for the current identity boundary. Histori
 
 P2 needs to distinguish the same player consistently enough inside one game to support player-level event aggregation.
 
-Conceptually:
-
 ```text
 raw track(s)
     ↓
@@ -146,390 +193,201 @@ P2 does not need to know that `game_player_03` is João Silva or that the player
 
 ## Jersey position
 
-Jersey recognition remains useful R&D and may provide optional evidence, but is not a P1/P2 exit gate.
+Jersey recognition remains useful supporting evidence/R&D but is not a P1/P2 exit gate. `shirt_num` and `player_name` may remain `UNKNOWN`.
 
 ## Status / exit definition
 
-The P2 motor is engineering-complete. Exit requires basketball correctness against reviewed human GT plus game-player attribution stable enough to support P3 analytics.
+The P2 engineering core is implemented. Exit requires basketball correctness against reviewed human GT plus game-player attribution stable enough to support P3 analytics.
+
+Detailed execution and validation history lives in `docs/p2_roadmap.md`.
 
 ---
 
-# P3 — Structured Analytics + Actions
+# P3 — Structured Analytics + Review
 
-## Question
+## Product question
 
-> What does this game tell us, and what should the user review?
+> What deserves attention in this game, and can I immediately review the evidence?
 
-P3 is the point where CourtFlux turns basketball understanding into a directly usable analysis product.
+P3 turns P2 basketball understanding into a durable, reopenable review product.
 
-## P3.1 — Game Analytics Core
+## Core outcomes
 
-Aggregate P2 events into structured game outputs:
+- persistent Game Record;
+- possession/event aggregation;
+- per-team and per-game-player summaries;
+- physical evidence clips linked to source timestamps;
+- `Things to Review` as the primary review surface;
+- timeline and filters;
+- conservative explainable insights;
+- human correction without destroying original predictions;
+- save / tag / note / collection actions;
+- versioning, provenance and reprocessing semantics.
 
-- possessions;
-- shots;
-- turnovers;
-- passes;
-- rebounds;
-- loose balls;
-- event counts and rates;
-- possession timeline;
-- team splits;
-- per-game-player splits.
+## Concurrent foundation rule
 
-Real-world player names are not required. A valid output can be:
+P3 structural development may begin while P2 validation continues.
 
-```text
-Player 3
-12 possessions
-4 shot attempts
-2 turnover candidates
-6 review clips
-```
+Safe concurrent work includes:
 
-## P3.2 — Evidence-linked Review
+- persistence/data contracts;
+- P2→P3 adapter;
+- analysis/model/schema versioning;
+- Game Record;
+- physical clip generation;
+- review UI/data model;
+- human corrections;
+- evidence lineage;
+- fixture-driven deterministic aggregation;
+- save/tag/note/collection infrastructure.
 
-Every important event, metric or insight must link back to the source footage.
+P2-accuracy-dependent metrics, rankings and review prioritization remain configurable/reprocessable until P2 passes its exit gate.
 
-Example:
+## Exit definition
 
-```text
-Turnover candidate
-02:14
-[Review clip]
-```
+A user can upload a game and rapidly find the moments, metrics and game-level players that deserve attention without manually searching through 60–90 minutes of video, while uncertainty and evidence remain visible.
 
-This is a core product principle, not an optional UI enhancement.
-
-## P3.3 — Smart Clip Organization
-
-Automatically create useful review collections such as:
-
-- all shots;
-- turnovers;
-- possession changes;
-- loose-ball sequences;
-- possessions ending in a shot;
-- player-specific possessions;
-- team offensive/defensive possessions.
-
-## P3.4 — Insight Layer
-
-Produce conservative, explainable observations from structured game data.
-
-Examples:
-
-- `Player 4 had 5 possessions ending in a turnover candidate.`
-- `Team A generated 8 shot attempts after possession changes.`
-- `6 of Player 2's 9 reviewable possessions occurred in the second half.`
-
-P3 should not make unsupported coaching judgments or pretend candidate events are perfect truth.
-
-## P3.5 — Action Workflow
-
-Turn review into action:
-
-```text
-Insight
-  ↓
-Evidence
-  ↓
-Save / Tag
-  ↓
-Review
-  ↓
-Action
-```
-
-Examples:
-
-- review these possessions;
-- save a clip;
-- add to a player review;
-- create a coach review collection.
-
-## P3 exit definition
-
-P3 is complete when a user can upload a game and rapidly find the moments, metrics and game-level players that deserve attention without manually searching through 60–90 minutes of video.
-
-This is the first major CourtFlux product “magic moment”.
+Detailed execution lives in [`docs/p3_roadmap.md`](p3_roadmap.md).
 
 ---
 
 # P4 — Tactical Intelligence
 
-## Question
+## Product question
 
-> How is this team playing, and what basketball patterns are repeating?
+> How did this team create or defend advantages, and can I immediately review every example?
 
-P4 moves from isolated events toward relationships between players, space and possession structure.
+P4 moves from isolated basketball events into temporal relationships between players, space and possession structure.
 
-## P4.1 — Spatial Team Structure
-
-Model:
-
-- player positions;
-- ball position;
-- spacing;
-- width/depth;
-- paint/perimeter occupancy;
-- inter-player distances;
-- offensive and defensive shape.
-
-## P4.2 — Transition Intelligence
-
-Identify and characterize:
-
-- offensive transition;
-- defensive transition;
-- fast-break situations;
-- numerical advantage/disadvantage;
-- early offense;
-- possession stabilization.
-
-## P4.3 — Screening / Pick-and-Roll Intelligence
-
-Build confidence-aware recognition of patterns such as:
-
-- screen candidate;
-- ball handler;
-- screener;
-- roll / pop;
-- reject;
-- switch;
-- drop;
-- hedge.
-
-## P4.4 — Defensive Behaviour
-
-Explore supported evidence for:
-
-- help;
-- rotations;
-- closeouts;
-- switches;
-- matchup changes;
-- rim protection;
-- defensive collapse and recovery.
-
-Weak or ambiguous evidence should remain `UNKNOWN` rather than force a tactical label.
-
-## P4 tactical milestone — Possession Pattern Classification
-
-Classify possessions when evidence supports patterns such as:
+## Core progression
 
 ```text
-transition
-pick-and-roll
-isolation
-post-up
-off-ball screen
-handoff
-spot-up sequence
-broken play
-unknown
+P4.0 — Tactical State Contract
+P4.1 — Spatial Foundation
+P4.2 — Tactical Primitives
+P4.3 — Offensive Transition
+P4.4 — Offensive Actions
+P4.5 — Tactical Segmentation
+P4.6 — Game + Team Tendencies
+P4.7 — Defensive Intelligence
+P4.8 — Tactical Review + Radar
+P4.9 — Human Correction + Tactical GT
+P4.10 — Validation + Integrity Exit Gate
 ```
 
-This is an internal P4 milestone and should not be confused with roadmap phase **P4.5 — Persistent Player Identity** below.
+P4 is offense-first. Defensive intelligence follows the validated spatial/offensive foundation.
 
-## P4.6 — Team Tendencies
+Tactical truth is temporal and may be multi-label. When geometry, tracking or contextual evidence is insufficient, output must remain `UNKNOWN` / `NOT_TACTICALLY_ANALYZABLE` rather than forcing a plausible tactical label.
 
-Aggregate tactical patterns into game/team tendencies while keeping evidence and sample size visible.
+## Integrity exit principle
 
-Examples:
+Every important P2→P4 analytical conclusion must be:
 
-- P&R usage frequency;
-- transition shot generation;
-- recurring defensive coverage behaviour;
-- offensive/defensive structural tendencies.
+```text
+VERSIONED
+TRACEABLE
+CORRECTABLE
+MEASURABLE
+REPRODUCIBLE
+```
 
-## P4 exit definition
-
-P4 is complete when CourtFlux can reliably characterize what kind of basketball is happening in a possession and identify meaningful tactical patterns that repeat through a game.
-
-Real-world player names are still not required for this phase.
+Detailed execution lives in [`docs/p4_roadmap.md`](p4_roadmap.md).
 
 ---
 
-# P4.5 — Persistent Player Identity
+# P5 — Persistent Player Identity / Jersey Evidence
 
-## Question
+## Product question
 
 > Who is this game-level player in the real roster, and is it the same person across games?
 
-This phase is deliberately separate from P2 game-level identity.
+P5 resolves game-local player entities into durable real-world player identities.
 
-## P4.5.1 — Roster Model
-
-Create persistent player records with concepts such as:
+P5 is deliberately **not** a second attempt to make Jersey OCR solve identity by itself.
 
 ```text
-player_id
-name
-team_id
-jersey_number
-position
-active roster status
-identity history
+game 1.game_player_03
+            \
+             \
+game 2.game_player_07 ---> persistent_player_id ---> João Silva
+             /
+            /
+game 3.game_player_02
 ```
 
-Jersey number must be treated as mutable metadata, not permanent identity.
-
-## P4.5.2 — Human Confirmation Workflow
-
-Provide a robust product fallback before attempting perfect automation:
+## Core progression
 
 ```text
-We found 9 game players
-    ↓
-Match / confirm roster identities
+P5.0 — Persistent Identity Contract
+P5.1 — Canonical Player + Membership Model
+P5.2 — Human Identity Confirmation MVP
+P5.3 — Identity Evidence Store
+P5.4 — CourtFlux Jersey vNext
+P5.5 — Appearance / ReID
+P5.6 — Multi-Evidence Identity Resolver
+P5.7 — Cross-Game Identity Memory
+P5.8 — Player History + Product Integration
+P5.9 — Identity Validation / Exit Gate
 ```
 
-Example:
+## Jersey position
+
+The historical Jersey investigation is an asset, not a phase to restart.
+
+P5 reuses:
+
+- Jersey GT tooling;
+- Identity v2 temporal/reversible evidence handling;
+- `UNKNOWN` / abstention policy;
+- roster-as-validator rule;
+- historical model/ROI/legibility findings.
+
+New Jersey model work should reopen only through CourtFlux-specific labelled data and measured adaptation/fine-tuning, not another ungrounded cycle of ROI/threshold heuristics.
+
+## Identity principle
 
 ```text
-Game Player 3 → João Silva
-Game Player 4 → Miguel Costa
+UNKNOWN > false identity
 ```
 
-A short confirmation flow is acceptable; false automatic identity is not.
+False merges are especially dangerous because they silently corrupt historical player analytics and future development models.
 
-## P4.5.3 — Jersey Evidence
-
-Use Jersey OCR as one probabilistic source of identity evidence rather than the identity system itself.
-
-## P4.5.4 — Appearance / ReID Evidence
-
-Add evidence such as:
-
-- body appearance embeddings;
-- kit details;
-- shoes/accessories when useful;
-- relative height/build cues;
-- visual similarity across clips.
-
-## P4.5.5 — Face Evidence When Available
-
-Face evidence may help in suitable footage but should remain optional/secondary because standard game video often lacks sufficient quality.
-
-## P4.5.6 — Cross-game Resolution
-
-Resolve:
-
-```text
-game_1.game_player_03
-game_2.game_player_07
-game_3.game_player_02
-          ↓
-     player_joao_silva
-```
-
-with confidence and provenance.
-
-## P4.5.7 — Identity Memory
-
-Confirmed identities from prior games become evidence for future games, allowing the system to improve progressively while preserving user correction.
-
-## P4.5 exit definition
-
-P4.5 is complete when CourtFlux can associate game-level player entities with persistent roster identities across games using automated evidence plus human confirmation where necessary.
-
-100% automatic identity is not required.
+Detailed execution lives in [`docs/p5_roadmap.md`](p5_roadmap.md).
 
 ---
 
-# P5 — Mobile App
+# P6 — Mobile App
 
-## Question
+## Product question
 
 > How does CourtFlux become part of the daily workflow of players and coaches?
 
-The mobile app should not be a simple responsive copy of the website. It should focus on frequent consumption, review, collaboration and action.
+P6 brings existing evidence/review workflows into frequent mobile use rather than creating a separate analytics truth layer.
 
-## P5.1 — Mobile Review Experience
+Core scope includes:
 
-Core app experience:
+- game feed and game summaries;
+- clip review;
+- player summaries/history;
+- saved moments;
+- notifications;
+- coach → player review workflow;
+- controlled sharing;
+- later mobile upload/capture flows.
 
-- game feed;
-- game summaries;
-- player summaries;
-- clip playback;
-- event timeline;
-- filters;
-- saved clips / favourites.
+## Exit definition
 
-## P5.2 — Notifications
-
-Examples:
-
-- analysis ready;
-- possessions ready for review;
-- coach added clips;
-- new game attached to a player profile;
-- new coach feedback.
-
-Notifications should support a useful product loop, not become noise.
-
-## P5.3 — Coach → Player Workflow
-
-Allow a coach to:
-
-```text
-select possessions
-  ↓
-add note / context
-  ↓
-assign to player
-  ↓
-player receives mobile review
-```
-
-## P5.4 — Sharing
-
-Support controlled sharing of:
-
-- clips;
-- review collections;
-- private team/player links;
-- coach-player feedback;
-- later, export formats suitable for external sharing.
-
-## P5.5 — Mobile Upload / Capture
-
-Later in P5, support:
-
-- selecting video from device;
-- direct upload;
-- background upload;
-- analysis status;
-- game metadata;
-- potentially guided capture.
-
-Capture/upload should not block the first useful mobile release.
-
-## P5.6 — Player Home
-
-With persistent identity available, give players a useful home surface for:
-
-- latest game;
-- review moments;
-- recent-game trends;
-- coach feedback;
-- saved priorities.
-
-## P5 exit definition
-
-P5 is complete when players and coaches can consume, review, share and act on CourtFlux analysis without needing the desktop workflow for ordinary use.
+Players and coaches can consume, review, share and act on CourtFlux analysis without requiring the desktop workflow for ordinary use.
 
 ---
 
-# P6 — Continuous Development / AI Coach
+# P7 — Continuous Development / AI Coach
 
-## Question
+## Product question
 
 > How is this player or team changing over time, and what should they focus on next?
 
-P6 moves CourtFlux from game analysis into continuous basketball development.
+P7 moves CourtFlux from game analysis to longitudinal development intelligence.
 
 The core loop becomes:
 
@@ -542,189 +400,90 @@ PATTERN
   ↓
 FOCUS
   ↓
-TRAIN / REVIEW
+REVIEW / TRAIN
   ↓
 NEXT GAME
   ↓
 MEASURE AGAIN
 ```
 
-## P6.1 — Player Model
+Core scope includes:
 
-Build a persistent, multidimensional model rather than a single player score.
+- persistent player/team models;
+- historical trends;
+- recurring pattern detection;
+- meaningful-change detection;
+- evidence-backed review/development priorities;
+- goals and progress;
+- AI Coach reasoning over structured CourtFlux evidence.
 
-Possible dimensions include:
+The AI Coach must reason from versioned P2/P3/P4/P5 evidence rather than act as a generic chatbot over raw video.
 
-- possession involvement;
-- shooting;
-- passing;
-- turnovers;
-- transition;
-- off-ball behaviour;
-- defence;
-- decision patterns;
-- tactical role;
-- usage/context.
+## Exit definition
 
-## P6.2 — Historical Trends
+CourtFlux can use evidence from multiple real games to identify recurring patterns, track meaningful change and suggest review/development priorities that remain linked to the underlying basketball evidence.
 
-Measure trends across real games while preserving sample size and uncertainty.
+---
 
-Examples:
-
-- shot volume;
-- turnover frequency;
-- possession involvement;
-- transition involvement;
-- passing tendencies;
-- tactical role changes.
-
-## P6.3 — Development Signals
-
-Detect meaningful changes or recurring patterns without overstating causality.
-
-Examples:
-
-- a repeated turnover pattern under pressure;
-- changing transition involvement;
-- changes in shot locations or possession outcomes.
-
-## P6.4 — Improvement Priorities
-
-Suggest evidence-backed review priorities.
-
-Example:
+# Phase dependency summary
 
 ```text
-Suggested focus
-Decision-making after first advantage
-
-Why
-8 reviewable possessions across the last 3 games
-
-Evidence
-[Clip] [Clip] [Clip]
+P0
+vision foundation
+  ↓
+P1
+reliable perception / tracking state
+  ↓
+P2
+basketball understanding + game-player attribution
+  ↓
+P3
+persistent review / analytics / corrections
+  ↓
+P4
+tactical understanding
+  ↓
+P5
+persistent real-world player identity
+  ↓
+P6
+mobile daily workflow
+  ↓
+P7
+longitudinal development / AI Coach
 ```
 
-No development recommendation should become detached from the evidence that produced it.
-
-## P6.5 — Player Development Loop
-
-Allow a user or coach to define a focus, review evidence, observe future games and measure whether the relevant pattern changes.
-
-## P6.6 — Coach Intelligence
-
-Help coaches understand where attention may be useful across a roster:
-
-- recurring player patterns;
-- recent changes;
-- assigned development priorities;
-- evidence collections;
-- team-level development themes.
-
-## P6.7 — AI Coach
-
-Only at this maturity level should CourtFlux seriously present an AI Coach concept.
-
-The AI Coach should reason over structured CourtFlux evidence and player/team models rather than operate as a generic chatbot over raw video.
-
-It should answer questions such as:
-
-> What should this player review this week?
-
-with:
-
-- an explainable reason;
-- the relevant games/possessions;
-- direct source-video evidence;
-- appropriate uncertainty.
-
-## P6.8 — Goals and Progress
-
-Support measurable development goals connected to game evidence.
-
-Example:
-
-```text
-Focus
-Reduce turnovers under pressure
-
-Baseline
-6 / game
-
-Current window
-3 / game
-
-Evidence
-Last 5 games
-```
-
-Metrics must use appropriate sample-size and uncertainty safeguards.
-
-## P6.9 — Team Model
-
-Extend the longitudinal model to teams:
-
-- offensive identity;
-- defensive identity;
-- transition profile;
-- P&R usage;
-- spacing tendencies;
-- shot generation;
-- turnover patterns;
-- rotation behaviour.
-
-## P6 exit definition
-
-P6 is complete when CourtFlux can use evidence from multiple real games to identify recurring patterns, track meaningful change and suggest review/development priorities that always link back to basketball evidence.
+P3 foundation may overlap temporally with final P2 validation, but semantic freeze still follows validated P2 integration.
 
 ---
 
 # Reference-history policy
 
-Historical P0/P1/P2 execution documents are intentionally retained. They record experiments, baselines, rejected challengers and earlier phase assumptions that remain useful for engineering reference.
+Historical execution and experiment documents are intentionally retained. They record baselines, rejected challengers, research stops and earlier phase assumptions that remain useful for engineering reference.
 
-The rule is:
+Rules:
 
-- do **not** rewrite historical experiment results to match later roadmap decisions;
-- use `docs/current_product_roadmap.md` for current product phase definitions;
+- do **not** rewrite historical experiment results to make them match later roadmap decisions;
+- do update current roadmap/boundary documents when phase ownership changes;
+- use `README.md` and this document for current phase order;
 - use `docs/p1_p2_identity_boundary.md` for the current identity boundary;
-- use historical P1/P2 documents for implementation history and experiment evidence.
+- use `docs/p3_roadmap.md`, `docs/p4_roadmap.md` and `docs/p5_roadmap.md` for detailed current execution contracts;
+- treat `docs/p1_jersey_exit_gate.md` and `docs/jersey_recon_rnd.md` as historical engineering evidence, not current phase definitions.
 
 ---
 
-# Product progression
-
-The roadmap can be summarized as:
+# Current engineering focus
 
 ```text
-P0–P2
-CourtFlux understands the game.
+P2
+reviewed GT + measured basketball correctness
++ game-player attribution validation
 
-P3
-CourtFlux makes the game fast and useful to review.
+        in parallel with
 
-P4
-CourtFlux understands how the game is being played tactically.
-
-P4.5
-CourtFlux knows who the players are across games.
-
-P5
-CourtFlux becomes part of the player's and coach's daily workflow.
-
-P6
-CourtFlux turns successive games into a continuous development system.
+P3 foundation
+stable adapter + persistence + provenance
++ clips + review + corrections + fixtures
 ```
 
-The long-term differentiation is therefore not “AI-generated stats”. It is the closed loop:
-
-```text
-real game
-→ structured understanding
-→ evidence
-→ insight
-→ action
-→ next game
-→ measured development
-```
+Do not let P3 concurrency weaken the P2 correctness gate. Do not let unfinished P2 calibration block structural P3 work that can be safely versioned and reprocessed.

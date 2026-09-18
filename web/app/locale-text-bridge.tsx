@@ -1,7 +1,8 @@
 "use client";
 
 import { useEffect } from "react";
-import type { Locale } from "@/lib/i18n/config";
+import { usePathname } from "next/navigation";
+import { isPublicPath, type Locale } from "@/lib/i18n/config";
 import { translateRuntimeText } from "@/lib/i18n/translations";
 
 const SKIP_TAGS = new Set(["SCRIPT", "STYLE", "CODE", "PRE", "NOSCRIPT", "SVG"]);
@@ -90,8 +91,10 @@ function translateTree(root: Node, locale: Locale) {
 }
 
 export function LocaleTextBridge({ locale }: { locale: Locale }) {
+  const pathname = usePathname();
+
   useEffect(() => {
-    if (locale === "en") return;
+    if (locale === "en" || isPublicPath(pathname)) return;
     translateTree(document, locale);
 
     const observer = new MutationObserver((mutations) => {
@@ -106,7 +109,7 @@ export function LocaleTextBridge({ locale }: { locale: Locale }) {
 
     observer.observe(document.body, { childList: true, subtree: true, characterData: true });
     return () => observer.disconnect();
-  }, [locale]);
+  }, [locale, pathname]);
 
   return null;
 }

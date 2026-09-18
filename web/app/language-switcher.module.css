@@ -20,6 +20,7 @@
 }
 
 .switcher select {
+  width: auto;
   min-height: 34px;
   max-width: 164px;
   border: 0;
@@ -31,6 +32,24 @@
   font-size: 0.76rem;
   font-weight: 750;
   cursor: pointer;
+}
+
+.light {
+  margin-left: 0;
+  border-color: rgba(10, 23, 34, 0.14);
+  background: rgba(255, 255, 255, 0.58);
+  box-shadow: none;
+}
+
+.light span {
+  color: #59656e;
+}
+
+.light select {
+  border: 1px solid rgba(10, 23, 34, 0.12);
+  background: #fff;
+  color: #17232d;
+  color-scheme: light;
 }
 
 .switcher select:focus-visible {

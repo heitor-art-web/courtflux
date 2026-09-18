@@ -27,7 +27,7 @@
       "Ball detection and temporal tracking",
       "Possession and ball-control state analysis",
       "Basketball event candidates including passes, turnovers, shots and rebounds",
-      "Evidence-grounded basketball video review"
+      "Uncertainty-aware basketball state and event candidates"
     ],
     "audienceType": "Basketball players, coaches, teams, academies and performance analysts",
     "webPageName": "Basketball Video Analysis for Players, Coaches & Teams | CourtFlux",
@@ -58,7 +58,7 @@
         "height": 1200
       },
       "overlay": {
-        "kicker": "Game intelligence",
+        "kicker": "Insight → Evidence → Improvement",
         "title": "From footage to basketball context",
         "metrics": ["Possessions", "Shots", "Changes of control"],
         "note": "P2 event understanding is in validation against reviewed human ground truth."
@@ -68,9 +68,9 @@
       "type": "valueStrip",
       "id": "value",
       "items": [
-        { "title": "Understand your game", "copy": "Move beyond isolated clips and see how the action develops through time." },
-        { "title": "Find your edge", "copy": "Surface the possessions and moments that deserve a closer look." },
-        { "title": "Improve with evidence", "copy": "Keep analysis connected to the film instead of separating numbers from context." }
+        { "title": "Find the insight", "copy": "Surface the possessions and moments that deserve a closer look." },
+        { "title": "Review the evidence", "copy": "Keep every insight connected to the source video and surrounding basketball context." },
+        { "title": "Choose what to improve", "copy": "Turn the evidence into a clearer next focus without handing basketball judgement to the system." }
       ]
     },
     {
@@ -82,7 +82,7 @@
       "highlight": "box score.",
       "copy": "CourtFlux follows players, teams and the ball across time, then builds that movement into basketball state. The current P2 layer can structure ball control, possession changes, loose-ball sequences, shot attempts and candidate pass, turnover and rebound events.",
       "points": [
-        { "title": "Track the action", "copy": "Persistent player, team and ball context creates the foundation for game understanding." },
+        { "title": "Track the action", "copy": "Game-level player, team and ball context creates the foundation for basketball understanding." },
         { "title": "Connect events through time", "copy": "Basketball decisions happen across sequences, not in isolated frames." },
         { "title": "Keep uncertainty visible", "copy": "Weak or contradictory evidence can remain unknown instead of being forced into a false answer." }
       ],
@@ -104,7 +104,7 @@
       "insight": {
         "kicker": "Example review flow",
         "title": "Possession changed under pressure",
-        "copy": "Jump directly from a structured event to the sequence that produced it, then review the surrounding context instead of searching through the full recording.",
+        "copy": "The P3 review layer is being built so a structured event can open its supporting sequence and surrounding context instead of forcing you to search the full recording.",
         "action": "Review the possession"
       },
       "media": {
@@ -137,8 +137,8 @@
         },
         {
           "audience": "Teams",
-          "title": "Build a shared game model.",
-          "copy": "Create a structured foundation for repeatable game review, player context and future team-level intelligence.",
+          "title": "Build a shared review foundation.",
+          "copy": "Create a structured foundation for repeatable game review today, with team-level analytics added only as they are validated.",
           "href": "/basketball-analysis-for-teams"
         }
       ]
@@ -181,8 +181,8 @@
           "description": "For an individual coach or analyst turning game film into a repeatable review and improvement workflow.",
           "allowance": "About 5 full games / month",
           "allowanceCopy": "300 analysis minutes included. Additional processing can be added when needed.",
-          "features": ["Game analysis", "Player, team and ball tracking", "P2 basketball-state and event outputs", "Video-linked evidence and saved analyses"],
-          "cta": "Start with a free game",
+          "features": ["Game analysis", "Player, team and ball tracking", "P2 basketball-state and event outputs", "Frame- and timestamp-linked event evidence and saved analyses"],
+          "cta": "Analyze your first game free",
           "href": "/login?mode=signup",
           "featured": false
         },
@@ -198,7 +198,7 @@
           "allowance": "About 16 full games / month",
           "allowanceCopy": "1,000 analysis minutes included. Additional processing can be added when needed.",
           "features": ["Everything in Coach", "Team workspace and roster context", "Shared coaching workflow", "Structured team and player analytics as validated"],
-          "cta": "Start with a free game",
+          "cta": "Analyze your first game free",
           "href": "/login?mode=signup",
           "featured": true
         }

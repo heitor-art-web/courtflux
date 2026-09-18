@@ -3,90 +3,95 @@
 import { useEffect, useState } from "react";
 import { createPortal } from "react-dom";
 import { usePathname, useRouter } from "next/navigation";
-import type { Locale } from "@/lib/i18n/config";
+import {
+  LOCALE_COOKIE,
+  LOCALE_LABELS,
+  SUPPORTED_LOCALES,
+  isPublicPath,
+  localeFromPathname,
+  localizePublicHref,
+  stripLocalePrefix,
+  type Locale,
+} from "@/lib/i18n/config";
 import styles from "./language-switcher.module.css";
 
-const COOKIE_NAME = "courtflux_locale";
-const PUBLIC_PATHS = new Set([
-  "/",
-  "/basketball-video-analysis",
-  "/basketball-analysis-for-coaches",
-  "/basketball-analysis-for-teams",
-  "/trust",
-  "/video-data",
-  "/privacy",
-  "/terms",
-  "/ai-limitations",
-]);
+type LanguageSwitcherTone = "dark" | "light";
 
-const OPTIONS: Array<{ locale: Locale; label: string }> = [
-  { locale: "en", label: "English" },
-  { locale: "pt-PT", label: "Português (Portugal)" },
-  { locale: "es-ES", label: "Español (España)" },
-];
-
-function stripLocale(pathname: string) {
-  const stripped = pathname.replace(/^\/(pt-pt|es-es)(?=\/|$)/i, "");
-  return stripped || "/";
+function destinationPath(pathname: string, locale: Locale) {
+  const cleanPath = stripLocalePrefix(pathname);
+  return isPublicPath(pathname) ? localizePublicHref(cleanPath, locale) : cleanPath;
 }
 
-function targetPath(pathname: string, locale: Locale) {
-  const cleanPath = stripLocale(pathname);
-  if (!PUBLIC_PATHS.has(cleanPath)) return cleanPath;
-  if (locale === "pt-PT") return cleanPath === "/" ? "/pt-pt" : `/pt-pt${cleanPath}`;
-  if (locale === "es-ES") return cleanPath === "/" ? "/es-es" : `/es-es${cleanPath}`;
-  return cleanPath;
-}
-
-export function LanguageSwitcher({ initialLocale }: { initialLocale: Locale }) {
+export function LanguageSwitcher({
+  initialLocale,
+  tone = "dark",
+}: {
+  initialLocale?: Locale;
+  tone?: LanguageSwitcherTone;
+}) {
   const router = useRouter();
   const pathname = usePathname();
-  const [locale, setLocale] = useState(initialLocale);
-  const [host, setHost] = useState<HTMLElement | null>(null);
+  const routeLocale = localeFromPathname(pathname) ?? "en";
+  const [locale, setLocale] = useState<Locale>(initialLocale ?? routeLocale);
 
   useEffect(() => {
-    let frame = 0;
-
-    const findHost = () => {
-      const nextHost = document.querySelector<HTMLElement>("#main-content header");
-      setHost((current) => (current === nextHost ? current : nextHost));
-    };
-
-    frame = window.requestAnimationFrame(findHost);
-    const mainContent = document.querySelector<HTMLElement>("#main-content");
-    const observer = new MutationObserver(findHost);
-    if (mainContent) observer.observe(mainContent, { childList: true, subtree: true });
-
-    return () => {
-      window.cancelAnimationFrame(frame);
-      observer.disconnect();
-    };
-  }, [pathname]);
+    setLocale(initialLocale ?? localeFromPathname(pathname) ?? "en");
+  }, [initialLocale, pathname]);
 
   function changeLanguage(nextLocale: Locale) {
+    if (nextLocale === locale) return;
+
     setLocale(nextLocale);
-    document.cookie = `${COOKIE_NAME}=${encodeURIComponent(nextLocale)}; Max-Age=31536000; Path=/; SameSite=Lax`;
-    const destination = `${targetPath(window.location.pathname, nextLocale)}${window.location.search}${window.location.hash}`;
-    router.push(destination);
+    document.cookie = `${LOCALE_COOKIE}=${encodeURIComponent(nextLocale)}; Max-Age=31536000; Path=/; SameSite=Lax`;
+
+    const nextPath = destinationPath(pathname, nextLocale);
+    const destination = `${nextPath}${window.location.search}${window.location.hash}`;
+
+    if (isPublicPath(pathname)) {
+      router.push(destination);
+      return;
+    }
+
+    if (nextPath !== pathname) router.push(destination);
     router.refresh();
   }
 
   const label = locale === "en" ? "Language" : locale === "pt-PT" ? "Língua" : "Idioma";
+  const toneClass = tone === "light" ? styles.light : "";
 
-  const control = (
-    <label className={styles.switcher} data-i18n-ignore>
+  return (
+    <label className={`${styles.switcher} ${toneClass}`} data-i18n-ignore>
       <span>{label}</span>
       <select
         aria-label={label}
         value={locale}
         onChange={(event) => changeLanguage(event.target.value as Locale)}
       >
-        {OPTIONS.map((option) => (
-          <option key={option.locale} value={option.locale}>{option.label}</option>
+        {SUPPORTED_LOCALES.map((option) => (
+          <option key={option} value={option}>{LOCALE_LABELS[option]}</option>
         ))}
       </select>
     </label>
   );
+}
 
-  return host ? createPortal(control, host) : null;
+export function AppLanguageSwitcherBridge({ initialLocale }: { initialLocale: Locale }) {
+  const pathname = usePathname();
+  const [host, setHost] = useState<HTMLElement | null>(null);
+
+  useEffect(() => {
+    if (isPublicPath(pathname)) {
+      setHost(null);
+      return;
+    }
+
+    const frame = window.requestAnimationFrame(() => {
+      setHost(document.querySelector<HTMLElement>("#main-content header"));
+    });
+
+    return () => window.cancelAnimationFrame(frame);
+  }, [pathname]);
+
+  if (isPublicPath(pathname) || !host) return null;
+  return createPortal(<LanguageSwitcher initialLocale={initialLocale} />, host);
 }

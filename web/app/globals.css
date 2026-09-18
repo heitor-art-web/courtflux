@@ -36,6 +36,14 @@ body::before {
   background-size: 36px 36px;
   mask-image: linear-gradient(to bottom, black, transparent 70%);
 }
+
+body[data-public-page="true"] {
+  color-scheme: light;
+  background: #f3f1eb;
+  color: #0a1722;
+}
+body[data-public-page="true"]::before { display: none; }
+
 button, input, select, textarea { font: inherit; }
 button { cursor: pointer; }
 
@@ -44,8 +52,8 @@ a:focus-visible, button:focus-visible, input:focus-visible, select:focus-visible
   outline-offset: 3px;
 }
 
-main { max-width: 1220px; margin: 0 auto; padding: 36px 24px 80px; position: relative; }
-header {
+body:not([data-public-page="true"]) main { max-width: 1220px; margin: 0 auto; padding: 36px 24px 80px; position: relative; }
+body:not([data-public-page="true"]) header {
   display: flex;
   justify-content: space-between;
   gap: 24px;
@@ -54,8 +62,8 @@ header {
   padding: 12px 0 18px;
   border-bottom: 1px solid rgba(255,255,255,.07);
 }
-header > div:first-child { min-width: 0; }
-header h1 {
+body:not([data-public-page="true"]) header > div:first-child { min-width: 0; }
+body:not([data-public-page="true"]) header h1 {
   width: min(540px, 62vw);
   aspect-ratio: 4 / 1;
   margin: 0 0 6px;
@@ -63,14 +71,14 @@ header h1 {
   text-indent: -9999px;
   background: url('/brand/horizontal_logo_safe_crop.png') left center / contain no-repeat;
 }
-header p {
+body:not([data-public-page="true"]) header p {
   margin: 3px 0 0;
   color: var(--muted);
   font-size: .9rem;
   letter-spacing: .01em;
 }
-h2 { margin: 0 0 16px; font-size: 1.08rem; letter-spacing: .01em; }
-p { color: var(--muted); }
+body:not([data-public-page="true"]) h2 { margin: 0 0 16px; font-size: 1.08rem; letter-spacing: .01em; }
+body:not([data-public-page="true"]) p { color: var(--muted); }
 
 .badge {
   display: inline-flex;
@@ -105,8 +113,10 @@ p { color: var(--muted); }
 .form-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 14px; }
 .field { display: flex; flex-direction: column; gap: 7px; }
 .field.full { grid-column: 1 / -1; }
-label { font-size: 0.84rem; color: #d5dce5; }
-input, select, textarea {
+body:not([data-public-page="true"]) label { font-size: 0.84rem; color: #d5dce5; }
+body:not([data-public-page="true"]) input,
+body:not([data-public-page="true"]) select,
+body:not([data-public-page="true"]) textarea {
   width: 100%;
   background: rgba(3, 10, 19, .78);
   color: var(--text);
@@ -116,13 +126,15 @@ input, select, textarea {
   outline: none;
   transition: border-color .16s ease, box-shadow .16s ease, background .16s ease;
 }
-input:focus, select:focus, textarea:focus {
+body:not([data-public-page="true"]) input:focus,
+body:not([data-public-page="true"]) select:focus,
+body:not([data-public-page="true"]) textarea:focus {
   border-color: var(--accent);
   box-shadow: 0 0 0 3px rgba(255, 116, 23, .11);
   background: #07111d;
 }
-input[type="checkbox"] { accent-color: var(--accent); }
-textarea { min-height: 280px; resize: vertical; font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 0.8rem; line-height: 1.45; }
+body:not([data-public-page="true"]) input[type="checkbox"] { accent-color: var(--accent); }
+body:not([data-public-page="true"]) textarea { min-height: 280px; resize: vertical; font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 0.8rem; line-height: 1.45; }
 
 .actions { display: flex; align-items: center; gap: 12px; margin-top: 18px; }
 .primary {
@@ -173,15 +185,15 @@ summary { cursor: pointer; }
 .muted { color: var(--muted); font-size: .86rem; }
 
 @media (max-width: 900px) {
-  header { flex-direction: column; align-items: flex-start; }
-  header h1 { width: min(560px, 92vw); }
+  body:not([data-public-page="true"]) header { flex-direction: column; align-items: flex-start; }
+  body:not([data-public-page="true"]) header h1 { width: min(560px, 92vw); }
   .span-8, .span-6, .span-4 { grid-column: span 12; }
   .metrics { grid-template-columns: repeat(2, minmax(0, 1fr)); }
 }
 
 @media (max-width: 560px) {
-  main { padding: 22px 14px 60px; }
-  header h1 { width: 100%; }
+  body:not([data-public-page="true"]) main { padding: 22px 14px 60px; }
+  body:not([data-public-page="true"]) header h1 { width: 100%; }
   .form-grid { grid-template-columns: 1fr; }
   .metrics { grid-template-columns: 1fr; }
 }
