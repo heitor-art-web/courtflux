@@ -25,46 +25,20 @@
     "breadcrumbName": "Basketball Video Analysis"
   },
   "navigation": [
-    {
-      "label": "How it works",
-      "href": "#how-it-works"
-    },
-    {
-      "label": "Capabilities",
-      "href": "#capabilities"
-    },
-    {
-      "label": "Pricing",
-      "href": "/#pricing"
-    },
-    {
-      "label": "Sign in",
-      "href": "/login"
-    },
-    {
-      "label": "Analyze your first game free",
-      "href": "/login?mode=signup",
-      "cta": true
-    }
+    { "label": "How it works", "href": "#how-it-works" },
+    { "label": "Capabilities", "href": "#capabilities" },
+    { "label": "Pricing", "href": "/#pricing" },
+    { "label": "Sign in", "href": "/login" },
+    { "label": "Analyze your first game free", "href": "/login?mode=signup", "cta": true }
   ],
   "hero": {
     "eyebrow": "Basketball intelligence from real game film",
     "title": "Basketball video analysis that starts with",
     "highlight": "the film you already have.",
     "lead": "CourtFlux turns ordinary basketball video into structured game intelligence, player insights and the moments that explain them — so you can understand what happened and what to work on next.",
-    "primary": {
-      "label": "Analyze your first game free",
-      "href": "/login?mode=signup"
-    },
-    "secondary": {
-      "label": "See how it works",
-      "href": "#how-it-works"
-    },
-    "trust": [
-      "Use ordinary game film",
-      "Evidence-first analysis",
-      "Private beta"
-    ],
+    "primary": { "label": "Analyze your first game free", "href": "/login?mode=signup" },
+    "secondary": { "label": "See how it works", "href": "#how-it-works" },
+    "trust": ["Use ordinary game film", "Evidence-first analysis", "Private beta"],
     "image": {
       "src": "/brand/CourtFlux_Full_Analyst_Workspace.png",
       "alt": "CourtFlux basketball video analysis workspace showing game footage, tracked players, ball movement and analysis panels",
@@ -73,18 +47,9 @@
     }
   },
   "problemStrip": [
-    {
-      "title": "Understand your game",
-      "copy": "Move beyond isolated clips and see how the action develops through time."
-    },
-    {
-      "title": "Find your edge",
-      "copy": "Surface the possessions and moments that deserve a closer look."
-    },
-    {
-      "title": "Improve with evidence",
-      "copy": "Keep analysis connected to the film instead of separating numbers from context."
-    }
+    { "title": "Find the insight", "copy": "Surface the possessions and moments that deserve a closer look." },
+    { "title": "Review the evidence", "copy": "Keep every insight connected to the source video and surrounding basketball context." },
+    { "title": "Choose what to improve", "copy": "Turn the evidence into a clearer next focus without handing basketball judgement to the system." }
   ],
   "how": {
     "eyebrow": "How CourtFlux works",
@@ -98,21 +63,9 @@
       "height": 1024
     },
     "steps": [
-      {
-        "number": "01",
-        "title": "Upload a game",
-        "copy": "Start with ordinary basketball footage. No proprietary capture system is required."
-      },
-      {
-        "number": "02",
-        "title": "CourtFlux follows the action",
-        "copy": "Players, teams, the ball and temporal game state are connected across the recording."
-      },
-      {
-        "number": "03",
-        "title": "Explore what matters",
-        "copy": "Review structured moments and the video context behind them as the analysis layer continues to mature."
-      }
+      { "number": "01", "title": "Upload a game", "copy": "Start with ordinary basketball footage. No proprietary capture system is required." },
+      { "number": "02", "title": "CourtFlux follows the action", "copy": "Players, teams, the ball and temporal game state are connected across the recording." },
+      { "number": "03", "title": "Explore what matters", "copy": "Review structured moments and the video context behind them as the analysis layer continues to mature." }
     ]
   },
   "capabilities": {
@@ -129,17 +82,17 @@
           "Ball detection and temporal tracking",
           "Possession and ball-control state analysis",
           "Basketball event candidates including passes, turnovers, shots and rebounds",
-          "Evidence-grounded basketball video review"
+          "Uncertainty-aware basketball state and event candidates"
         ]
       },
       {
         "label": "In development",
-        "title": "Structured player and team analytics",
+        "title": "Structured analytics and review",
         "items": [
-          "Saved analyses",
-          "Game summaries as validated",
-          "Structured analytics as validated",
-          "Video-linked evidence and saved analyses"
+          "Persistent Game Record and evidence clips linked to source timestamps",
+          "Things to Review, timeline and filters",
+          "Per-team and per-game-player summaries as validated",
+          "Save, tag, note and correction workflows"
         ]
       },
       {
@@ -173,23 +126,9 @@
     "title": "One analysis foundation.",
     "highlight": "Different basketball workflows.",
     "cards": [
-      {
-        "title": "Coaches",
-        "copy": "Reduce repetitive video searching and build a clearer evidence trail around the moments you want to teach.",
-        "href": "/basketball-analysis-for-coaches",
-        "linkLabel": "For individual coaches"
-      },
-      {
-        "title": "Teams",
-        "copy": "Build a season-long library where staff can review the same game context, tracked evidence and future structured analytics.",
-        "href": "/basketball-analysis-for-teams",
-        "linkLabel": "For team staff"
-      },
-      {
-        "title": "Academies",
-        "copy": "Multi-team academy workflows are part of the product direction but remain in development.",
-        "linkLabel": "Academy page pending development"
-      }
+      { "title": "Coaches", "copy": "Reduce repetitive video searching and build a clearer evidence trail around the moments you want to teach.", "href": "/basketball-analysis-for-coaches", "linkLabel": "For individual coaches" },
+      { "title": "Teams", "copy": "Build a season-long library where staff can review the same game context, tracked evidence and future structured analytics.", "href": "/basketball-analysis-for-teams", "linkLabel": "For team staff" },
+      { "title": "Academies", "copy": "Multi-team academy workflows are part of the product direction but remain in development.", "linkLabel": "Academy page pending development" }
     ]
   },
   "faqIntro": {
@@ -200,7 +139,7 @@
   "faq": [
     {
       "question": "What is basketball video analysis software?",
-      "answer": "Basketball video analysis software helps coaches and analysts turn game footage into structured information they can review. CourtFlux is being built to extract player, team, ball and eventually spatial and event context directly from video."
+      "answer": "Basketball video analysis software helps coaches and analysts turn game footage into structured information they can review. CourtFlux currently tracks players, teams and the ball and structures basketball state and event candidates; structured review and tactical intelligence are later phases."
     },
     {
       "question": "Do I need a special camera system?",
@@ -224,39 +163,15 @@
     "title": "Turn the game you played into what you",
     "highlight": "work on next.",
     "copy": "Start with the footage you already have and see how CourtFlux turns basketball video into structured game understanding.",
-    "primary": {
-      "label": "Analyze your first game free",
-      "href": "/login?mode=signup"
-    },
-    "secondary": {
-      "label": "See pricing",
-      "href": "/#pricing"
-    }
+    "primary": { "label": "Analyze your first game free", "href": "/login?mode=signup" },
+    "secondary": { "label": "See pricing", "href": "/#pricing" }
   },
   "footer": [
-    {
-      "label": "Home",
-      "href": "/"
-    },
-    {
-      "label": "For coaches",
-      "href": "/basketball-analysis-for-coaches"
-    },
-    {
-      "label": "For teams",
-      "href": "/basketball-analysis-for-teams"
-    },
-    {
-      "label": "Pricing",
-      "href": "/#pricing"
-    },
-    {
-      "label": "Trust",
-      "href": "/trust"
-    },
-    {
-      "label": "Sign in",
-      "href": "/login"
-    }
+    { "label": "Home", "href": "/" },
+    { "label": "For coaches", "href": "/basketball-analysis-for-coaches" },
+    { "label": "For teams", "href": "/basketball-analysis-for-teams" },
+    { "label": "Pricing", "href": "/#pricing" },
+    { "label": "Trust", "href": "/trust" },
+    { "label": "Sign in", "href": "/login" }
   ]
 }

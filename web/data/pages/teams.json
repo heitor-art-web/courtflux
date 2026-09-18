@@ -25,46 +25,20 @@
     "breadcrumbName": "For Teams"
   },
   "navigation": [
-    {
-      "label": "Workflow",
-      "href": "#workflow"
-    },
-    {
-      "label": "Benefits",
-      "href": "#benefits"
-    },
-    {
-      "label": "How CourtFlux works",
-      "href": "/basketball-video-analysis"
-    },
-    {
-      "label": "Pricing",
-      "href": "/#pricing"
-    },
-    {
-      "label": "Analyze your first game free",
-      "href": "/login?mode=signup",
-      "cta": true
-    }
+    { "label": "Workflow", "href": "#workflow" },
+    { "label": "Benefits", "href": "#benefits" },
+    { "label": "How CourtFlux works", "href": "/basketball-video-analysis" },
+    { "label": "Pricing", "href": "/#pricing" },
+    { "label": "Analyze your first game free", "href": "/login?mode=signup", "cta": true }
   ],
   "hero": {
     "eyebrow": "Basketball video analysis for coaching and performance staff",
     "title": "Give your staff one place to turn game film into",
     "highlight": "shared evidence.",
     "lead": "CourtFlux turns ordinary basketball video into structured game intelligence, player insights and the moments that explain them — so you can understand what happened and what to work on next.",
-    "primary": {
-      "label": "Analyze your first game free",
-      "href": "/login?mode=signup"
-    },
-    "secondary": {
-      "label": "See the team workflow",
-      "href": "#workflow"
-    },
-    "trust": [
-      "Use ordinary game film",
-      "Evidence-first analysis",
-      "Private beta"
-    ],
+    "primary": { "label": "Analyze your first game free", "href": "/login?mode=signup" },
+    "secondary": { "label": "See the team workflow", "href": "#workflow" },
+    "trust": ["Use ordinary game film", "Evidence-first analysis", "Private beta"],
     "image": {
       "src": "/brand/CourtFlux_Split_Screen_Court_Reconstruction.png",
       "alt": "CourtFlux basketball analysis showing game footage and tracked court context for coaching staff",
@@ -73,18 +47,9 @@
     }
   },
   "problemStrip": [
-    {
-      "title": "Understand your game",
-      "copy": "Move beyond isolated clips and see how the action develops through time."
-    },
-    {
-      "title": "Find your edge",
-      "copy": "Surface the possessions and moments that deserve a closer look."
-    },
-    {
-      "title": "Improve with evidence",
-      "copy": "Keep analysis connected to the film instead of separating numbers from context."
-    }
+    { "title": "Find the insight", "copy": "Surface the possessions and moments that deserve a closer look." },
+    { "title": "Review the evidence", "copy": "Keep every insight connected to the source video and surrounding basketball context." },
+    { "title": "Choose what to improve", "copy": "Turn the evidence into a clearer next focus without handing basketball judgement to the system." }
   ],
   "how": {
     "eyebrow": "A repeatable staff workflow",
@@ -98,21 +63,9 @@
       "height": 941
     },
     "steps": [
-      {
-        "number": "01",
-        "title": "Upload a game",
-        "copy": "Start with ordinary basketball footage. No proprietary capture system is required."
-      },
-      {
-        "number": "02",
-        "title": "CourtFlux follows the action",
-        "copy": "Players, teams, the ball and temporal game state are connected across the recording."
-      },
-      {
-        "number": "03",
-        "title": "Explore what matters",
-        "copy": "Review structured moments and the video context behind them as the analysis layer continues to mature."
-      }
+      { "number": "01", "title": "Upload a game", "copy": "Start with ordinary basketball footage. No proprietary capture system is required." },
+      { "number": "02", "title": "CourtFlux follows the action", "copy": "Players, teams, the ball and temporal game state are connected across the recording." },
+      { "number": "03", "title": "Explore what matters", "copy": "Review structured moments and the video context behind them as the analysis layer continues to mature." }
     ]
   },
   "outcomes": {
@@ -175,7 +128,7 @@
     },
     {
       "question": "Does every staff member need to prepare a roster before analysis?",
-      "answer": "No. The first analysis only requires home and away teams. Roster and jersey information is optional and can be added when player-level identity becomes useful."
+      "answer": "No. Home and away team names are enough to start. Roster names and jersey numbers can remain optional because current analysis can use game-level player identity without claiming cross-game identity."
     },
     {
       "question": "Can staff return to older analyses?",
@@ -195,39 +148,15 @@
     "title": "Build a more repeatable",
     "highlight": "team video workflow.",
     "copy": "Start with the footage you already have and see how CourtFlux turns basketball video into structured game understanding.",
-    "primary": {
-      "label": "Analyze your first game free",
-      "href": "/login?mode=signup"
-    },
-    "secondary": {
-      "label": "See pricing",
-      "href": "/#pricing"
-    }
+    "primary": { "label": "Analyze your first game free", "href": "/login?mode=signup" },
+    "secondary": { "label": "See pricing", "href": "/#pricing" }
   },
   "footer": [
-    {
-      "label": "Home",
-      "href": "/"
-    },
-    {
-      "label": "Basketball video analysis",
-      "href": "/basketball-video-analysis"
-    },
-    {
-      "label": "For coaches",
-      "href": "/basketball-analysis-for-coaches"
-    },
-    {
-      "label": "Pricing",
-      "href": "/#pricing"
-    },
-    {
-      "label": "Trust",
-      "href": "/trust"
-    },
-    {
-      "label": "Sign in",
-      "href": "/login"
-    }
+    { "label": "Home", "href": "/" },
+    { "label": "Basketball video analysis", "href": "/basketball-video-analysis" },
+    { "label": "For coaches", "href": "/basketball-analysis-for-coaches" },
+    { "label": "Pricing", "href": "/#pricing" },
+    { "label": "Trust", "href": "/trust" },
+    { "label": "Sign in", "href": "/login" }
   ]
 }
