@@ -42,6 +42,7 @@ jobs:
         run: >-
           python -m pytest -q
           evaluation/p3_source_contract_test.py
+          evaluation/p3_contract_v1_test.py
           evaluation/p3_game_record_test.py
           evaluation/p3_persistence_test.py
           evaluation/p3_clip_planner_test.py
