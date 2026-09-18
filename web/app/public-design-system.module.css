@@ -12,6 +12,8 @@
   --cf-radius-card: 16px;
   --cf-radius-panel: 24px;
   --cf-space-section: clamp(84px, 8vw, 108px);
+  --cf-scroll-offset-home: 116px;
+  --cf-scroll-offset-standard: 124px;
   --cf-type-page-hero: clamp(2.85rem, 4.4vw, 4rem);
   --cf-type-home-hero: clamp(3.2rem, 5vw, 4.5rem);
   --cf-type-section: clamp(2.3rem, 3.7vw, 3.5rem);
@@ -50,10 +52,14 @@
   text-wrap: balance;
 }
 
-.homeRoot :where(#understand, #evidence, #for-you, #how, #pricing, #faq),
+.homeRoot :where(#understand, #evidence, #for-you, #how, #pricing, #faq) {
+  padding-top: var(--cf-space-section);
+  scroll-margin-top: var(--cf-scroll-offset-home);
+}
+
 .standardRoot :where(#how-it-works, #capabilities, #workflow, #benefits) {
   padding-top: var(--cf-space-section);
-  scroll-margin-top: 116px;
+  scroll-margin-top: var(--cf-scroll-offset-standard);
 }
 
 .publicRoot :where(a, button, summary, select):focus-visible {
@@ -74,6 +80,13 @@
   min-height: 44px;
 }
 
+@media (max-width: 820px) {
+  .publicRoot {
+    --cf-scroll-offset-home: 120px;
+    --cf-scroll-offset-standard: 166px;
+  }
+}
+
 @media (max-width: 760px) {
   .publicRoot {
     --cf-space-section: 72px;
@@ -81,11 +94,6 @@
     --cf-type-home-hero: clamp(2.55rem, 11.5vw, 3.15rem);
     --cf-type-section: clamp(2rem, 9vw, 2.6rem);
     --cf-type-legal-hero: clamp(2.2rem, 9.5vw, 2.8rem);
-  }
-
-  .homeRoot :where(#understand, #evidence, #for-you, #how, #pricing, #faq),
-  .standardRoot :where(#how-it-works, #capabilities, #workflow, #benefits) {
-    scroll-margin-top: 104px;
   }
 }
 
