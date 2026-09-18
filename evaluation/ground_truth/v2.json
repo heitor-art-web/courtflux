@@ -196,7 +196,17 @@
       "human_note": "made dunk around 30s; human also observed two passes in the same coarse second"
     }
   ],
-  "unresolved_event_windows": [],
+  "unresolved_event_windows": [
+    {
+      "event_type": "pass_sequence",
+      "frame_start": 1500,
+      "frame_end": 1500,
+      "source_time_start_sec": 30.0,
+      "source_time_end_sec": 30.0,
+      "expected_count": 2,
+      "human_note": "human explicitly observed two passes around 30s; exact sub-second timing/order relative to the made dunk was not supplied, so preserve as unresolved context rather than invent individual pass windows"
+    }
+  ],
   "human_source_notes": [
     "0-7 non game play",
     "8-11 shot_flight made red team",
@@ -214,6 +224,7 @@
     "Team colours are retained only as human notes because V2 is a neutral clip and team_id must remain null.",
     "The 21s annotation is scored as pass_flight for Gate A; the word 'missed' is preserved verbatim as a note and is not converted into a shot outcome.",
     "At 30s the human observed two passes and a made dunk inside one coarse second. Exact pass/shot control-state boundaries were not supplied, so frame 1500 is excluded from Gate A control scoring rather than guessed.",
+    "The two passes around 30s are preserved as an unresolved pass_sequence with expected_count=2; this is context only and does not invent individual pass event timing.",
     "Do not inspect P2 predictions before freezing this Pass A GT."
   ]
 }
