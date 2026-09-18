@@ -211,15 +211,15 @@ def diagnose_v3(analyzer: TeamOnlyAnalyzer, torso: np.ndarray) -> dict[str, Any]
             row_by_key[key]["discriminative_vote_pixels"] = count
             row_by_key[key]["discriminative_vote_mass"] = _r(np.sum(local_values[proto_mask]))
 
-    total_mass = float(sum(masses_by_team.values()))
+    discriminative_count = int(np.count_nonzero(discriminative))
     raw_scores = {
-        team: (masses_by_team[team] / total_mass if total_mass > 1e-12 else 0.0)
+        team: (votes_by_team[team] / discriminative_count if discriminative_count else 0.0)
         for team in team_names
     }
 
-    discriminative_count = int(np.count_nonzero(discriminative))
     return {
         "colour_space": "CIELAB_continuous_chroma_luminance_v3",
+        "score_aggregation": "equal_discriminative_pixel_votes",
         "total_pixels": total_pixels,
         "pixel_lightness": _stats(lab_pixels[:, 0]),
         "pixel_chroma": _stats(pixel_chroma),
@@ -347,6 +347,7 @@ def _print_case(result: dict[str, Any]) -> None:
     print(f"\n===== {result['label']} / frame={result['frame_id']} track={result['track_id']} =====")
     print(f"archived_raw={result['archived_raw_scores']}")
     print(f"current={result['current_scorer']}")
+    print(f"score_aggregation={diag['score_aggregation']}")
     print(
         f"pixels={diag['total_pixels']} discriminative={diag['discriminative_pixels']} "
         f"abstained={diag['abstained_pixels']} low_affinity={diag['rejected_low_affinity_pixels']} "
@@ -408,7 +409,8 @@ def main() -> None:
         "version": "courtflux_p2_team_colour_v3_error_audit_v1",
         "contract": (
             "diagnostic-only; uses the current scorer's exact hue/chroma/lightness affinity "
-            "on archived run boxes without changing inference, GT, or Gate-C thresholds"
+            "and equal discriminative pixel votes on archived run boxes without changing "
+            "GT or Gate-C thresholds"
         ),
         "cases": results,
     }
