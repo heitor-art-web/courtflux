@@ -31,7 +31,52 @@ def _resolve_path(value: Any, *, base: Path) -> Path | None:
     return path
 
 
-def _video_path(summary_path: Path) -> Path:
+def _video_source_from_run_config(run_dir: Path) -> str | None:
+    run_config_path = run_dir / "run_config.json"
+    if not run_config_path.exists():
+        return None
+    payload = json.loads(run_config_path.read_text(encoding="utf-8"))
+    if not isinstance(payload, dict):
+        return None
+    config = payload.get("config")
+    if not isinstance(config, dict):
+        return None
+    source = str(config.get("video_source") or "").strip()
+    return source or None
+
+
+def _resolve_video_from_source(source: str, *, run_dir: Path) -> Path | None:
+    """Resolve a run video source without depending on summary.extra.video_path.
+
+    Local paths are tried first. YouTube URLs are resolved through the same downloader
+    used by the analytics pipeline, which reuses the deterministic data/<video_id>.mp4
+    cache when present.
+    """
+    text = str(source or "").strip()
+    if not text:
+        return None
+
+    local_candidates = [
+        Path(text).expanduser(),
+        (PROJECT_ROOT / text).resolve(),
+        (run_dir / text).resolve(),
+    ]
+    for candidate in local_candidates:
+        if candidate.exists() and candidate.is_file():
+            return candidate.resolve()
+
+    if text.startswith(("https://", "http://")):
+        from services.ingestion.youtube_downloader import YouTubeDownloader
+
+        if YouTubeDownloader._video_id_from_url(text):
+            downloader = YouTubeDownloader(output_dir=str(PROJECT_ROOT / "data"))
+            path = Path(downloader.get_local_video(text)).expanduser()
+            if path.exists() and path.is_file():
+                return path.resolve()
+    return None
+
+
+def _video_path(summary_path: Path, run_dir: Path) -> tuple[Path, str | None]:
     summary = json.loads(summary_path.read_text(encoding="utf-8"))
     candidates: list[Any] = [summary.get("video_path")]
     extra = summary.get("extra")
@@ -46,9 +91,17 @@ def _video_path(summary_path: Path) -> Path:
     for value in candidates:
         path = _resolve_path(value, base=summary_path.parent)
         if path is not None and path.exists():
-            return path
+            return path.resolve(), None
+
+    source = _video_source_from_run_config(run_dir)
+    if source:
+        path = _resolve_video_from_source(source, run_dir=run_dir)
+        if path is not None:
+            return path, source
+
     raise FileNotFoundError(
-        f"Could not resolve local video from {summary_path}; expected summary.extra.video_path"
+        f"Could not resolve video for {run_dir}. Tried summary video paths and "
+        "run_config.json config.video_source."
     )
 
 
@@ -170,7 +223,7 @@ def export_case(
     row = _find_state(_load_jsonl(states_path), frame_id)
     box = _box_for_track(row, track_id)
     timestamp_sec = _timestamp(row)
-    video_path = _video_path(summary_path)
+    video_path, video_source = _video_path(summary_path, run_dir)
     frame = _read_frame(video_path, timestamp_sec)
     player, clipped_box = _safe_crop(frame, box)
 
@@ -216,6 +269,7 @@ def export_case(
         "frame_id": frame_id,
         "track_id": track_id,
         "timestamp_sec": round(timestamp_sec, 6),
+        "video_source": video_source,
         "video_path": str(video_path),
         "player_box": clipped_box,
         "torso_roi_in_player": [left, top, right, bottom],
@@ -263,7 +317,7 @@ def main() -> None:
 
     manifest_path = output_root / "manifest.json"
     manifest_path.write_text(
-        json.dumps({"version": "courtflux_p2_team_colour_crop_audit_v1", "cases": results}, indent=2),
+        json.dumps({"version": "courtflux_p2_team_colour_crop_audit_v2", "cases": results}, indent=2),
         encoding="utf-8",
     )
 
