@@ -42,9 +42,9 @@ def _float(value: Any, default: float = 0.0) -> float:
         return default
 
 
-def _truth_by_frame(gt: dict[str, Any]) -> dict[int, str]:
-    result: dict[int, str] = {}
-    for row in list(gt.get("control_intervals", []) or []):
+def _truth_by_frame(gt: dict[str, Any]) -> dict[int, tuple[str, int]]:
+    result: dict[int, tuple[str, int]] = {}
+    for interval_index, row in enumerate(list(gt.get("control_intervals", []) or [])):
         if not isinstance(row, dict):
             continue
         state = str(row.get("state") or "unknown")
@@ -53,7 +53,7 @@ def _truth_by_frame(gt: dict[str, Any]) -> dict[int, str]:
         if end < start:
             start, end = end, start
         for frame_id in range(start, end + 1):
-            result[frame_id] = state
+            result[frame_id] = (state, interval_index)
     return result
 
 
@@ -65,17 +65,22 @@ def _label(state: str) -> str:
     return "unresolved"
 
 
-def _features_from_existing_row(row: dict[str, Any]) -> dict[str, float]:
-    """Map an existing persisted P2 state row onto the runtime feature contract.
-
-    V1-V5 were generated before AirborneClassifierV1 existed. Only fields that were
-    already persisted in those runs are used. Missing historical diagnostics are neutral
-    (0.0), which yields constant columns and therefore zero learned weight.
-    """
+def _features_from_existing_row(row: dict[str, Any], *, fps: float) -> dict[str, float]:
+    fps = max(1.0, float(fps))
+    flight_frames = max(0.0, _float(row.get("flight_frames"), 0.0))
+    direct_observations = max(
+        0.0, _float(row.get("flight_direct_observations"), 0.0)
+    )
+    delta_distance = _float(row.get("shot_preflight_delta_distance_norm"), 0.0)
+    delta_relative_y = _float(row.get("shot_preflight_delta_relative_y"), 0.0)
+    approach_streak = max(0.0, _float(row.get("shot_preflight_approach_streak"), 0.0))
+    rising_streak = max(0.0, _float(row.get("shot_preflight_rising_streak"), 0.0))
     values = {
         "flight_supported": 1.0 if bool(row.get("flight_supported", False)) else 0.0,
-        "flight_frames": _float(row.get("flight_frames"), 0.0),
-        "flight_direct_observations": _float(row.get("flight_direct_observations"), 0.0),
+        "flight_duration_sec": flight_frames / fps,
+        "flight_direct_observation_fraction": (
+            direct_observations / max(flight_frames, 1.0)
+        ),
         "flight_displacement_player_heights": _float(
             row.get("flight_displacement_player_heights"), 0.0
         ),
@@ -109,18 +114,10 @@ def _features_from_existing_row(row: dict[str, Any]) -> dict[str, float]:
         "shot_preflight_relative_y_rim_heights": _float(
             row.get("shot_preflight_relative_y_rim_heights"), 0.0
         ),
-        "shot_preflight_delta_distance_norm": _float(
-            row.get("shot_preflight_delta_distance_norm"), 0.0
-        ),
-        "shot_preflight_delta_relative_y": _float(
-            row.get("shot_preflight_delta_relative_y"), 0.0
-        ),
-        "shot_preflight_approach_streak": _float(
-            row.get("shot_preflight_approach_streak"), 0.0
-        ),
-        "shot_preflight_rising_streak": _float(
-            row.get("shot_preflight_rising_streak"), 0.0
-        ),
+        "shot_preflight_distance_velocity_norm_per_sec": delta_distance * fps,
+        "shot_preflight_vertical_velocity_heights_per_sec": delta_relative_y * fps,
+        "shot_preflight_approach_duration_sec": approach_streak / fps,
+        "shot_preflight_rising_duration_sec": rising_streak / fps,
     }
     return {name: float(values.get(name, 0.0)) for name in FEATURES}
 
@@ -157,11 +154,13 @@ def build(manifest_path: Path) -> tuple[list[dict[str, Any]], dict[str, Any]]:
             raise FileNotFoundError(f"{clip_id}: missing {gt_path}")
 
         gt = _load_json(gt_path)
+        fps = max(1.0, _float(dict(gt.get("video", {}) or {}).get("fps"), 30.0))
         truth = _truth_by_frame(gt)
         state_rows = sorted(
             _load_jsonl(states_path), key=lambda row: int(row.get("frame_id", -1))
         )
         counts: Counter[str] = Counter()
+        interval_counts: Counter[str] = Counter()
         included = 0
 
         for state_row in state_rows:
@@ -176,19 +175,23 @@ def build(manifest_path: Path) -> tuple[list[dict[str, Any]], dict[str, Any]]:
             if not bool(state_row.get("flight_active", False)):
                 continue
 
-            label = _label(truth[frame_id])
+            truth_state, truth_interval_index = truth[frame_id]
+            label = _label(truth_state)
             rows_out.append(
                 {
                     "clip_id": clip_id,
                     "video_id": video_id,
                     "run_id": run_id,
+                    "fps": fps,
                     "frame_id": frame_id,
-                    "truth_state": truth[frame_id],
+                    "truth_interval_index": int(truth_interval_index),
+                    "truth_state": truth_state,
                     "label": label,
-                    "features": _features_from_existing_row(state_row),
+                    "features": _features_from_existing_row(state_row, fps=fps),
                 }
             )
             counts[label] += 1
+            interval_counts[f"{truth_interval_index}:{label}"] += 1
             included += 1
 
         clip_summary.append(
@@ -196,8 +199,10 @@ def build(manifest_path: Path) -> tuple[list[dict[str, Any]], dict[str, Any]]:
                 "clip_id": clip_id,
                 "video_id": video_id,
                 "run_id": run_id,
+                "fps": fps,
                 "rows": included,
                 "labels": dict(sorted(counts.items())),
+                "eligible_truth_intervals": len(interval_counts),
             }
         )
 
@@ -214,9 +219,10 @@ def build(manifest_path: Path) -> tuple[list[dict[str, Any]], dict[str, Any]]:
         raise ValueError(f"development dataset missing classifier classes: {missing}")
 
     summary = {
-        "version": "courtflux_airborne_dataset_v2",
+        "version": "courtflux_airborne_dataset_v3",
         "policy": (
-            "V1-V5 development corpus; grouped leave-one-video-out CV; "
+            "V1-V5 development corpus; FPS-normalized temporal features; "
+            "truth interval ids preserved; grouped leave-one-video-out CV; "
             "V6-V7 reserved for final Gate A"
         ),
         "rows": len(rows_out),
