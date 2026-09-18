@@ -76,6 +76,17 @@ from .p4_court_zones import (
     primary_zone,
     zone_memberships,
 )
+from .p4_spatial_eligibility import (
+    P4_SPATIAL_ELIGIBILITY_CONTRACT_VERSION,
+    P4_SPATIAL_ELIGIBILITY_POLICY_VERSION,
+    P4SpatialEligibilityError,
+    SpatialEligibilityObservation,
+    SpatialEligibilityPolicy,
+    SpatialEligibilityReason,
+    SpatialEligibilityState,
+    evaluate_spatial_eligibility,
+    p4_spatial_eligibility_manifest,
+)
 from .p4_spatial_contract import (
     P4_SPATIAL_CONTRACT_VERSION,
     P4_SPATIAL_FORBIDDEN_SEMANTICS,
@@ -160,6 +171,15 @@ __all__ = [
     "perimeter_subzone",
     "primary_zone",
     "zone_memberships",
+    "P4_SPATIAL_ELIGIBILITY_CONTRACT_VERSION",
+    "P4_SPATIAL_ELIGIBILITY_POLICY_VERSION",
+    "P4SpatialEligibilityError",
+    "SpatialEligibilityObservation",
+    "SpatialEligibilityPolicy",
+    "SpatialEligibilityReason",
+    "SpatialEligibilityState",
+    "evaluate_spatial_eligibility",
+    "p4_spatial_eligibility_manifest",
     "P4_SPATIAL_CONTRACT_VERSION",
     "P4_SPATIAL_FORBIDDEN_SEMANTICS",
     "P4_SPATIAL_FRAME_FIELDS",

@@ -50,6 +50,7 @@ calibration                    persistence                       persistence
 basketball correctness        clips/corrections                 geometry quality
 player attribution            organization                      FIBA coordinates
      │                              │                            canonical zones
+     │                              │                         spatial eligibility
      │                              │                                │
      └────────────── validated basketball truth ─────────────────────┘
                                     ↓
@@ -191,15 +192,16 @@ The **P4 Spatial Foundation is now under active development** on `p4_spatial_fou
 - durable P4 spatial run/snapshot/artifact lineage;
 - `p4.geometry_quality.v1`;
 - canonical FIBA 28 × 15 m coordinates (`p4.fiba_28x15_xy.v1`);
-- canonical/versioned FIBA court zones (`p4.fiba_zones.v1`).
+- canonical/versioned FIBA court zones (`p4.fiba_zones.v1`);
+- explicit spatial eligibility/abstention (`p4.spatial_eligibility.v1`).
 
-The remaining spatial-foundation work covers eligibility/abstention, trajectories, kinematics, spatial relationships, team shape, generic motion primitives, snapshot materialization, internal radar tooling, diagnostics, golden fixtures and a spatial exit gate.
+The remaining spatial-foundation work covers trajectories, kinematics, spatial relationships, team shape, generic motion primitives, snapshot materialization, internal radar tooling, diagnostics, golden fixtures and a spatial exit gate.
 
 This branch must not infer possession, ball handler, offense/defense, tactical actions or P3 review semantics. Once P2 and final P3 basketball context are validated, tactical P4 can resume directly from this spatial base rather than rebuilding geometry and motion infrastructure.
 
 P4 remains offense-first at the tactical layer. Defensive intelligence follows the validated spatial/offensive foundation. Tactical conclusions must preserve `UNKNOWN`/abstention when geometry or context is insufficient.
 
-Detailed execution lives in [`docs/p4_roadmap.md`](docs/p4_roadmap.md). Spatial contracts are documented in [`docs/p4_spatial_contract.md`](docs/p4_spatial_contract.md), [`docs/p4_spatial_persistence.md`](docs/p4_spatial_persistence.md), [`docs/p4_geometry_quality.md`](docs/p4_geometry_quality.md), [`docs/p4_court_coordinates.md`](docs/p4_court_coordinates.md) and [`docs/p4_court_zones.md`](docs/p4_court_zones.md).
+Detailed execution lives in [`docs/p4_roadmap.md`](docs/p4_roadmap.md). Spatial contracts are documented in [`docs/p4_spatial_contract.md`](docs/p4_spatial_contract.md), [`docs/p4_spatial_persistence.md`](docs/p4_spatial_persistence.md), [`docs/p4_geometry_quality.md`](docs/p4_geometry_quality.md), [`docs/p4_court_coordinates.md`](docs/p4_court_coordinates.md), [`docs/p4_court_zones.md`](docs/p4_court_zones.md) and [`docs/p4_spatial_eligibility.md`](docs/p4_spatial_eligibility.md).
 
 ### P5 — Persistent Player Identity
 
@@ -265,7 +267,7 @@ Tactical interpretation                            ← P4
 Persistent real-world player identity               ← P5
 ```
 
-Alongside that runtime path, `p4_spatial_foundation` currently builds a P1-only spatial substrate (`SpatialFrame` → geometry quality → canonical FIBA geometry/zones → future trajectories/kinematics) that will later feed tactical P4 once basketball context is validated.
+Alongside that runtime path, `p4_spatial_foundation` currently builds a P1-only spatial substrate (`SpatialFrame` → geometry quality → canonical FIBA geometry/zones → spatial eligibility/abstention → future trajectories/kinematics) that will later feed tactical P4 once basketball context is validated.
 
 `services/pipeline.py` is the canonical state path. The old alternate analytics runtime and detection-only runtime split are retired. Smart Ball remains **OFF by default**.
 
@@ -283,6 +285,7 @@ CourtFlux follows a conservative evidence contract:
 - event counts and coverage are diagnostics until validated against human truth;
 - P3 outputs derived before P2 freeze must remain reproducible/reprocessable against the final validated P2 baseline;
 - P4 Spatial output must expose geometry provenance and avoid basketball/tactical inference until validated context exists;
+- P4 Spatial metric consumers must abstain on `INVALID` eligibility and explicitly decide whether `DEGRADED` evidence is acceptable for their task;
 - tactical output must expose when geometry/context is not sufficient for analysis;
 - public/product claims must distinguish structural capability from measured accuracy.
 
@@ -368,7 +371,7 @@ Accepted enabled values are `1`, `true`, `yes` and `on` (case-insensitive). Prod
 - ✅ P1 complete
 - 🧪 P2 engineering core integrated; reviewed human GT + game-level entity validation pending
 - ✅ P3 foundation complete and integrated; product surface disabled by default and final P2-dependent semantics remain reprocessable until P2 exit
-- 🧱 P4 Spatial Foundation in progress on `p4_spatial_foundation`; contract, persistence, geometry quality, canonical FIBA coordinates and zones are established without P2/P3 dependencies
+- 🧱 P4 Spatial Foundation in progress on `p4_spatial_foundation`; contract, persistence, geometry quality, canonical FIBA coordinates/zones and spatial eligibility/abstention are established without P2/P3 dependencies
 - ⏳ P5 Persistent Player Identity / Jersey Evidence is future
 - ⏳ P6 Mobile App is future
 - ⏳ P7 Continuous Development / AI Coach is future
