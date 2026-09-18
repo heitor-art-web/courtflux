@@ -17,8 +17,8 @@
 | **P0** | Vision Foundation | ✅ Complete |
 | **P1** | Perception + Tracking | ✅ Complete |
 | **P2** | Basketball Understanding + Game-Level Player Identity | 🧪 Engineering core complete; human GT + game-entity validation pending |
-| **P3** | Structured Analytics + Review | ✅ Foundation complete and integrated behind a disabled feature flag; final product exit depends on validated P2 |
-| **P4** | Tactical Intelligence | ✅ Spatial Foundation structurally complete on `p4_spatial_foundation`; tactical semantics remain gated by validated P2/P3 |
+| **P3** | Structured Analytics + Review | 🚧 In progress — foundation complete and integrated behind a disabled feature flag; final product exit depends on validated P2 |
+| **P4** | Tactical Intelligence | 🚧 In progress — Spatial Foundation structurally complete and integrated; spatial validation and tactical semantics remain pending/gated by validated P2/P3 |
 | **P5** | Persistent Player Identity / Jersey Evidence | ⏳ Future |
 | **P6** | Mobile App | ⏳ Future |
 | **P7** | Continuous Development / AI Coach | ⏳ Future |
@@ -39,7 +39,7 @@ calibrate only from measured error
 freeze the validated P2 baseline
 ```
 
-The P3 foundation is complete and integrated into `main` behind a server-side feature flag. In parallel, CourtFlux has completed a deliberately P1-only **P4 Spatial Foundation** on `p4_spatial_foundation`:
+The P3 foundation is complete and integrated into `main` behind a server-side feature flag. In parallel, CourtFlux has completed and integrated a deliberately P1-only **P4 Spatial Foundation**:
 
 ```text
 P2 validation                 P3 foundation              P4 Spatial Foundation
@@ -190,7 +190,7 @@ Detailed execution lives in [`docs/p3_roadmap.md`](docs/p3_roadmap.md). Foundati
 
 Move from isolated events to temporal relationships between players, space and possession structure: validated spatial state, tactical primitives, transition, screening/P&R and other offensive actions, multi-label tactical segmentation, game/team tendencies, defensive intelligence and evidence-linked radar review.
 
-The **P4 Spatial Foundation is structurally complete** on `p4_spatial_foundation`. This tranche is intentionally independent of P2/P3 and establishes:
+The **P4 Spatial Foundation is structurally complete and integrated into `main`**. This tranche is intentionally independent of P2/P3 and establishes:
 
 - `p4.spatial_frame.v1`;
 - durable P4 spatial run/snapshot/artifact lineage;
@@ -209,7 +209,7 @@ The **P4 Spatial Foundation is structurally complete** on `p4_spatial_foundation
 
 The 14 structural Spatial Foundation tasks are complete. Spatial GT / Golden Fixtures, real-video measurements, calibrated thresholds and the formal Spatial Validation + Exit Gate are a later **P4 Spatial Validation** tranche rather than prerequisites for this structural foundation.
 
-This branch must not infer possession, ball handler, offense/defense, tactical actions or P3 review semantics. Once P2 and final P3 basketball context are validated, tactical P4 can resume directly from this spatial base rather than rebuilding geometry and motion infrastructure.
+The integrated Spatial Foundation must not infer possession, ball handler, offense/defense, tactical actions or P3 review semantics. Once P2 and final P3 basketball context are validated, tactical P4 can resume directly from this spatial base rather than rebuilding geometry and motion infrastructure.
 
 P4 remains offense-first at the tactical layer. Defensive intelligence follows the validated spatial/offensive foundation. Tactical conclusions must preserve `UNKNOWN`/abstention when geometry or context is insufficient.
 
@@ -279,7 +279,7 @@ Tactical interpretation                            ← P4
 Persistent real-world player identity               ← P5
 ```
 
-Alongside that runtime path, `p4_spatial_foundation` provides a completed P1-only spatial substrate:
+Alongside that runtime path, the integrated P4 Spatial Foundation provides a completed P1-only spatial substrate:
 
 ```text
 SpatialFrame
@@ -402,8 +402,8 @@ Accepted enabled values are `1`, `true`, `yes` and `on` (case-insensitive). Prod
 - ✅ P0 complete
 - ✅ P1 complete
 - 🧪 P2 engineering core integrated; reviewed human GT + game-level entity validation pending
-- ✅ P3 foundation complete and integrated; product surface disabled by default and final P2-dependent semantics remain reprocessable until P2 exit
-- ✅ P4 Spatial Foundation structurally complete on `p4_spatial_foundation`; 14/14 foundation tasks complete, with Spatial Validation intentionally deferred
+- 🚧 P3 in progress — foundation complete and integrated; product surface disabled by default and final P2-dependent semantics remain reprocessable until P2 exit
+- 🚧 P4 in progress — Spatial Foundation structurally complete and integrated; Spatial Validation and tactical intelligence remain pending/gated by validated P2/P3
 - ⏳ P5 Persistent Player Identity / Jersey Evidence is future
 - ⏳ P6 Mobile App is future
 - ⏳ P7 Continuous Development / AI Coach is future
