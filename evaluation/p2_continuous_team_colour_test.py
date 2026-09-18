@@ -45,10 +45,11 @@ class ContinuousTeamColourTest(unittest.TestCase):
 
         result = analyzer.score_teams(self._solid_rgb((209, 10, 140)))
 
-        self.assertEqual(result["colour_space"], "CIELAB_continuous_v1")
+        self.assertEqual(result["colour_space"], "CIELAB_continuous_discriminative_v2")
         self.assertEqual(result["best_team"], "team_a")
         self.assertTrue(result["evidence_accepted"])
         self.assertGreater(result["raw_scores"]["team_a"], result["raw_scores"]["team_b"])
+        self.assertGreater(result["discriminative_pixel_fraction"], 0.0)
 
     def test_rgb_and_hsv_specs_share_same_open_contract(self) -> None:
         analyzer = self._analyzer(
@@ -92,6 +93,28 @@ class ContinuousTeamColourTest(unittest.TestCase):
 
         self.assertEqual(result["best_team"], "team_a")
         self.assertLess(shared_white_weight, unique_blue_weight)
+
+    def test_team_scores_share_one_discriminative_pixel_pool(self) -> None:
+        analyzer = self._analyzer(["White"], ["Black"])
+        crop = np.zeros((100, 100, 3), dtype=np.uint8)
+        crop[:, :80] = (255, 255, 255)
+        crop[:, 80:] = (0, 0, 0)
+
+        result = analyzer.score_teams(crop)
+
+        self.assertGreater(result["raw_scores"]["team_a"], result["raw_scores"]["team_b"])
+        self.assertGreater(result["raw_scores"]["team_a"], 0.70)
+        self.assertLess(result["raw_scores"]["team_b"], 0.30)
+        self.assertGreater(result["discriminative_pixel_fraction"], 0.50)
+
+    def test_ambiguous_pixels_can_abstain_instead_of_forcing_team(self) -> None:
+        analyzer = self._analyzer(["Red"], ["Orange"])
+        crop = self._solid_rgb((135, 135, 135))
+
+        result = analyzer.score_teams(crop)
+
+        self.assertFalse(result["evidence_accepted"])
+        self.assertIsNone(result["best_team"])
 
     def test_identity_compatibility_vector_is_continuous_not_mask_based(self) -> None:
         analyzer = self._analyzer(
