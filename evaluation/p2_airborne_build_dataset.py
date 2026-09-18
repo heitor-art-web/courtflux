@@ -42,13 +42,6 @@ def _float(value: Any, default: float = 0.0) -> float:
         return default
 
 
-def _int(value: Any) -> int | None:
-    try:
-        return None if value is None else int(value)
-    except (TypeError, ValueError):
-        return None
-
-
 def _truth_by_frame(gt: dict[str, Any]) -> dict[int, str]:
     result: dict[int, str] = {}
     for row in list(gt.get("control_intervals", []) or []):
@@ -72,24 +65,13 @@ def _label(state: str) -> str:
     return "unresolved"
 
 
-def _receiver_track(row: dict[str, Any]) -> int | None:
-    candidate = _int(row.get("candidate_track_id"))
-    if candidate is not None:
-        return candidate
-    raw = _int(row.get("raw_best_track_id"))
-    origin = _int(row.get("flight_origin_track_id"))
-    if raw is not None and raw != origin:
-        return raw
-    return None
+def _features_from_existing_row(row: dict[str, Any]) -> dict[str, float]:
+    """Map an existing persisted P2 state row onto the runtime feature contract.
 
-
-def _features_from_existing_row(
-    row: dict[str, Any],
-    *,
-    receiver_streak: int,
-) -> dict[str, float]:
-    delta_distance = _float(row.get("shot_preflight_delta_distance_norm"), 0.0)
-    delta_relative_y = _float(row.get("shot_preflight_delta_relative_y"), 0.0)
+    V1-V5 were generated before AirborneClassifierV1 existed. Only fields that were
+    already persisted in those runs are used. Missing historical diagnostics are neutral
+    (0.0), which yields constant columns and therefore zero learned weight.
+    """
     values = {
         "flight_supported": 1.0 if bool(row.get("flight_supported", False)) else 0.0,
         "flight_frames": _float(row.get("flight_frames"), 0.0),
@@ -97,36 +79,50 @@ def _features_from_existing_row(
         "flight_displacement_player_heights": _float(
             row.get("flight_displacement_player_heights"), 0.0
         ),
-        "receiver_evidence": 1.0 if bool(row.get("pass_flight_receiver_evidence", False)) else 0.0,
-        "receiver_thresholded": 1.0 if row.get("candidate_track_id") is not None else 0.0,
+        "receiver_evidence": 1.0
+        if bool(row.get("pass_flight_receiver_evidence", False))
+        else 0.0,
         "raw_best_distinct_from_origin": 1.0
         if bool(row.get("raw_best_distinct_from_flight_origin", False))
         else 0.0,
         "raw_best_score": _float(row.get("raw_best_score"), 0.0),
         "candidate_score": _float(row.get("candidate_score"), 0.0),
-        "receiver_same_track_streak": float(receiver_streak),
-        # These two receiver-geometry features were not persisted in the existing
-        # V1-V5 runs. Keep them neutral; constant training columns produce zero weight.
-        "receiver_approach_delta_heights": 0.0,
-        "receiver_motion_cosine": 0.0,
         "shot_active": 1.0 if bool(row.get("shot_active", False)) else 0.0,
-        # Semantic shot evidence was not persisted in the historical state rows. Strong
-        # semantic shot evidence still has runtime precedence outside the classifier.
-        "semantic_shot_signal": 0.0,
-        "rim_available": 1.0 if bool(row.get("shot_preflight_available", False)) else 0.0,
-        "rim_above": 1.0 if bool(row.get("shot_preflight_above", False)) else 0.0,
-        "rim_distance_norm": _float(row.get("shot_preflight_ball_to_rim_distance_norm"), 0.0),
-        # Runtime classifier expresses approach/rise as positive progress. Existing
-        # diagnostics store current-minus-previous, so invert the sign here.
-        "rim_approach_delta_norm": -delta_distance,
-        "rim_rising_delta_heights": -delta_relative_y,
-        "direct_ball_observed": 1.0
+        "shot_preflight_available": 1.0
+        if bool(row.get("shot_preflight_available", False))
+        else 0.0,
+        "shot_preflight_direct_observed": 1.0
         if bool(row.get("shot_preflight_direct_observed", False))
         else 0.0,
-        # Not persisted in the existing V1-V5 runs; neutral and therefore zero-weighted.
-        "recent_owner_age_frames": 0.0,
+        "shot_preflight_near_x": 1.0
+        if bool(row.get("shot_preflight_near_x", False))
+        else 0.0,
+        "shot_preflight_above": 1.0
+        if bool(row.get("shot_preflight_above", False))
+        else 0.0,
+        "shot_preflight_ball_to_rim_distance_norm": _float(
+            row.get("shot_preflight_ball_to_rim_distance_norm"), 0.0
+        ),
+        "shot_preflight_horizontal_distance_rim_widths": _float(
+            row.get("shot_preflight_horizontal_distance_rim_widths"), 0.0
+        ),
+        "shot_preflight_relative_y_rim_heights": _float(
+            row.get("shot_preflight_relative_y_rim_heights"), 0.0
+        ),
+        "shot_preflight_delta_distance_norm": _float(
+            row.get("shot_preflight_delta_distance_norm"), 0.0
+        ),
+        "shot_preflight_delta_relative_y": _float(
+            row.get("shot_preflight_delta_relative_y"), 0.0
+        ),
+        "shot_preflight_approach_streak": _float(
+            row.get("shot_preflight_approach_streak"), 0.0
+        ),
+        "shot_preflight_rising_streak": _float(
+            row.get("shot_preflight_rising_streak"), 0.0
+        ),
     }
-    return {name: float(values[name]) for name in FEATURES}
+    return {name: float(values.get(name, 0.0)) for name in FEATURES}
 
 
 def build(manifest_path: Path) -> tuple[list[dict[str, Any]], dict[str, Any]]:
@@ -167,31 +163,12 @@ def build(manifest_path: Path) -> tuple[list[dict[str, Any]], dict[str, Any]]:
         )
         counts: Counter[str] = Counter()
         included = 0
-        previous_receiver: int | None = None
-        previous_frame: int | None = None
-        receiver_streak = 0
 
         for state_row in state_rows:
             try:
                 frame_id = int(state_row.get("frame_id", -1))
             except (TypeError, ValueError):
                 continue
-
-            receiver = _receiver_track(state_row)
-            if (
-                receiver is not None
-                and receiver == previous_receiver
-                and previous_frame is not None
-                and frame_id == previous_frame + 1
-            ):
-                receiver_streak += 1
-            elif receiver is not None:
-                receiver_streak = 1
-            else:
-                receiver_streak = 0
-            previous_receiver = receiver
-            previous_frame = frame_id
-
             if frame_id not in truth:
                 continue
             if not bool(state_row.get("engine_eligible", False)):
@@ -208,9 +185,7 @@ def build(manifest_path: Path) -> tuple[list[dict[str, Any]], dict[str, Any]]:
                     "frame_id": frame_id,
                     "truth_state": truth[frame_id],
                     "label": label,
-                    "features": _features_from_existing_row(
-                        state_row, receiver_streak=receiver_streak
-                    ),
+                    "features": _features_from_existing_row(state_row),
                 }
             )
             counts[label] += 1
@@ -232,13 +207,18 @@ def build(manifest_path: Path) -> tuple[list[dict[str, Any]], dict[str, Any]]:
         raise ValueError("development dataset contains no eligible airborne rows")
 
     label_counts = Counter(str(row["label"]) for row in rows_out)
-    missing = [label for label in AirborneClassifierV1.CLASSES if label_counts.get(label, 0) == 0]
+    missing = [
+        label for label in AirborneClassifierV1.CLASSES if label_counts.get(label, 0) == 0
+    ]
     if missing:
         raise ValueError(f"development dataset missing classifier classes: {missing}")
 
     summary = {
         "version": "courtflux_airborne_dataset_v2",
-        "policy": "V1-V5 development corpus; grouped leave-one-video-out CV; V6-V7 reserved for final Gate A",
+        "policy": (
+            "V1-V5 development corpus; grouped leave-one-video-out CV; "
+            "V6-V7 reserved for final Gate A"
+        ),
         "rows": len(rows_out),
         "features": list(FEATURES),
         "label_counts": dict(sorted(label_counts.items())),
