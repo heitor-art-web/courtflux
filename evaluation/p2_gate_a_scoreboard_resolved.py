@@ -8,6 +8,8 @@ from evaluation import p2_gate_a_scoreboard_v3 as _base
 
 PROJECT_ROOT = _base.PROJECT_ROOT
 CLIPS = _base.CLIPS
+DEVELOPMENT_CLIPS = ("V1", "V3", "V4", "V5")
+CHALLENGE_CLIPS = ("V2",)
 
 
 def _predicted_intervals(states: list[dict[str, Any]]) -> list[dict[str, Any]]:
@@ -73,6 +75,30 @@ _aggregate = _base._aggregate
 _gate_checks = _base._gate_checks
 
 
+def _select_clips(clips: list[dict[str, Any]], ids: tuple[str, ...]) -> list[dict[str, Any]]:
+    wanted = set(ids)
+    return [row for row in clips if str(row.get("clip")) in wanted]
+
+
+def _challenge_report(clips: list[dict[str, Any]]) -> dict[str, Any]:
+    challenge_clips = _select_clips(clips, CHALLENGE_CLIPS)
+    if not challenge_clips:
+        return {
+            "blocking": False,
+            "clips": [],
+            "aggregate": None,
+            "diagnostic_gate": None,
+        }
+    aggregate = _base._aggregate(challenge_clips)
+    diagnostic_gate = _base._gate_checks(challenge_clips, aggregate)
+    return {
+        "blocking": False,
+        "clips": challenge_clips,
+        "aggregate": aggregate,
+        "diagnostic_gate": diagnostic_gate,
+    }
+
+
 def main() -> None:
     args = _base.parse_args()
     run_map = {clip: str(getattr(args, f"{clip.lower()}_run")) for clip in CLIPS}
@@ -80,22 +106,30 @@ def main() -> None:
         _base._clip_metrics(clip, run_map[clip], args.tolerance_frames)
         for clip in CLIPS
     ]
-    aggregate = _base._aggregate(clips)
-    gate = _base._gate_checks(clips, aggregate)
+
+    development_clips = _select_clips(clips, DEVELOPMENT_CLIPS)
+    aggregate = _base._aggregate(development_clips)
+    gate = _base._gate_checks(development_clips, aggregate)
+    challenge = _challenge_report(clips)
+
     result = {
-        "version": "courtflux_p2_gate_a_p3_readiness_v4",
+        "version": "courtflux_p2_gate_a_p3_readiness_v5",
         "contract": (
             "P3 final timeline uses resolved_control_state when available; live control "
             "remains diagnostic; interval semantics primary; sequence order conditioned "
-            "on detected adjacent episodes; V1-V5 development analysis; V6-V7 final "
-            "validation-only"
+            "on detected adjacent episodes; V1/V3/V4/V5 are blocking development clips; "
+            "V2 is a non-blocking challenge/outlier clip; V6/V7 remain unseen until the "
+            "single final P2 Exit Gate after Gates A-D and thresholds are frozen"
         ),
         "timeline_state_channel": "resolved_control_state_then_live_fallback",
+        "development_clips": list(DEVELOPMENT_CLIPS),
+        "challenge_clips": list(CHALLENGE_CLIPS),
         "tolerance_frames": int(args.tolerance_frames),
         "runs": run_map,
         "clips": clips,
         "aggregate": aggregate,
         "gate": gate,
+        "challenge": challenge,
     }
 
     output = Path(args.output)
@@ -107,8 +141,15 @@ def main() -> None:
         json.dumps(
             {
                 "timeline_state_channel": result["timeline_state_channel"],
+                "development_clips": result["development_clips"],
                 "gate": gate,
                 "aggregate": aggregate,
+                "challenge": {
+                    "clips": result["challenge_clips"],
+                    "blocking": challenge["blocking"],
+                    "diagnostic_gate": challenge["diagnostic_gate"],
+                    "aggregate": challenge["aggregate"],
+                },
                 "clips": [
                     {
                         "clip": row["clip"],
