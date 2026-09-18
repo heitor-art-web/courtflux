@@ -18,6 +18,7 @@ PROJECT_ROOT = Path(__file__).resolve().parents[1]
 ALL_CLIPS = ("V1", "V2", "V3", "V4", "V5")
 DEVELOPMENT_CLIPS = ("V1", "V3", "V4", "V5")
 CHALLENGE_CLIPS = ("V2",)
+RUN_KEYS = ("V1", "V2", "V3", "V4_A", "V4_B", "V4_C", "V5")
 DEFAULT_GT = PROJECT_ROOT / "evaluation" / "ground_truth" / "p2_gate_c_team_attribution.json"
 
 TEAM_ATTRIBUTION_COVERAGE_MIN = 0.80
@@ -49,8 +50,8 @@ def _load_gt(path: Path) -> dict[str, Any]:
     payload = json.loads(path.read_text(encoding="utf-8"))
     if not isinstance(payload, dict):
         raise ValueError("Gate C ground truth must be a JSON object")
-    if str(payload.get("version") or "") != "courtflux_p2_gate_c_team_gt_v1":
-        raise ValueError("Gate C ground truth version must be courtflux_p2_gate_c_team_gt_v1")
+    if str(payload.get("version") or "") != "courtflux_p2_gate_c_team_gt_v2":
+        raise ValueError("Gate C ground truth version must be courtflux_p2_gate_c_team_gt_v2")
     return payload
 
 
@@ -171,27 +172,49 @@ def _evaluate_event_sample(
     }
 
 
-def evaluate_clip(
-    *,
-    clip: str,
-    run_id: str,
-    clip_gt: dict[str, Any],
-    tolerance_frames: int,
-) -> dict[str, Any]:
+def _load_run_artifacts(run_id: str) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
     states_path = _run_path(run_id, "p2_states.jsonl")
     events_path = _run_path(run_id, "p2_events.jsonl")
     if not states_path.exists():
         raise FileNotFoundError(states_path)
     if not events_path.exists():
         raise FileNotFoundError(events_path)
+    return load_jsonl(states_path), load_jsonl(events_path)
 
-    states = load_jsonl(states_path)
-    events = load_jsonl(events_path)
+
+def evaluate_clip(
+    *,
+    clip: str,
+    run_ids: dict[str, str],
+    clip_gt: dict[str, Any],
+    tolerance_frames: int,
+) -> dict[str, Any]:
+    run_specs = {
+        str(key): dict(value)
+        for key, value in dict(clip_gt.get("runs", {}) or {}).items()
+        if isinstance(value, dict)
+    }
     samples = [row for row in list(clip_gt.get("samples", []) or []) if isinstance(row, dict)]
-    used_event_indices: set[int] = set()
+
+    required_run_keys = sorted({str(sample.get("run_key") or "") for sample in samples})
+    if not required_run_keys or any(not key for key in required_run_keys):
+        raise ValueError(f"Gate C clip {clip} has a sample without run_key")
+
+    artifacts: dict[str, tuple[list[dict[str, Any]], list[dict[str, Any]]]] = {}
+    for run_key in required_run_keys:
+        if run_key not in run_specs:
+            raise ValueError(f"Gate C clip {clip} references unknown run_key {run_key!r}")
+        run_id = str(run_ids.get(run_key) or "").strip()
+        if not run_id:
+            raise ValueError(f"missing run id for Gate C run_key {run_key}")
+        artifacts[run_key] = _load_run_artifacts(run_id)
+
+    used_event_indices: dict[str, set[int]] = {key: set() for key in required_run_keys}
     rows: list[dict[str, Any]] = []
 
     for sample_index, sample in enumerate(samples):
+        run_key = str(sample["run_key"])
+        states, events = artifacts[run_key]
         state = str(sample.get("state") or "")
         if state == "possessed":
             result = _evaluate_possessed_sample(sample, states)
@@ -200,18 +223,24 @@ def evaluate_clip(
                 sample,
                 events,
                 tolerance_frames=tolerance_frames,
-                used_event_indices=used_event_indices,
+                used_event_indices=used_event_indices[run_key],
             )
         else:
             raise ValueError(f"unsupported Gate C sample state: {state!r}")
 
         start, end = _sample_window(sample)
+        run_spec = run_specs[run_key]
         rows.append(
             {
                 "sample_index": sample_index,
+                "run_key": run_key,
+                "run_id": run_ids[run_key],
+                "match_config": run_spec.get("match_config"),
                 "state": state,
                 "frame_start": start,
                 "frame_end": end,
+                "original_frame_start": sample.get("original_frame_start", start),
+                "original_frame_end": sample.get("original_frame_end", end),
                 "human_note": sample.get("human_note"),
                 **result,
             }
@@ -234,8 +263,8 @@ def evaluate_clip(
     )
     return {
         "clip": clip,
-        "run_id": run_id,
-        "match_config": clip_gt.get("match_config"),
+        "run_ids": {key: run_ids[key] for key in required_run_keys},
+        "match_configs": {key: run_specs[key].get("match_config") for key in required_run_keys},
         "teams": list(clip_gt.get("teams", []) or []),
         "samples": total,
         "attributed_samples": attributed,
@@ -317,9 +346,14 @@ def _gate(aggregate: dict[str, Any], clips: list[dict[str, Any]]) -> dict[str, A
 
 
 def parse_args() -> argparse.Namespace:
-    parser = argparse.ArgumentParser(description="Evaluate P2 Gate C team attribution.")
-    for clip in ALL_CLIPS:
-        parser.add_argument(f"--{clip.lower()}-run", required=True)
+    parser = argparse.ArgumentParser(description="Evaluate P2 Gate C team attribution with audited kit contexts.")
+    parser.add_argument("--v1-run", required=True)
+    parser.add_argument("--v2-run", required=True)
+    parser.add_argument("--v3-run", required=True)
+    parser.add_argument("--v4a-run", required=True)
+    parser.add_argument("--v4b-run", required=True)
+    parser.add_argument("--v4c-run", required=True)
+    parser.add_argument("--v5-run", required=True)
     parser.add_argument("--ground-truth", default=str(DEFAULT_GT))
     parser.add_argument("--tolerance-frames", type=int, default=8)
     parser.add_argument("--output", default="evaluation/gate_c_scoreboard.json")
@@ -333,12 +367,20 @@ def main() -> None:
         gt_path = PROJECT_ROOT / gt_path
     gt = _load_gt(gt_path)
     clip_gt = dict(gt.get("clips", {}) or {})
-    run_map = {clip: str(getattr(args, f"{clip.lower()}_run")) for clip in ALL_CLIPS}
+    run_map = {
+        "V1": str(args.v1_run),
+        "V2": str(args.v2_run),
+        "V3": str(args.v3_run),
+        "V4_A": str(args.v4a_run),
+        "V4_B": str(args.v4b_run),
+        "V4_C": str(args.v4c_run),
+        "V5": str(args.v5_run),
+    }
 
     clip_results = [
         evaluate_clip(
             clip=clip,
-            run_id=run_map[clip],
+            run_ids=run_map,
             clip_gt=dict(clip_gt[clip]),
             tolerance_frames=max(0, int(args.tolerance_frames)),
         )
@@ -353,12 +395,11 @@ def main() -> None:
     challenge_gate = _gate(challenge_aggregate, challenge)
 
     result = {
-        "version": "courtflux_p2_gate_c_team_attribution_v1",
+        "version": "courtflux_p2_gate_c_team_attribution_v2",
         "contract": (
-            "Gate C uses prediction-blind human visual-team colour windows from the separate "
-            "Gate C sidecar; V1/V3/V4/V5 block development, V2 is challenge-only; one human "
-            "window is one scoring unit; unknown/unattributed is separate from wrong-team "
-            "attribution"
+            "Gate C uses prediction-blind human team slots and audited kit contexts; V4 is split into "
+            "three colour-stable runtime segments but remains one clip for per-clip scoring; V1/V3/V4/V5 "
+            "block development, V2 is challenge-only; unknown/unattributed is separate from wrong-team attribution"
         ),
         "thresholds": {
             "coverage_min": TEAM_ATTRIBUTION_COVERAGE_MIN,
