@@ -315,7 +315,14 @@ class TeamOnlyAnalyzer:
         self,
         lab_pixels: np.ndarray,
     ) -> tuple[dict[str, float], dict[str, float], float, int]:
-        """Score teams from one shared discriminative pixel pool."""
+        """Score teams from one shared discriminative pixel pool.
+
+        Affinity determines whether a pixel is reliable enough to contribute and which
+        team wins that pixel. Once a pixel is discriminative it casts one equal vote.
+        This avoids a small number of exact white/blue matches outweighing a larger,
+        camera-shifted jersey region merely because their affinity is numerically closer
+        to 1.0.
+        """
         team_names = [str(team) for team in self.active_colour_prototypes]
         prototype_affinity: dict[str, float] = {}
         if not team_names or lab_pixels.size == 0:
@@ -354,19 +361,18 @@ class TeamOnlyAnalyzer:
         discriminative_count = int(np.count_nonzero(discriminative))
         evidence_fraction = discriminative_count / max(int(matrix.shape[0]), 1)
 
-        masses = np.zeros((len(team_names),), dtype=np.float64)
+        votes = np.zeros((len(team_names),), dtype=np.float64)
         if discriminative_count:
             for team_index in range(len(team_names)):
-                team_mask = discriminative & (best_indices == team_index)
-                if np.any(team_mask):
-                    masses[team_index] = float(np.sum(best_values[team_mask]))
+                votes[team_index] = float(
+                    np.count_nonzero(discriminative & (best_indices == team_index))
+                )
 
-        total_mass = float(np.sum(masses))
-        if total_mass <= 1e-12:
+        if discriminative_count <= 0:
             scores = {team_name: 0.0 for team_name in team_names}
         else:
             scores = {
-                team_name: float(masses[index] / total_mass)
+                team_name: float(votes[index] / discriminative_count)
                 for index, team_name in enumerate(team_names)
             }
         return scores, prototype_affinity, evidence_fraction, discriminative_count
