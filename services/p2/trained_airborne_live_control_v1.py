@@ -3,24 +3,27 @@ from __future__ import annotations
 from typing import Any
 
 from core.basketball_event import BallControlState
-from services.p2.airborne_classifier_v1 import AirborneClassifierV1
+from services.p2.airborne_classifier_v1_1 import AirborneClassifierV1
 from services.p2.live_control_resolver_v1 import (
     LiveControlP2EngineV1 as _BaseLiveControlP2EngineV1,
 )
 
 
 class LiveControlP2EngineV1(_BaseLiveControlP2EngineV1):
-    """Canonical live resolver with optional trained airborne semantics.
+    """Canonical live resolver with optional episode-level trained airborne semantics.
 
-    Event generation remains entirely in the inherited P2 engine. When no airborne model is
-    loaded, behavior is identical to the AIRBORNE-v2 resolver. When a model is loaded, only
-    the internal airborne classification is replaced by AirborneClassifierV1.
+    Event generation remains entirely in the inherited P2 engine. Without a trained model,
+    behavior falls back to the AIRBORNE-v2 resolver. With AirborneClassifierV1.1 loaded,
+    evidence is accumulated causally over each active flight hypothesis: Stage 1 resolves
+    AIRBORNE vs CONTINUITY, then Stage 2 resolves PASS vs SHOT. Only published control-state
+    semantics are replaced; event trackers still execute once in the inherited engine.
     """
 
     LIVE_CONTROL_POLICY = (
-        "causal_live_resolver_v4;AirborneClassifierV1_when_model_loaded;"
-        "strong_shot_signals_precede_classifier;classifier_pass_shot_unresolved;"
-        "recent_owner_continuity;events_unchanged"
+        "causal_live_resolver_v5;AirborneClassifierV1.1_episode_when_model_loaded;"
+        "causal_incremental_episode_evidence;strong_shot_signals_precede_classifier;"
+        "stage1_airborne_vs_continuity;stage2_pass_vs_shot;recent_owner_continuity;"
+        "events_unchanged"
     )
 
     HARD_SHOT_SOURCES = {
@@ -65,7 +68,7 @@ class LiveControlP2EngineV1(_BaseLiveControlP2EngineV1):
         )
 
         # Feature-collection/development mode: no trained artifact means zero behavior
-        # change from the already validated AIRBORNE-v2 fallback.
+        # change from the already established AIRBORNE-v2 fallback.
         state, source, diagnostics = super()._resolve_eligible_control(
             frame_state=frame_state,
             p2=p2,
@@ -97,7 +100,7 @@ class LiveControlP2EngineV1(_BaseLiveControlP2EngineV1):
             self._live_control_latch = BallControlState.SHOT_FLIGHT
             self._airborne_state = self.AIRBORNE_SHOT
             diagnostics["internal_airborne_state"] = self._airborne_state
-            diagnostics["classifier_decision_source"] = "trained_classifier"
+            diagnostics["classifier_decision_source"] = "trained_episode_classifier"
             return BallControlState.SHOT_FLIGHT, "airborne_classifier_shot", diagnostics
 
         if label == "pass_flight":
@@ -105,33 +108,33 @@ class LiveControlP2EngineV1(_BaseLiveControlP2EngineV1):
             self._live_control_latch = BallControlState.PASS_FLIGHT
             self._airborne_state = self.AIRBORNE_PASS
             diagnostics["internal_airborne_state"] = self._airborne_state
-            diagnostics["classifier_decision_source"] = "trained_classifier"
+            diagnostics["classifier_decision_source"] = "trained_episode_classifier"
             return BallControlState.PASS_FLIGHT, "airborne_classifier_pass", diagnostics
 
-        # A prior trained classification remains stable for the physical flight. This is a
-        # temporal latch of a model decision, not a new per-frame guess.
+        # First committed PASS/SHOT decision remains stable for the physical flight.
         if self._classifier_latch is BallControlState.SHOT_FLIGHT:
             self._airborne_state = self.AIRBORNE_SHOT
             diagnostics["internal_airborne_state"] = self._airborne_state
-            diagnostics["classifier_decision_source"] = "trained_classifier_latch"
+            diagnostics["classifier_decision_source"] = "trained_episode_classifier_latch"
             return BallControlState.SHOT_FLIGHT, "airborne_classifier_shot_latched", diagnostics
         if self._classifier_latch is BallControlState.PASS_FLIGHT:
             self._airborne_state = self.AIRBORNE_PASS
             diagnostics["internal_airborne_state"] = self._airborne_state
-            diagnostics["classifier_decision_source"] = "trained_classifier_latch"
+            diagnostics["classifier_decision_source"] = "trained_episode_classifier_latch"
             return BallControlState.PASS_FLIGHT, "airborne_classifier_pass_latched", diagnostics
 
-        # Model explicitly abstained. Do not let the inherited receiver heuristic silently
-        # turn that abstention into PASS. Preserve recent-owner continuity where available;
-        # otherwise expose the raw non-PASS tracker state.
+        # Stage-1 continuity or Stage-2 abstention does not become a false PASS. Preserve
+        # recent-owner continuity where available; otherwise expose the raw non-PASS state.
         self._live_control_latch = None
         self._airborne_state = self.AIRBORNE_UNCLASSIFIED
         diagnostics["internal_airborne_state"] = self._airborne_state
-        diagnostics["classifier_decision_source"] = "trained_classifier_unresolved"
+        diagnostics["classifier_decision_source"] = str(
+            classification.get("decision_stage") or "trained_episode_classifier_unresolved"
+        )
         if bool(diagnostics.get("recent_owner", False)):
             return (
                 BallControlState.POSSESSED,
-                "airborne_classifier_unresolved_owner_continuity",
+                "airborne_classifier_continuity",
                 diagnostics,
             )
 
@@ -162,4 +165,4 @@ class LiveControlP2EngineV1(_BaseLiveControlP2EngineV1):
             return
         airborne = dict((resolver_diag or {}).get("airborne_classifier", {}) or {})
         p2["airborne_classifier"] = airborne
-        p2["behavior_revision"] = "control_state_v7_trainable_airborne_classifier"
+        p2["behavior_revision"] = "control_state_v8_episode_airborne_classifier_v1_1"
