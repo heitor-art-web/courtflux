@@ -42,6 +42,18 @@ class ContinuousTeamColourTest(unittest.TestCase):
         lab_image = np.full((size, size, 3), lab, dtype=np.uint8)
         return cv2.cvtColor(lab_image, cv2.COLOR_LAB2BGR)
 
+    @staticmethod
+    def _paint_production_core(crop: np.ndarray, bgr: tuple[int, int, int]) -> None:
+        h, w = crop.shape[:2]
+        y1, y2 = int(h * 0.22), int(h * 0.58)
+        x1, x2 = int(w * 0.22), int(w * 0.78)
+        chest_h, chest_w = y2 - y1, x2 - x1
+        cy1 = y1 + int(round(chest_h * TeamOnlyAnalyzer.CORE_Y_MIN))
+        cy2 = y1 + int(round(chest_h * TeamOnlyAnalyzer.CORE_Y_MAX))
+        cx1 = x1 + int(round(chest_w * TeamOnlyAnalyzer.CORE_X_MIN))
+        cx2 = x1 + int(round(chest_w * TeamOnlyAnalyzer.CORE_X_MAX))
+        crop[cy1:cy2, cx1:cx2] = bgr
+
     def test_arbitrary_hex_colours_do_not_require_named_mask(self) -> None:
         analyzer = self._analyzer(
             [{"name": "electric_magenta", "hex": "#D10A8C"}],
@@ -55,6 +67,7 @@ class ContinuousTeamColourTest(unittest.TestCase):
         self.assertTrue(result["evidence_accepted"])
         self.assertGreater(result["raw_scores"]["team_a"], result["raw_scores"]["team_b"])
         self.assertGreater(result["discriminative_pixel_fraction"], 0.0)
+        self.assertEqual(result["spatial_policy"], "central_jersey_core_first_v1")
 
     def test_rgb_and_hsv_specs_share_same_open_contract(self) -> None:
         analyzer = self._analyzer(
@@ -111,6 +124,32 @@ class ContinuousTeamColourTest(unittest.TestCase):
         self.assertGreater(result["raw_scores"]["team_a"], 0.70)
         self.assertLess(result["raw_scores"]["team_b"], 0.30)
         self.assertGreater(result["discriminative_pixel_fraction"], 0.50)
+
+    def test_core_first_prefers_central_jersey_over_outer_contamination(self) -> None:
+        analyzer = self._analyzer(["White", "Blue"], ["Green"])
+        crop = np.full((120, 120, 3), (255, 255, 255), dtype=np.uint8)
+        # Only the production core is green; the surrounding chest is deliberately white.
+        self._paint_production_core(crop, (72, 150, 28))
+
+        result = analyzer.score_teams(crop)
+
+        self.assertEqual(result["evidence_region"], "inner_core")
+        self.assertEqual(result["best_team"], "team_b")
+        self.assertTrue(result["evidence_accepted"])
+        self.assertGreater(result["raw_scores"]["team_b"], 0.90)
+
+    def test_core_first_falls_back_when_core_abstains(self) -> None:
+        analyzer = self._analyzer(["Red"], ["Orange"])
+        crop = np.full((120, 120, 3), (36, 28, 220), dtype=np.uint8)  # canonical red BGR
+        # Neutral center should abstain between two chromatic prototypes; the surrounding
+        # chest remains strongly red and therefore supplies fallback evidence.
+        self._paint_production_core(crop, (135, 135, 135))
+
+        result = analyzer.score_teams(crop)
+
+        self.assertEqual(result["evidence_region"], "full_fallback")
+        self.assertEqual(result["best_team"], "team_a")
+        self.assertTrue(result["evidence_accepted"])
 
     def test_ambiguous_pixels_can_abstain_instead_of_forcing_team(self) -> None:
         analyzer = self._analyzer(["Red"], ["Orange"])
