@@ -173,6 +173,14 @@ from .p4_spatial_snapshot import (
     materialize_spatial_snapshots,
     p4_spatial_snapshot_manifest,
 )
+from .p4_spatial_diagnostics import (
+    P4_SPATIAL_DIAGNOSTICS_CONTRACT_VERSION,
+    P4SpatialDiagnosticsError,
+    PlayerSpatialDiagnostics,
+    SpatialDiagnosticsReport,
+    build_spatial_diagnostics,
+    p4_spatial_diagnostics_manifest,
+)
 
 __all__ = [
     "FrameState",
@@ -325,4 +333,10 @@ __all__ = [
     "materialize_spatial_snapshot",
     "materialize_spatial_snapshots",
     "p4_spatial_snapshot_manifest",
+    "P4_SPATIAL_DIAGNOSTICS_CONTRACT_VERSION",
+    "P4SpatialDiagnosticsError",
+    "PlayerSpatialDiagnostics",
+    "SpatialDiagnosticsReport",
+    "build_spatial_diagnostics",
+    "p4_spatial_diagnostics_manifest",
 ]

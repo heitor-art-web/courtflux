@@ -46,6 +46,10 @@ REQUIRED_CORE_EXPORTS = {
     "P4_SPATIAL_SNAPSHOT_CONTRACT_VERSION",
     "SpatialSnapshot",
     "materialize_spatial_snapshot",
+    "P4_SPATIAL_DIAGNOSTICS_CONTRACT_VERSION",
+    "PlayerSpatialDiagnostics",
+    "SpatialDiagnosticsReport",
+    "build_spatial_diagnostics",
 }
 
 
