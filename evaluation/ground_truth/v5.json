@@ -26,6 +26,30 @@
     "frames_seen": 751,
     "note": "Metadata only. Human GT was authored blind from video and was not bootstrapped from P2 predictions."
   },
+  "human_kit_audit": {
+    "version": "courtflux_p2_human_kit_audit_v1",
+    "review_scope": "Gate C team-colour context only; does not rewrite frozen Gate A/B labels",
+    "prediction_blind": true,
+    "classifier_feature_policy": "jersey_body colours are candidate team-classifier context; shorts and lettering are recorded as human context and are not automatically injected as torso colours",
+    "segments": [
+      {
+        "source_time_start_sec": 10.0,
+        "source_time_end_sec": 40.0,
+        "team_a": {
+          "name": "FC Porto",
+          "shorts": ["Blue"],
+          "jersey_body": ["White", "Blue"],
+          "lettering": ["White"]
+        },
+        "team_b": {
+          "name": "Sporting",
+          "shorts": ["Black"],
+          "jersey_body": ["Green"],
+          "lettering": ["White"]
+        }
+      }
+    ]
+  },
   "control_intervals": [
     {
       "state": "shot_flight",
@@ -231,7 +255,8 @@
     "Pass A is frozen using human windows rather than millisecond/frame-exact event labels.",
     "The blocked pass remains pass_flight for Gate A; blocked is preserved only as human context.",
     "The 27-29s dunk is stored as a shot event for later gates but excluded from Gate A control-state scoring because no explicit control-state label was provided.",
-    "Team colours are human context only for neutral V1-V5 clips; team_id remains null.",
-    "Do not require exact release frames from the reviewer."
+    "Team colours are human context only for neutral V1-V5 clips; event team_id remains null.",
+    "Do not require exact release frames from the reviewer.",
+    "Detailed Gate C equipment context is stored in human_kit_audit: FC Porto is team_a (white/blue torso) and Sporting is team_b (green torso)."
   ]
 }
