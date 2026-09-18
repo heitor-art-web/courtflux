@@ -2,7 +2,7 @@ name: Repository Python lint
 
 on:
   push:
-    branches: [main, p2-rebuilt, p3_foundation]
+    branches: [main, p2-rebuilt, p3_foundation, p4_spatial_foundation]
   pull_request:
     branches: [main]
 
@@ -53,6 +53,9 @@ jobs:
           evaluation/p3_serialized_adapter_test.py
           evaluation/p3_artifact_store_test.py
           evaluation/p3_materializer_test.py
+
+      - name: Run P4 spatial foundation tests
+        run: python -m pytest -q evaluation/p4_*_test.py
 
       - name: Run worker API contract tests
         run: python -m unittest -q evaluation.worker_api_contract_test
