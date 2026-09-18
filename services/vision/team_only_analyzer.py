@@ -21,10 +21,21 @@ class TeamOnlyAnalyzer:
     Legacy colour-name strings remain supported as configuration aliases only. They are
     converted to numeric prototypes before inference; no named hard-mask participates
     in the team decision.
+
+    Team scoring is discriminative per pixel: every torso pixel compares all teams on
+    the same evidence. Only pixels with enough absolute affinity and a clear relative
+    winner cast a vote. This prevents different teams from cherry-picking different
+    top-k pixels from the same crop and naturally leaves background/skin/ambiguous
+    colours unattributed.
     """
 
-    MIN_TEAM_SCORE = 0.45
-    MIN_TEAM_MARGIN = 0.08
+    # These are classifier-internal development parameters, not Gate-C thresholds.
+    MIN_TEAM_SCORE = 0.58
+    MIN_TEAM_MARGIN = 0.16
+    MIN_DISCRIMINATIVE_PIXEL_FRACTION = 0.02
+    PIXEL_MIN_AFFINITY = 0.20
+    PIXEL_MIN_MARGIN = 0.04
+
     LAB_SIGMA = 34.0
     TOP_PIXEL_FRACTION = 0.35
     SHARED_COLOUR_FLOOR = 0.12
@@ -235,23 +246,68 @@ class TeamOnlyAnalyzer:
     def _team_scores(
         self,
         lab_pixels: np.ndarray,
-    ) -> tuple[dict[str, float], dict[str, float]]:
-        scores: dict[str, float] = {}
-        prototype_affinity: dict[str, float] = {}
+    ) -> tuple[dict[str, float], dict[str, float], float, int]:
+        """Score teams from one shared discriminative pixel pool.
 
-        for team_name, prototypes in self.active_colour_prototypes.items():
+        Each pixel first gets one affinity per team (the strongest weighted kit-colour
+        prototype for that team). A pixel contributes only when the strongest team has
+        enough absolute affinity and enough margin over the runner-up. Team raw scores
+        are then normalized winning evidence mass, making them directly comparable.
+        """
+        team_names = [str(team) for team in self.active_colour_prototypes]
+        prototype_affinity: dict[str, float] = {}
+        if not team_names or lab_pixels.size == 0:
+            return ({name: 0.0 for name in team_names}, prototype_affinity, 0.0, 0)
+
+        team_affinities: list[np.ndarray] = []
+        for team_name in team_names:
+            prototypes = self.active_colour_prototypes.get(team_name, [])
             if not prototypes:
-                scores[team_name] = 0.0
+                team_affinities.append(np.zeros((lab_pixels.shape[0],), dtype=np.float32))
                 continue
-            weighted_affinities = []
+
+            weighted_affinities: list[np.ndarray] = []
+            weights = self.prototype_weights.get(team_name, [1.0] * len(prototypes))
             for index, prototype in enumerate(prototypes):
                 affinity = self._affinity(lab_pixels, prototype["lab"])
-                weight = self.prototype_weights.get(team_name, [1.0] * len(prototypes))[index]
+                weight = float(weights[index])
                 weighted_affinities.append(affinity * weight)
                 prototype_affinity[f"{team_name}:{prototype['label']}:{index}"] = self._top_mean(affinity)
-            combined = np.maximum.reduce(weighted_affinities)
-            scores[team_name] = self._top_mean(combined)
-        return scores, prototype_affinity
+            team_affinities.append(np.maximum.reduce(weighted_affinities))
+
+        matrix = np.stack(team_affinities, axis=1)
+        best_indices = np.argmax(matrix, axis=1)
+        best_values = matrix[np.arange(matrix.shape[0]), best_indices]
+
+        if matrix.shape[1] > 1:
+            sorted_values = np.partition(matrix, matrix.shape[1] - 2, axis=1)
+            second_values = sorted_values[:, -2]
+        else:
+            second_values = np.zeros_like(best_values)
+
+        discriminative = (
+            (best_values >= self.PIXEL_MIN_AFFINITY)
+            & ((best_values - second_values) >= self.PIXEL_MIN_MARGIN)
+        )
+        discriminative_count = int(np.count_nonzero(discriminative))
+        evidence_fraction = discriminative_count / max(int(matrix.shape[0]), 1)
+
+        masses = np.zeros((len(team_names),), dtype=np.float64)
+        if discriminative_count:
+            for team_index in range(len(team_names)):
+                team_mask = discriminative & (best_indices == team_index)
+                if np.any(team_mask):
+                    masses[team_index] = float(np.sum(best_values[team_mask]))
+
+        total_mass = float(np.sum(masses))
+        if total_mass <= 1e-12:
+            scores = {team_name: 0.0 for team_name in team_names}
+        else:
+            scores = {
+                team_name: float(masses[index] / total_mass)
+                for index, team_name in enumerate(team_names)
+            }
+        return scores, prototype_affinity, evidence_fraction, discriminative_count
 
     def _continuous_basis_projection(self, lab_pixels: np.ndarray) -> dict[str, float]:
         return {
@@ -290,7 +346,7 @@ class TeamOnlyAnalyzer:
         }
 
     def score_teams(self, crop: np.ndarray) -> dict:
-        """Return selective team evidence using continuous CIELAB prototype affinity."""
+        """Return selective team evidence using continuous discriminative CIELAB affinity."""
         empty = {
             "scores": {},
             "raw_scores": {str(team): 0.0 for team in self.rosters},
@@ -298,12 +354,14 @@ class TeamOnlyAnalyzer:
             "best_score": 0.0,
             "margin": 0.0,
             "evidence_accepted": False,
+            "discriminative_pixel_fraction": 0.0,
+            "discriminative_pixels": 0,
             "color_coverage": {},
             "color_embedding": [],
             "prototype_affinity": {},
             "active_kits": self.active_kits,
             "active_colour_prototypes": self._public_prototypes(),
-            "colour_space": "CIELAB_continuous_v1",
+            "colour_space": "CIELAB_continuous_discriminative_v2",
         }
         if crop is None or crop.size == 0 or not self.rosters:
             return empty
@@ -312,9 +370,11 @@ class TeamOnlyAnalyzer:
         if h < 10 or w < 10:
             return empty
 
-        # Bias toward the torso rather than head/skin or shorts. Shorts and lettering are
-        # human-audit context, not implicit torso-colour votes.
-        chest = crop[int(h * 0.18):int(h * 0.62), int(w * 0.18):int(w * 0.82)]
+        # Tighter torso ROI reduces head/arms/background while still tolerating angled
+        # player boxes. Shorts and lettering remain audit context, not implicit votes.
+        chest = crop[int(h * 0.22):int(h * 0.58), int(w * 0.22):int(w * 0.78)]
+        if chest.size == 0:
+            chest = crop[int(h * 0.18):int(h * 0.62), int(w * 0.18):int(w * 0.82)]
         if chest.size == 0:
             chest = crop[: int(h * 0.65), :]
 
@@ -323,7 +383,7 @@ class TeamOnlyAnalyzer:
         if lab_pixels.size == 0:
             return empty
 
-        raw_scores, prototype_affinity = self._team_scores(lab_pixels)
+        raw_scores, prototype_affinity, evidence_fraction, discriminative_count = self._team_scores(lab_pixels)
         ordered = sorted(raw_scores.items(), key=lambda item: item[1], reverse=True)
         best_team, best_score = ordered[0] if ordered else (None, 0.0)
         second_score = ordered[1][1] if len(ordered) > 1 else 0.0
@@ -331,7 +391,9 @@ class TeamOnlyAnalyzer:
 
         accepted = (
             best_team
-            if best_score >= self.MIN_TEAM_SCORE and margin >= self.MIN_TEAM_MARGIN
+            if evidence_fraction >= self.MIN_DISCRIMINATIVE_PIXEL_FRACTION
+            and best_score >= self.MIN_TEAM_SCORE
+            and margin >= self.MIN_TEAM_MARGIN
             else None
         )
         evidence_scores = raw_scores if accepted is not None else {}
@@ -344,6 +406,8 @@ class TeamOnlyAnalyzer:
             "best_score": round(best_score, 6),
             "margin": round(margin, 6),
             "evidence_accepted": accepted is not None,
+            "discriminative_pixel_fraction": round(float(evidence_fraction), 6),
+            "discriminative_pixels": int(discriminative_count),
             # Backward-compatible field consumed by Identity v2. Values are continuous
             # anchor affinities, not binary/named masks.
             "color_coverage": {name: round(value, 6) for name, value in basis_projection.items()},
@@ -353,7 +417,7 @@ class TeamOnlyAnalyzer:
             },
             "active_kits": self.active_kits,
             "active_colour_prototypes": self._public_prototypes(),
-            "colour_space": "CIELAB_continuous_v1",
+            "colour_space": "CIELAB_continuous_discriminative_v2",
         }
 
     def get_team_color(self, crop: np.ndarray) -> Optional[str]:
