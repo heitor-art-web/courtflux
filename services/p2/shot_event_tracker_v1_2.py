@@ -5,7 +5,7 @@ from typing import Any
 from core.ball_state import BallState
 from core.basketball_event import BasketballEvent, EventDecision, ShotOutcome
 from core.court_state import CourtState
-from services.p2.shot_event_tracker_v1 import ShotEventTrackerV1
+from services.p2.shot_event_tracker_v1_1 import ShotEventTrackerV1
 
 
 class ShotEventTrackerV12(ShotEventTrackerV1):
@@ -69,20 +69,16 @@ class ShotEventTrackerV12(ShotEventTrackerV1):
         reason = self._deferred_confirmation_reason(
             diagnostics if isinstance(diagnostics, dict) else None
         )
+        event.provenance["outcome_policy_revision"] = self.OUTCOME_POLICY_REVISION
+        event.provenance["deferred_confirmation_policy"] = (
+            "repeated_inside_mouth_or_persistent_near_x_with_coherent_rim"
+        )
         if reason is None:
-            event.provenance["outcome_policy_revision"] = self.OUTCOME_POLICY_REVISION
-            event.provenance["deferred_confirmation_policy"] = (
-                "repeated_inside_mouth_or_persistent_near_x_with_coherent_rim"
-            )
             return event
 
         event.attributes["outcome"] = ShotOutcome.MADE.value
         event.attributes["resolution_reason"] = reason
         event.attributes["deferred_spatial_confirmation"] = reason
-        event.provenance["outcome_policy_revision"] = self.OUTCOME_POLICY_REVISION
-        event.provenance["deferred_confirmation_policy"] = (
-            "repeated_inside_mouth_or_persistent_near_x_with_coherent_rim"
-        )
         event.evidence = tuple(sorted(set(event.evidence) | {reason}))
         event.decision = EventDecision.CONFIRMED
         event.confidence = max(float(event.confidence), 0.78)
