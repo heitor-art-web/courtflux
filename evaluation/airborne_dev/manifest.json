@@ -1,0 +1,72 @@
+{
+  "version": "courtflux_airborne_dev_manifest_v1",
+  "policy": "development_only; human_labels_required; video-disjoint train/calibration; V1-V5 forbidden",
+  "clips": [
+    {
+      "id": "D1",
+      "split": "train",
+      "video_id": "u7tk6obXrPk",
+      "source": "https://www.youtube.com/watch?v=u7tk6obXrPk",
+      "start_time_sec": 762.0,
+      "end_time_sec": 852.0,
+      "gt_file": "evaluation/airborne_dev/ground_truth/d1.json",
+      "run_id": null,
+      "annotation_status": "needs_human_annotation"
+    },
+    {
+      "id": "D2",
+      "split": "train",
+      "video_id": "u7tk6obXrPk",
+      "source": "https://www.youtube.com/watch?v=u7tk6obXrPk",
+      "start_time_sec": 912.0,
+      "end_time_sec": 1002.0,
+      "gt_file": "evaluation/airborne_dev/ground_truth/d2.json",
+      "run_id": null,
+      "annotation_status": "needs_human_annotation"
+    },
+    {
+      "id": "D3",
+      "split": "train",
+      "video_id": "9-eG-yPvpZU",
+      "source": "https://www.youtube.com/watch?v=9-eG-yPvpZU",
+      "start_time_sec": 708.0,
+      "end_time_sec": 798.0,
+      "gt_file": "evaluation/airborne_dev/ground_truth/d3.json",
+      "run_id": null,
+      "annotation_status": "needs_human_annotation"
+    },
+    {
+      "id": "D4",
+      "split": "train",
+      "video_id": "9-eG-yPvpZU",
+      "source": "https://www.youtube.com/watch?v=9-eG-yPvpZU",
+      "start_time_sec": 858.0,
+      "end_time_sec": 948.0,
+      "gt_file": "evaluation/airborne_dev/ground_truth/d4.json",
+      "run_id": null,
+      "annotation_status": "needs_human_annotation"
+    },
+    {
+      "id": "D5",
+      "split": "calibration",
+      "video_id": "KiqVPGMTMyk",
+      "source": "https://www.youtube.com/watch?v=KiqVPGMTMyk",
+      "start_time_sec": 1083.0,
+      "end_time_sec": 1173.0,
+      "gt_file": "evaluation/airborne_dev/ground_truth/d5.json",
+      "run_id": null,
+      "annotation_status": "needs_human_annotation"
+    },
+    {
+      "id": "D6",
+      "split": "calibration",
+      "video_id": "KiqVPGMTMyk",
+      "source": "https://www.youtube.com/watch?v=KiqVPGMTMyk",
+      "start_time_sec": 1233.0,
+      "end_time_sec": 1323.0,
+      "gt_file": "evaluation/airborne_dev/ground_truth/d6.json",
+      "run_id": null,
+      "annotation_status": "needs_human_annotation"
+    }
+  ]
+}
