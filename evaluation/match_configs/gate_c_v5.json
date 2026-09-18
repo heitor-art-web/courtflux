@@ -1,15 +1,16 @@
 {
   "metadata": {
-    "home_team": "green",
-    "away_team": "blue",
+    "home_team": "team_a",
+    "away_team": "team_b",
     "active_kits": {
-      "green": "current",
-      "blue": "current"
+      "team_a": "current",
+      "team_b": "current"
     },
-    "evaluation_scope": "p2_gate_c_development_v5"
+    "evaluation_scope": "p2_gate_c_development_v5",
+    "human_kit_audit_ref": "evaluation/ground_truth/v5.json#human_kit_audit"
   },
   "teams": {
-    "green": {"kits": {"current": ["Green"]}, "roster": {}},
-    "blue": {"kits": {"current": ["Blue"]}, "roster": {}}
+    "team_a": {"kits": {"current": ["White", "Blue"]}, "roster": {}},
+    "team_b": {"kits": {"current": ["Green"]}, "roster": {}}
   }
 }
