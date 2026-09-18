@@ -3,7 +3,7 @@ from __future__ import annotations
 import argparse
 import json
 import sys
-from collections import Counter
+from collections import Counter, defaultdict
 from pathlib import Path
 from typing import Any
 
@@ -98,6 +98,50 @@ def _metrics(y: np.ndarray, pred: np.ndarray) -> dict[str, Any]:
     }
 
 
+def _sample_weights(rows: list[dict[str, Any]]) -> np.ndarray:
+    """Give comparable influence to intervals, videos and classes.
+
+    Frame rows are highly autocorrelated. First divide each human interval's total weight
+    equally across its rows, then normalize each source video to equal total influence,
+    finally class-balance the resulting effective mass.
+    """
+    interval_counts: Counter[tuple[str, int]] = Counter()
+    for row in rows:
+        key = (str(row.get("video_id") or ""), int(row.get("truth_interval_index", -1)))
+        interval_counts[key] += 1
+
+    base: list[float] = []
+    video_mass: defaultdict[str, float] = defaultdict(float)
+    for row in rows:
+        video_id = str(row.get("video_id") or "")
+        key = (video_id, int(row.get("truth_interval_index", -1)))
+        weight = 1.0 / max(interval_counts[key], 1)
+        base.append(weight)
+        video_mass[video_id] += weight
+
+    video_balanced: list[float] = []
+    for row, weight in zip(rows, base):
+        video_id = str(row.get("video_id") or "")
+        video_balanced.append(weight / max(video_mass[video_id], 1e-12))
+
+    class_mass: defaultdict[str, float] = defaultdict(float)
+    for row, weight in zip(rows, video_balanced):
+        class_mass[str(row.get("label"))] += weight
+    total_mass = sum(video_balanced)
+    class_factor = {
+        label: total_mass / (len(CLASSES) * max(class_mass[label], 1e-12))
+        for label in CLASSES
+    }
+    result = np.asarray(
+        [
+            weight * class_factor[str(row.get("label"))]
+            for row, weight in zip(rows, video_balanced)
+        ],
+        dtype=np.float64,
+    )
+    return result / max(float(result.mean()), 1e-12)
+
+
 def _fit(
     rows: list[dict[str, Any]],
     *,
@@ -121,12 +165,7 @@ def _fit(
     weights = np.zeros((len(CLASSES), len(FEATURES)), dtype=np.float64)
     bias = np.zeros(len(CLASSES), dtype=np.float64)
     one_hot = np.eye(len(CLASSES), dtype=np.float64)[y]
-    class_weight = {
-        CLASS_TO_INDEX[label]: len(rows) / (len(CLASSES) * count)
-        for label, count in counts.items()
-    }
-    sample_weight = np.asarray([class_weight[int(index)] for index in y], dtype=np.float64)
-    sample_weight = sample_weight / max(sample_weight.mean(), 1e-12)
+    sample_weight = _sample_weights(rows)
 
     for _ in range(max(1, int(epochs))):
         probabilities = _softmax(x @ weights.T + bias)
@@ -224,11 +263,20 @@ def train(
         minimum_probability=minimum_probability,
     )
 
+    interval_count = len(
+        {
+            (str(row.get("video_id")), int(row.get("truth_interval_index", -1)))
+            for row in rows
+        }
+    )
     report = {
         "contract": "V1-V5 development corpus; leave-one-video-out grouped cross-validation; V6-V7 final validation only",
         "development_video_ids": video_ids,
         "label_counts": dict(sorted(overall_counts.items())),
+        "truth_intervals": interval_count,
         "minimum_probability": float(minimum_probability),
+        "feature_time_basis": "FPS-normalized physical time",
+        "training_weighting": "equal interval mass -> equal video mass -> class balance",
         "grouped_cross_validation": {
             "aggregate": cv_report,
             "folds": fold_reports,
@@ -249,14 +297,16 @@ def train(
         "bias": [round(float(value), 10) for value in bias.tolist()],
         "minimum_probability": round(float(minimum_probability), 6),
         "training": {
-            "algorithm": "class_balanced_multinomial_logistic_regression_full_batch_gradient_descent",
+            "algorithm": "interval_video_class_balanced_multinomial_logistic_regression",
             "learning_rate": float(learning_rate),
             "epochs": int(epochs),
             "l2": float(l2),
             "rows": len(rows),
+            "truth_intervals": interval_count,
             "development_video_ids": video_ids,
             "development_clips": ["V1", "V2", "V3", "V4", "V5"],
             "grouped_cross_validation": "leave_one_video_out",
+            "feature_time_basis": "FPS-normalized physical time",
             "final_validation_clips": ["V6", "V7"],
         },
         "development_report": report,
