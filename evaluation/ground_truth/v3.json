@@ -1,6 +1,6 @@
 {
   "version": "courtflux_p2_gt_v1",
-  "annotation_status": "pass_a_frozen_human_windows",
+  "annotation_status": "gate_a_control_and_gate_b_shot_events_frozen",
   "evaluation_ready": true,
   "video": {
     "source": "https://www.youtube.com/watch?v=Vr4105n-cPM",
@@ -135,10 +135,47 @@
       "frame_end": 688,
       "source_time_start_sec": 22.0,
       "source_time_end_sec": 23.0,
-      "human_note": "no human control-state label supplied; excluded rather than guessed"
+      "human_note": "no human control-state label supplied; excluded rather than inferred"
     }
   ],
-  "events": [],
+  "events": [
+    {
+      "event_type": "shot_attempt",
+      "frame_start": 120,
+      "frame_end": 239,
+      "outcome": "made",
+      "team_id": null,
+      "actor_track_id": null,
+      "secondary_track_id": null,
+      "source_time_start_sec": 4.0,
+      "source_time_end_sec": 8.0,
+      "human_note": "made shot; black team"
+    },
+    {
+      "event_type": "shot_attempt",
+      "frame_start": 420,
+      "frame_end": 449,
+      "outcome": "made",
+      "team_id": null,
+      "actor_track_id": null,
+      "secondary_track_id": null,
+      "source_time_start_sec": 14.0,
+      "source_time_end_sec": 15.0,
+      "human_note": "dunk; made"
+    },
+    {
+      "event_type": "shot_attempt",
+      "frame_start": 689,
+      "frame_end": 778,
+      "outcome": "made",
+      "team_id": null,
+      "actor_track_id": null,
+      "secondary_track_id": null,
+      "source_time_start_sec": 23.0,
+      "source_time_end_sec": 26.0,
+      "human_note": "alley-oop made finish; exact release/finish subwindow was not supplied, so Gate B uses the existing coarse human sequence window"
+    }
+  ],
   "unresolved_event_windows": [],
   "human_source_notes": [
     "0-4 non game play",
@@ -154,11 +191,13 @@
   ],
   "notes": [
     "Gate A V3 Pass A frozen from blind human annotation.",
+    "Gate B shot-event rows were transcribed from the pre-existing human annotations: made shot at 4-8s, made dunk at 14-15s, and made alley-oop finish in the coarse 23-26s sequence window.",
+    "The Gate B event transcription does not derive labels from P2 predictions; the underlying human shot/made observations predate Gate B scoring.",
     "Canonical source run: evaluation/runs/20260917_142607_777551.",
     "Run completed with Jersey OFF and neutral match config; home_team and away_team were null.",
     "video_fps=29.97 from canonical run summary; analysis_fps=26.776 is processing throughput and is not used for temporal GT conversion.",
     "Human colour/team notes are preserved as context only; team_id remains null for neutral V1-V5 clips.",
     "13-14s and 22-23s were not labelled by the human reviewer and are excluded rather than inferred.",
-    "The alley-oop made finish is retained as human context only; Gate A does not infer an additional shot_flight interval that was not explicitly annotated."
+    "The alley-oop made finish remains pass_flight for Gate A control scoring while also being a shot_attempt event for Gate B; control-state and event semantics are evaluated independently."
   ]
 }
