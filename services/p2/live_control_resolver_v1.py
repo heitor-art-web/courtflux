@@ -3,6 +3,7 @@ from __future__ import annotations
 import math
 from typing import Any
 
+from core.ball_state import BallStateStatus
 from core.basketball_event import BallControlState
 from services.p2.engine_v1 import P2EngineV1 as _BaseP2EngineV1
 
@@ -15,20 +16,21 @@ class LiveControlP2EngineV1(_BaseP2EngineV1):
     resolves the published control state afterwards. The raw tracker decision is retained
     as ``tracker_control_state`` for auditability.
 
-    Resolver policy:
-    - confirmed/active shot evidence has precedence and latches SHOT_FLIGHT;
-    - supported pass evidence with a distinct receiver latches PASS_FLIGHT;
-    - while release/airborne classification is still maturing, a recent confirmed owner
-      preserves POSSESSED continuity instead of immediately publishing UNKNOWN/LOOSE;
-    - transient gameplay-eligibility gaps preserve the last published state for the same
-      horizon already used for recent shot-actor attribution, without advancing trackers or
-      emitting events;
-    - long gameplay gaps and temporal discontinuities still reset all temporal state.
+    Release flight has an internal AIRBORNE_UNCLASSIFIED phase which is never published as
+    Gate-A truth. SHOT classification always has precedence. PASS requires a distinct
+    receiver plus direct ball motion converging toward that receiver. While airborne is
+    still unclassified, recent-owner continuity remains published as POSSESSED rather than
+    falling back immediately to UNKNOWN/LOOSE.
     """
+
+    AIRBORNE_UNCLASSIFIED = "airborne_unclassified"
+    AIRBORNE_SHOT = "shot_flight"
+    AIRBORNE_PASS = "pass_flight"
 
     SHOT_PREFLIGHT_MAX_DISTANCE_NORM = 8.0
     LIVE_CONTROL_POLICY = (
-        "causal_live_resolver_v1;shot_precedence;pass_requires_distinct_receiver;"
+        "causal_live_resolver_v2;internal_airborne_unclassified;shot_first;"
+        "pass_requires_distinct_receiver_and_converging_direct_trajectory;"
         "recent_owner_continuity;shot_preflight_above_distance<=8;"
         "gameplay_gap_grace_uses_recent_shot_actor_horizon;events_unchanged"
     )
@@ -41,6 +43,11 @@ class LiveControlP2EngineV1(_BaseP2EngineV1):
         self._live_control_latch: BallControlState | None = None
         self._live_ineligible_frames = 0
         self._live_seen_reset_count = int(self._reset_count)
+        self._airborne_state: str | None = None
+        self._previous_direct_ball_position: tuple[float, float] | None = None
+        self._previous_direct_ball_frame: int | None = None
+        self._receiver_trajectory_track_id: int | None = None
+        self._receiver_trajectory_converging = False
         # Normal runtime reuses the existing recent-shot-actor continuity horizon. When
         # reset_after_ineligible_frames is explicitly configured, preserve the legacy
         # boundary: reset on frame N means only N-1 frames may be held as grace.
@@ -54,6 +61,11 @@ class LiveControlP2EngineV1(_BaseP2EngineV1):
         self._live_control_state = BallControlState.UNKNOWN
         self._live_control_source = f"reset:{reason}"
         self._live_control_latch = None
+        self._airborne_state = None
+        self._previous_direct_ball_position = None
+        self._previous_direct_ball_frame = None
+        self._receiver_trajectory_track_id = None
+        self._receiver_trajectory_converging = False
 
     @staticmethod
     def _semantic_shot_signal(rows: list[dict[str, Any]]) -> bool:
@@ -92,6 +104,30 @@ class LiveControlP2EngineV1(_BaseP2EngineV1):
             return float(position[0]), float(position[1])
         except (TypeError, ValueError, IndexError):
             return None
+
+    @staticmethod
+    def _direct_ball_position(frame_state: Any) -> tuple[float, float] | None:
+        ball_state = getattr(frame_state, "ball_state", None)
+        if ball_state is None or getattr(ball_state, "status", None) is not BallStateStatus.OBSERVED:
+            return None
+        return LiveControlP2EngineV1._ball_position(frame_state)
+
+    @staticmethod
+    def _player_center(frame_state: Any, track_id: int | None) -> tuple[float, float] | None:
+        if track_id is None:
+            return None
+        for player in list(getattr(frame_state, "player_states", []) or []):
+            if getattr(player, "track_id", None) != track_id:
+                continue
+            bbox = getattr(player, "bbox", None)
+            if not isinstance(bbox, (list, tuple)) or len(bbox) < 4:
+                return None
+            try:
+                x1, y1, x2, y2 = [float(value) for value in bbox[:4]]
+            except (TypeError, ValueError):
+                return None
+            return (x1 + x2) / 2.0, (y1 + y2) / 2.0
+        return None
 
     @staticmethod
     def _rim_boxes(frame_state: Any) -> list[tuple[float, float, float, float]]:
@@ -149,6 +185,84 @@ class LiveControlP2EngineV1(_BaseP2EngineV1):
             "signal": signal,
         }
 
+    def _receiver_trajectory(
+        self,
+        *,
+        frame_state: Any,
+        possession: dict[str, Any],
+        flight_active: bool,
+        receiver_evidence: bool,
+    ) -> dict[str, Any]:
+        frame_id = int(getattr(frame_state, "frame_id", 0))
+        raw_receiver = possession.get("candidate_track_id")
+        receiver_track_id: int | None = None
+        try:
+            if raw_receiver is not None:
+                receiver_track_id = int(raw_receiver)
+        except (TypeError, ValueError):
+            receiver_track_id = None
+
+        current_ball = self._direct_ball_position(frame_state)
+        receiver_center = self._player_center(frame_state, receiver_track_id)
+        previous_ball = self._previous_direct_ball_position
+        previous_frame = self._previous_direct_ball_frame
+        consecutive_direct = bool(
+            current_ball is not None
+            and previous_ball is not None
+            and previous_frame is not None
+            and frame_id == int(previous_frame) + 1
+        )
+
+        previous_distance = None
+        current_distance = None
+        projection = None
+        converging = False
+        if (
+            flight_active
+            and receiver_evidence
+            and receiver_track_id is not None
+            and receiver_center is not None
+            and consecutive_direct
+            and current_ball is not None
+            and previous_ball is not None
+        ):
+            rx, ry = receiver_center
+            px, py = previous_ball
+            cx, cy = current_ball
+            previous_distance = math.hypot(rx - px, ry - py)
+            current_distance = math.hypot(rx - cx, ry - cy)
+            move_x = cx - px
+            move_y = cy - py
+            target_x = rx - px
+            target_y = ry - py
+            projection = move_x * target_x + move_y * target_y
+            converging = bool(current_distance < previous_distance and projection > 0.0)
+
+        self._receiver_trajectory_track_id = receiver_track_id
+        self._receiver_trajectory_converging = converging
+        return {
+            "receiver_track_id": receiver_track_id,
+            "receiver_center_available": receiver_center is not None,
+            "consecutive_direct_ball_observations": consecutive_direct,
+            "previous_distance_px": (
+                None if previous_distance is None else round(float(previous_distance), 3)
+            ),
+            "current_distance_px": (
+                None if current_distance is None else round(float(current_distance), 3)
+            ),
+            "directional_projection": None if projection is None else round(float(projection), 3),
+            "converging": converging,
+        }
+
+    def _remember_direct_ball(self, frame_state: Any) -> None:
+        position = self._direct_ball_position(frame_state)
+        if position is None:
+            self._previous_direct_ball_position = None
+            self._previous_direct_ball_frame = None
+            return
+        self._previous_direct_ball_position = position
+        self._previous_direct_ball_frame = int(getattr(frame_state, "frame_id", 0))
+
     def _recent_owner_context(
         self,
         *,
@@ -201,15 +315,22 @@ class LiveControlP2EngineV1(_BaseP2EngineV1):
         )
         semantic_shot = self._semantic_shot_signal(semantic_evidence)
         preflight = self._shot_preflight(frame_state)
+        # SHOT is evaluated before PASS. Receiver evidence never suppresses the frozen
+        # geometry signal; this deliberately removes the old pass-first ambiguity.
         preflight_shot = bool(
-            tracker_state is BallControlState.UNKNOWN
-            and flight_active
-            and not receiver_evidence
+            flight_active
+            and tracker_state is not BallControlState.POSSESSED
             and preflight["signal"]
         )
         recent_owner, recent_owner_age = self._recent_owner_context(
             possession=possession,
             frame_id=frame_id,
+        )
+        receiver_trajectory = self._receiver_trajectory(
+            frame_state=frame_state,
+            possession=possession,
+            flight_active=flight_active,
+            receiver_evidence=receiver_evidence,
         )
 
         resolver_diag = {
@@ -222,6 +343,8 @@ class LiveControlP2EngineV1(_BaseP2EngineV1):
             "shot_event_frame": shot_event_frame,
             "semantic_shot_signal": semantic_shot,
             "shot_preflight": preflight,
+            "receiver_trajectory": receiver_trajectory,
+            "internal_airborne_state": self._airborne_state,
         }
 
         shot_signal = bool(
@@ -232,6 +355,7 @@ class LiveControlP2EngineV1(_BaseP2EngineV1):
             or preflight_shot
         )
         if shot_signal:
+            self._airborne_state = self.AIRBORNE_SHOT
             self._live_control_latch = BallControlState.SHOT_FLIGHT
             if shot_active:
                 source = "shot_tracker_active"
@@ -243,33 +367,50 @@ class LiveControlP2EngineV1(_BaseP2EngineV1):
                 source = "frozen_shot_preflight"
             else:
                 source = "tracker_shot_flight"
+            resolver_diag["internal_airborne_state"] = self._airborne_state
             return BallControlState.SHOT_FLIGHT, source, resolver_diag
 
         if self._live_control_latch is BallControlState.SHOT_FLIGHT:
             if shot_active or flight_active:
+                self._airborne_state = self.AIRBORNE_SHOT
+                resolver_diag["internal_airborne_state"] = self._airborne_state
                 return BallControlState.SHOT_FLIGHT, "latched_shot_flight", resolver_diag
             self._live_control_latch = None
+            self._airborne_state = None
 
         pass_signal = bool(
-            tracker_state is BallControlState.PASS_FLIGHT
-            and flight_active
+            flight_active
             and receiver_evidence
+            and bool(receiver_trajectory.get("converging", False))
         )
         if pass_signal:
+            self._airborne_state = self.AIRBORNE_PASS
             self._live_control_latch = BallControlState.PASS_FLIGHT
-            return BallControlState.PASS_FLIGHT, "distinct_receiver_pass", resolver_diag
+            resolver_diag["internal_airborne_state"] = self._airborne_state
+            return BallControlState.PASS_FLIGHT, "receiver_trajectory_pass", resolver_diag
 
         if self._live_control_latch is BallControlState.PASS_FLIGHT:
             if flight_active and tracker_state is not BallControlState.POSSESSED:
+                self._airborne_state = self.AIRBORNE_PASS
+                resolver_diag["internal_airborne_state"] = self._airborne_state
                 return BallControlState.PASS_FLIGHT, "latched_pass_flight", resolver_diag
             self._live_control_latch = None
+            self._airborne_state = None
 
         if (
             tracker_state is BallControlState.POSSESSED
             and possession.get("current_track_id") is not None
         ):
             self._live_control_latch = None
+            self._airborne_state = None
+            resolver_diag["internal_airborne_state"] = None
             return BallControlState.POSSESSED, "tracker_possessed", resolver_diag
+
+        if flight_active:
+            self._airborne_state = self.AIRBORNE_UNCLASSIFIED
+            resolver_diag["internal_airborne_state"] = self._airborne_state
+            if recent_owner:
+                return BallControlState.POSSESSED, "airborne_unclassified_owner_continuity", resolver_diag
 
         if recent_owner and tracker_state in {
             BallControlState.UNKNOWN,
@@ -278,6 +419,9 @@ class LiveControlP2EngineV1(_BaseP2EngineV1):
         }:
             return BallControlState.POSSESSED, "recent_owner_continuity", resolver_diag
 
+        if not flight_active:
+            self._airborne_state = None
+            resolver_diag["internal_airborne_state"] = None
         return tracker_state, "tracker_fallback", resolver_diag
 
     def _apply_live_override(
@@ -303,8 +447,9 @@ class LiveControlP2EngineV1(_BaseP2EngineV1):
         possession["live_control_latch"] = (
             None if self._live_control_latch is None else self._live_control_latch.value
         )
+        possession["internal_airborne_state"] = self._airborne_state
         p2["possession"] = possession
-        p2["behavior_revision"] = "control_state_v5_live_resolver"
+        p2["behavior_revision"] = "control_state_v6_airborne_classifier"
         p2["eligibility_policy"] = (
             "court_state_gameplay_present_with_recent_shot_actor_horizon_grace"
         )
@@ -313,6 +458,7 @@ class LiveControlP2EngineV1(_BaseP2EngineV1):
             "source": str(source),
             "policy": self.LIVE_CONTROL_POLICY,
             "latch": None if self._live_control_latch is None else self._live_control_latch.value,
+            "internal_airborne_state": self._airborne_state,
             "gameplay_continuity_grace_frames": int(self.gameplay_continuity_grace_frames),
             "ineligible_gap_frames": int(self._live_ineligible_frames),
             **dict(resolver_diag or {}),
@@ -412,6 +558,7 @@ class LiveControlP2EngineV1(_BaseP2EngineV1):
         diagnostics = getattr(result, "diagnostics", None)
         p2 = diagnostics.get("p2") if isinstance(diagnostics, dict) else None
         if not isinstance(p2, dict):
+            self._remember_direct_ball(result)
             return result
         self._sync_live_reset(p2)
         semantic_evidence = self._semantic_evidence(result)
@@ -426,4 +573,5 @@ class LiveControlP2EngineV1(_BaseP2EngineV1):
             source=source,
             resolver_diag=resolver_diag,
         )
+        self._remember_direct_ball(result)
         return result
