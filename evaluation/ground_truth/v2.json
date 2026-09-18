@@ -33,6 +33,31 @@
     "video_fps": 50.0,
     "note": "Metadata only. Human GT was authored blind from video and was not bootstrapped from P2 predictions."
   },
+  "human_kit_audit": {
+    "version": "courtflux_p2_human_kit_audit_v1",
+    "review_scope": "Gate C team-colour context only; does not rewrite frozen Gate A/B labels",
+    "prediction_blind": true,
+    "audit_status": "partial_existing_gt_only_not_reaudited_in_2026_09_18_kit_pass",
+    "classifier_feature_policy": "only jersey_body colours explicitly supported by human notes are configured; shorts and lettering remain null rather than guessed",
+    "segments": [
+      {
+        "source_time_start_sec": 0.0,
+        "source_time_end_sec": 30.0,
+        "team_a": {
+          "name": null,
+          "shorts": null,
+          "jersey_body": ["Red"],
+          "lettering": null
+        },
+        "team_b": {
+          "name": null,
+          "shorts": null,
+          "jersey_body": ["White"],
+          "lettering": null
+        }
+      }
+    ]
+  },
   "control_intervals": [
     {
       "state": "shot_flight",
@@ -221,7 +246,8 @@
   ],
   "notes": [
     "Pass A is frozen using human windows rather than millisecond/frame-exact labels.",
-    "Team colours are retained only as human notes because V2 is a neutral clip and team_id must remain null.",
+    "Team colours are retained only as human notes because V2 is a neutral clip and event team_id remains null.",
+    "V2 was not part of the 2026-09-18 detailed kit re-audit; human_kit_audit records only the red/white torso evidence already supported by prior blind GT.",
     "The 21s annotation is scored as pass_flight for Gate A; the word 'missed' is preserved verbatim as a note and is not converted into a shot outcome.",
     "At 30s the human observed two passes and a made dunk inside one coarse second. Exact pass/shot control-state boundaries were not supplied, so frame 1500 is excluded from Gate A control scoring rather than guessed.",
     "The two passes around 30s are preserved as an unresolved pass_sequence with expected_count=2; this is context only and does not invent individual pass event timing.",
