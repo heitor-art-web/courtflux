@@ -3,6 +3,10 @@ from __future__ import annotations
 from collections.abc import Mapping
 from typing import Any
 
+from core.p4_court_coordinates import (
+    P4_FIBA_COURT_COORDINATE_SYSTEM,
+    canonicalize_upstream_point,
+)
 from core.p4_spatial_contract import (
     P4_UPSTREAM_COURT_COORDINATE_SYSTEM,
     SpatialFrame,
@@ -43,6 +47,15 @@ def _camera_geometry_diagnostics(frame_state: Any) -> dict[str, Any]:
     return {key: camera[key] for key in allowed if key in camera}
 
 
+def _canonical_court_position(value: Any) -> tuple[float, float] | None:
+    if value is None:
+        return None
+    return canonicalize_upstream_point(
+        value,
+        source_coordinate_system=P4_UPSTREAM_COURT_COORDINATE_SYSTEM,
+    ).as_tuple()
+
+
 def spatial_frame_from_p1(
     frame_state: Any,
     *,
@@ -52,9 +65,9 @@ def spatial_frame_from_p1(
     """Adapt canonical P1 state into the P4 spatial v1 contract.
 
     The adapter reads only frame timing/geometry, ``court_state``,
-    ``player_states`` and P1 camera diagnostics. P2/P3/tactical fields on the input
-    object are intentionally ignored so the spatial foundation can be reproduced
-    without basketball truth.
+    ``player_states`` and P1 camera diagnostics. P1 metric court points are explicitly
+    bridged into the P4 canonical FIBA coordinate system. P2/P3/tactical fields on the
+    input object are intentionally ignored.
     """
 
     frame_id = int(getattr(frame_state, "frame_id"))
@@ -75,6 +88,12 @@ def spatial_frame_from_p1(
         if court_state is not None
         else {}
     )
+    geometry_provenance["upstream_court_coordinate_system"] = (
+        P4_UPSTREAM_COURT_COORDINATE_SYSTEM
+    )
+    geometry_provenance["canonical_court_coordinate_system"] = (
+        P4_FIBA_COURT_COORDINATE_SYSTEM
+    )
     camera_diagnostics = _camera_geometry_diagnostics(frame_state)
     if camera_diagnostics:
         geometry_provenance["p1_camera_diagnostics"] = camera_diagnostics
@@ -86,7 +105,7 @@ def spatial_frame_from_p1(
         reprojection_rmse_px=getattr(court_state, "reprojection_rmse_px", None),
         homography_matrix=homography_matrix,
         court_polygon_px=court_polygon,
-        court_coordinate_system=P4_UPSTREAM_COURT_COORDINATE_SYSTEM,
+        court_coordinate_system=P4_FIBA_COURT_COORDINATE_SYSTEM,
         projection_uncertainty_m=None,
         homography_age_frames=None,
         provenance=geometry_provenance,
@@ -109,7 +128,9 @@ def spatial_frame_from_p1(
                 local_team_id=local_team_id,
                 local_team_confidence=local_team_confidence,
                 image_center_px=getattr(player, "center_px"),
-                court_position_m=getattr(player, "court_position_m", None),
+                court_position_m=_canonical_court_position(
+                    getattr(player, "court_position_m", None)
+                ),
                 observation_confidence=getattr(player, "confidence"),
                 observation_uncertainty=getattr(player, "uncertainty"),
                 position_confidence=None,
@@ -128,6 +149,8 @@ def spatial_frame_from_p1(
         provenance={
             "adapter": "services.p4.spatial_adapter.spatial_frame_from_p1",
             "source_layer": "P1",
+            "upstream_court_coordinate_system": P4_UPSTREAM_COURT_COORDINATE_SYSTEM,
+            "canonical_court_coordinate_system": P4_FIBA_COURT_COORDINATE_SYSTEM,
             "p2_consumed": False,
             "p3_consumed": False,
             "tactical_semantics": False,
