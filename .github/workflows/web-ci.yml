@@ -2,7 +2,7 @@ name: Web quality
 
 on:
   push:
-    branches: [main, p2-rebuilt, p3_foundation]
+    branches: [main, p2-rebuilt, p3_foundation, p4_spatial_foundation]
     paths:
       - "web/**"
       - "package.json"
