@@ -1,0 +1,15 @@
+{
+  "metadata": {
+    "home_team": "green",
+    "away_team": "blue",
+    "active_kits": {
+      "green": "current",
+      "blue": "current"
+    },
+    "evaluation_scope": "p2_gate_c_development_v5"
+  },
+  "teams": {
+    "green": {"kits": {"current": ["Green"]}, "roster": {}},
+    "blue": {"kits": {"current": ["Blue"]}, "roster": {}}
+  }
+}
