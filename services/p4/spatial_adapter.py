@@ -27,6 +27,22 @@ def _optional_local_team(
     return str(value), None
 
 
+def _camera_geometry_diagnostics(frame_state: Any) -> dict[str, Any]:
+    camera = dict((getattr(frame_state, "diagnostics", {}) or {}).get("camera", {}) or {})
+    allowed = (
+        "valid",
+        "source",
+        "anchor_count",
+        "inlier_count",
+        "reprojection_rmse_px",
+        "model_id",
+        "keypoint_schema",
+        "keypoint_backend",
+        "error",
+    )
+    return {key: camera[key] for key in allowed if key in camera}
+
+
 def spatial_frame_from_p1(
     frame_state: Any,
     *,
@@ -35,9 +51,10 @@ def spatial_frame_from_p1(
 ) -> SpatialFrame:
     """Adapt canonical P1 state into the P4 spatial v1 contract.
 
-    The adapter reads only frame timing/geometry, ``court_state`` and
-    ``player_states``. P2/P3/tactical fields on the input object are intentionally
-    ignored so the spatial foundation can be reproduced without basketball truth.
+    The adapter reads only frame timing/geometry, ``court_state``,
+    ``player_states`` and P1 camera diagnostics. P2/P3/tactical fields on the input
+    object are intentionally ignored so the spatial foundation can be reproduced
+    without basketball truth.
     """
 
     frame_id = int(getattr(frame_state, "frame_id"))
@@ -53,6 +70,15 @@ def spatial_frame_from_p1(
         if court_state is not None
         else getattr(frame_state, "court_polygon", None)
     )
+    geometry_provenance = (
+        dict(getattr(court_state, "provenance", {}) or {})
+        if court_state is not None
+        else {}
+    )
+    camera_diagnostics = _camera_geometry_diagnostics(frame_state)
+    if camera_diagnostics:
+        geometry_provenance["p1_camera_diagnostics"] = camera_diagnostics
+
     geometry = SpatialGeometryEvidence(
         geometry_valid=bool(getattr(court_state, "geometry_valid", False)),
         court_visible=bool(getattr(court_state, "court_visible", False)),
@@ -63,11 +89,7 @@ def spatial_frame_from_p1(
         court_coordinate_system=P4_UPSTREAM_COURT_COORDINATE_SYSTEM,
         projection_uncertainty_m=None,
         homography_age_frames=None,
-        provenance=(
-            dict(getattr(court_state, "provenance", {}) or {})
-            if court_state is not None
-            else {}
-        ),
+        provenance=geometry_provenance,
     )
 
     players: list[SpatialPlayerObservation] = []

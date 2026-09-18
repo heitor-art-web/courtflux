@@ -32,6 +32,16 @@ from .p3_contract import (
     validate_source_event_batch,
 )
 from .p3_review import HumanReviewState, P3HumanReview, ReviewCorrectionType
+from .p4_geometry_quality import (
+    GeometryQualityObservation,
+    GeometryQualityPolicy,
+    GeometryQualityState,
+    GeometryQualityTracker,
+    P4_GEOMETRY_QUALITY_CONTRACT_VERSION,
+    P4_GEOMETRY_QUALITY_POLICY_VERSION,
+    P4GeometryQualityError,
+    p4_geometry_quality_manifest,
+)
 from .p4_spatial_contract import (
     P4_SPATIAL_CONTRACT_VERSION,
     P4_SPATIAL_FORBIDDEN_SEMANTICS,
@@ -78,6 +88,14 @@ __all__ = [
     "HumanReviewState",
     "P3HumanReview",
     "ReviewCorrectionType",
+    "GeometryQualityObservation",
+    "GeometryQualityPolicy",
+    "GeometryQualityState",
+    "GeometryQualityTracker",
+    "P4_GEOMETRY_QUALITY_CONTRACT_VERSION",
+    "P4_GEOMETRY_QUALITY_POLICY_VERSION",
+    "P4GeometryQualityError",
+    "p4_geometry_quality_manifest",
     "P4_SPATIAL_CONTRACT_VERSION",
     "P4_SPATIAL_FORBIDDEN_SEMANTICS",
     "P4_SPATIAL_FRAME_FIELDS",
