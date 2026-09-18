@@ -101,6 +101,26 @@ test("mobile menu closes after same-page anchor navigation", async ({ page }) =>
   await expect(mobile).not.toBeVisible();
 });
 
+test("contextual anchors clear the sticky header at mobile breakpoints", async ({ page }) => {
+  for (const width of [320, 430, 820]) {
+    await page.setViewportSize({ width, height: 844 });
+    await page.goto("/basketball-video-analysis");
+
+    const header = page.locator("header");
+    const contextual = page.getByRole("navigation", { name: "Basketball video analysis navigation" });
+    await contextual.getByRole("link", { name: "Capabilities" }).click();
+    await expect(page).toHaveURL(/#capabilities$/);
+
+    const target = page.locator("#capabilities");
+    await expect(target).toBeVisible();
+    await expect.poll(async () => {
+      const [headerBox, targetBox] = await Promise.all([header.boundingBox(), target.boundingBox()]);
+      if (!headerBox || !targetBox) return -999;
+      return Math.round(targetBox.y - (headerBox.y + headerBox.height));
+    }).toBeGreaterThanOrEqual(-1);
+  }
+});
+
 test("skip link moves focus to main content", async ({ page }) => {
   await page.goto("/");
   await page.keyboard.press("Tab");

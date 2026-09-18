@@ -19,7 +19,7 @@ export const metadata: Metadata = {
     template: "%s | CourtFlux",
   },
   description:
-    "CourtFlux is basketball video analysis software for coaches, teams and academies, turning ordinary game film into structured player, ball and spatial intelligence.",
+    "CourtFlux is basketball video analysis software for coaches, teams and academies, turning ordinary game film into structured player, ball and game intelligence.",
   authors: [{ name: "CourtFlux" }],
   creator: "CourtFlux",
   publisher: "CourtFlux",
