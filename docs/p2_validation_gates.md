@@ -4,7 +4,14 @@
 
 P2 exists to provide a basketball timeline that P3 can aggregate, search, clip and explain. Validation therefore measures whether P2 understands the semantic sequence of the play, not whether every human interval boundary is reproduced frame-perfectly.
 
-V1–V5 remain validation-only clips. They must not be used to train, calibrate or select AirborneClassifierV1 features, weights or confidence thresholds.
+The data contract is now:
+
+- V1–V5: development/training corpus for AirborneClassifierV1;
+- grouped leave-one-video-out cross-validation is used inside V1–V5;
+- the final AirborneClassifierV1 artefact is fitted on all V1–V5 only after development choices are frozen;
+- V6–V7: new, unseen validation videos for the final P2 gates.
+
+V6–V7 must not be used to select features, weights, model family, confidence threshold or gate thresholds.
 
 The validation order remains A → B → C → D.
 
@@ -24,7 +31,7 @@ Frame accuracy, dominant-frame accuracy and exact boundary overlap are diagnosti
 
 ### Required checks
 
-Frozen before AirborneClassifierV1 validation:
+Frozen before V6–V7 validation:
 
 - GT-window prediction coverage: aggregate >= 0.98; every clip >= 0.95.
 - Core interval detection recall (`possessed`, `pass_flight`, `shot_flight`): aggregate >= 0.70.
@@ -125,8 +132,9 @@ Track IDs may change. The evaluated identity is the stable game-player entity, n
 
 ## Gate policy
 
-- Thresholds are frozen before evaluating a new validation implementation.
-- Development clips and validation clips are disjoint.
-- V1–V5 are validation-only for Gate A and cannot be used for AirborneClassifierV1 training or confidence calibration.
+- Gate thresholds are frozen before V6–V7 evaluation.
+- Development and final validation videos are disjoint.
+- V1–V5 may be used for AirborneClassifierV1 development, grouped CV and final fitting.
+- V6–V7 are final validation-only and must remain untouched until model and thresholds are frozen.
 - A failed gate triggers remediation of the responsible layer; thresholds are not changed in response to observed validation scores.
 - P2 exits validation when Gates A–D pass their applicable contracts with reviewed GT.
