@@ -40,7 +40,7 @@ Frozen before final Exit Gate validation:
 - Core interval detection recall (`possessed`, `pass_flight`, `shot_flight`): aggregate >= 0.70.
 - Possessed interval detection recall: aggregate >= 0.70.
 - Pass interval detection recall: aggregate >= 0.60.
-- Shot interval detection recall: aggregate >= 0.70.
+- Shot interval detection recall >= 0.70.
 - Semantic transition **order accuracy**, conditioned on both adjacent GT episodes being correctly detected: aggregate >= 0.90.
 - Core unresolved interval rate: aggregate <= 0.25.
 - PASS truth resolved as SHOT: <= 0.15.
@@ -140,6 +140,27 @@ Required contract:
 - every evaluation clip must retain >= 0.70 attribution accuracy.
 
 Unattributed is reported separately from wrongly attributed.
+
+### Team identity and kit-context contract
+
+Gate C evaluates **team identity**, not colour labels. Human scoring uses stable `team_a` / `team_b` slots inside the declared runtime context; colour names are evidence used to configure the visual team classifier and must never become the semantic team identity by themselves.
+
+Each V1–V5 GT file may contain a prediction-blind `human_kit_audit` with:
+
+- source-time segment boundaries;
+- team slot (`team_a` / `team_b`);
+- jersey-body colours;
+- shorts colours;
+- lettering/number colours;
+- real team name only when the reviewer explicitly supplied it.
+
+For the current TeamOnlyAnalyzer contract, **jersey-body colours are the configurable classifier evidence**. Shorts and lettering are retained as human context and must not be silently injected as torso colours.
+
+When a source clip changes matchup or equipment context, Gate C must not force one static colour configuration over the whole clip. Colour-stable runtime segments are evaluated separately and aggregated back to the original video for the per-clip Gate-C check. V4 therefore uses three runtime segments (0–15 s, 15–27 s, 27–30 s) while remaining one `V4` result for thresholding.
+
+V3 is a player-highlight clip whose Team-A torso varies Black/Red → Red → Black while Team B remains White. Its development runtime config uses the prediction-blind union of the reviewed Team-A torso colours, while the exact temporal variants remain recorded in `v3.json`.
+
+Human kit context and runtime colour support are separate concerns. A colour written in GT (for example Orange) records what the reviewer observed; it does **not** imply that the current classifier implementation already models that colour correctly. Colour-capability validation occurs before Gate C is closed and before the final P2 freeze.
 
 ---
 
