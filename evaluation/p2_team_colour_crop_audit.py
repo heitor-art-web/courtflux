@@ -38,11 +38,21 @@ def _video_source_from_run_config(run_dir: Path) -> str | None:
     payload = json.loads(run_config_path.read_text(encoding="utf-8"))
     if not isinstance(payload, dict):
         return None
-    config = payload.get("config")
-    if not isinstance(config, dict):
-        return None
-    source = str(config.get("video_source") or "").strip()
-    return source or None
+
+    # Canonical RunDiagnostics format stores video_source at the top level.
+    # Keep nested fallbacks for older/ad-hoc run metadata variants.
+    candidates: list[Any] = [payload.get("video_source")]
+    for key in ("config", "input", "request"):
+        nested = payload.get(key)
+        if isinstance(nested, dict):
+            candidates.append(nested.get("video_source"))
+            candidates.append(nested.get("video"))
+
+    for value in candidates:
+        source = str(value or "").strip()
+        if source:
+            return source
+    return None
 
 
 def _resolve_video_from_source(source: str, *, run_dir: Path) -> Path | None:
@@ -101,7 +111,7 @@ def _video_path(summary_path: Path, run_dir: Path) -> tuple[Path, str | None]:
 
     raise FileNotFoundError(
         f"Could not resolve video for {run_dir}. Tried summary video paths and "
-        "run_config.json config.video_source."
+        "run_config.json video_source (top-level plus legacy nested variants)."
     )
 
 
