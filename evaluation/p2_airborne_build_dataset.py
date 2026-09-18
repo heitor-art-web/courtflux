@@ -8,7 +8,12 @@ if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
 from evaluation.p2_airborne_build_episode_dataset import *  # noqa: F401,F403
-from evaluation.p2_airborne_build_episode_dataset import main
+from evaluation.p2_airborne_build_episode_dataset import (
+    _features_from_existing_row,
+    _finalize_episode,
+    build,
+    main,
+)
 
 
 if __name__ == "__main__":
