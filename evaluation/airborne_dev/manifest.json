@@ -1,72 +1,36 @@
 {
-  "version": "courtflux_airborne_dev_manifest_v1",
-  "policy": "development_only; human_labels_required; video-disjoint train/calibration; V1-V5 forbidden",
+  "version": "courtflux_airborne_dev_manifest_v2",
+  "policy": "V1-V5 are development/training data; grouped cross-validation is video-held-out; final Gate A validation uses new V6-V7 videos only",
   "clips": [
     {
-      "id": "D1",
-      "split": "train",
-      "video_id": "u7tk6obXrPk",
-      "source": "https://www.youtube.com/watch?v=u7tk6obXrPk",
-      "start_time_sec": 762.0,
-      "end_time_sec": 852.0,
-      "gt_file": "evaluation/airborne_dev/ground_truth/d1.json",
-      "run_id": null,
-      "annotation_status": "needs_human_annotation"
+      "id": "V1",
+      "video_id": "hILf-ySowIo",
+      "gt_file": "evaluation/ground_truth/v1.json",
+      "run_id": "20260917_165024_441761"
     },
     {
-      "id": "D2",
-      "split": "train",
-      "video_id": "u7tk6obXrPk",
-      "source": "https://www.youtube.com/watch?v=u7tk6obXrPk",
-      "start_time_sec": 912.0,
-      "end_time_sec": 1002.0,
-      "gt_file": "evaluation/airborne_dev/ground_truth/d2.json",
-      "run_id": null,
-      "annotation_status": "needs_human_annotation"
+      "id": "V2",
+      "video_id": "ULUpcQXsRII",
+      "gt_file": "evaluation/ground_truth/v2.json",
+      "run_id": "20260917_165113_811539"
     },
     {
-      "id": "D3",
-      "split": "train",
-      "video_id": "9-eG-yPvpZU",
-      "source": "https://www.youtube.com/watch?v=9-eG-yPvpZU",
-      "start_time_sec": 708.0,
-      "end_time_sec": 798.0,
-      "gt_file": "evaluation/airborne_dev/ground_truth/d3.json",
-      "run_id": null,
-      "annotation_status": "needs_human_annotation"
+      "id": "V3",
+      "video_id": "Vr4105n-cPM",
+      "gt_file": "evaluation/ground_truth/v3.json",
+      "run_id": "20260917_165223_075513"
     },
     {
-      "id": "D4",
-      "split": "train",
-      "video_id": "9-eG-yPvpZU",
-      "source": "https://www.youtube.com/watch?v=9-eG-yPvpZU",
-      "start_time_sec": 858.0,
-      "end_time_sec": 948.0,
-      "gt_file": "evaluation/airborne_dev/ground_truth/d4.json",
-      "run_id": null,
-      "annotation_status": "needs_human_annotation"
+      "id": "V4",
+      "video_id": "WMWTbS8J2ec",
+      "gt_file": "evaluation/ground_truth/v4.json",
+      "run_id": "20260917_165301_107385"
     },
     {
-      "id": "D5",
-      "split": "calibration",
-      "video_id": "KiqVPGMTMyk",
-      "source": "https://www.youtube.com/watch?v=KiqVPGMTMyk",
-      "start_time_sec": 1083.0,
-      "end_time_sec": 1173.0,
-      "gt_file": "evaluation/airborne_dev/ground_truth/d5.json",
-      "run_id": null,
-      "annotation_status": "needs_human_annotation"
-    },
-    {
-      "id": "D6",
-      "split": "calibration",
-      "video_id": "KiqVPGMTMyk",
-      "source": "https://www.youtube.com/watch?v=KiqVPGMTMyk",
-      "start_time_sec": 1233.0,
-      "end_time_sec": 1323.0,
-      "gt_file": "evaluation/airborne_dev/ground_truth/d6.json",
-      "run_id": null,
-      "annotation_status": "needs_human_annotation"
+      "id": "V5",
+      "video_id": "C-JjAlX2Dyc",
+      "gt_file": "evaluation/ground_truth/v5.json",
+      "run_id": "20260917_165410_762353"
     }
   ]
 }
