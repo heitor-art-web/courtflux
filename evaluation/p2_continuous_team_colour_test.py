@@ -112,6 +112,22 @@ class ContinuousTeamColourTest(unittest.TestCase):
         self.assertLess(result["raw_scores"]["team_b"], 0.30)
         self.assertGreater(result["discriminative_pixel_fraction"], 0.50)
 
+    def test_discriminative_pixels_have_equal_vote_weight_after_affinity_gating(self) -> None:
+        analyzer = self._analyzer(["White", "Blue"], ["Green"])
+        # 600 camera-shifted/desaturated green pixels still clear the affinity gate but
+        # each has lower affinity than the 400 exact-white pixels. Team aggregation must
+        # follow the larger discriminative jersey region rather than affinity mass.
+        green = np.tile(np.array([[105.0, 122.0, 136.0]], dtype=np.float32), (600, 1))
+        white = np.tile(np.array([[255.0, 128.0, 128.0]], dtype=np.float32), (400, 1))
+        lab_pixels = np.concatenate([green, white], axis=0)
+
+        scores, _, evidence_fraction, discriminative_count = analyzer._team_scores(lab_pixels)
+
+        self.assertEqual(discriminative_count, 1000)
+        self.assertAlmostEqual(evidence_fraction, 1.0)
+        self.assertAlmostEqual(scores["team_b"], 0.6, places=6)
+        self.assertAlmostEqual(scores["team_a"], 0.4, places=6)
+
     def test_ambiguous_pixels_can_abstain_instead_of_forcing_team(self) -> None:
         analyzer = self._analyzer(["Red"], ["Orange"])
         crop = self._solid_rgb((135, 135, 135))
