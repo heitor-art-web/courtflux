@@ -7,8 +7,9 @@
   --cf-line: rgba(10, 23, 34, 0.13);
   --cf-orange: #b94700;
   --cf-orange-bright: #ed6a19;
+  --cf-orange-dark: #8e3500;
   --cf-night: #06131f;
-  --cf-focus: rgba(237, 106, 25, 0.82);
+  --cf-focus: #b94700;
   --cf-radius-card: 16px;
   --cf-radius-panel: 24px;
   --cf-space-section: clamp(84px, 8vw, 108px);
@@ -62,28 +63,41 @@
   scroll-margin-top: var(--cf-scroll-offset-standard);
 }
 
-.publicRoot :where(a, button, summary, select):focus-visible {
+/* Keep focus indication visible on both the light marketing canvas and dark panels.
+   Repeating the root class intentionally outranks legacy page-level focus rules
+   without introducing !important. */
+.publicRoot.publicRoot :where(a, button, summary, select):focus-visible {
   outline: 3px solid var(--cf-focus);
   outline-offset: 3px;
 }
 
-.publicRoot :where(header nav a, header summary, footer a) {
+/* Interactive public navigation stays readable and touch-friendly at every
+   breakpoint, including the language selector and the compact mobile menu. */
+.publicRoot.publicRoot header a,
+.publicRoot.publicRoot header summary,
+.publicRoot.publicRoot header select,
+.publicRoot.publicRoot footer a {
   min-height: 44px;
+  font-size: 0.8125rem;
 }
 
-.publicRoot :where(header nav a, footer a) {
+.publicRoot.publicRoot :where(header nav a, footer a) {
   display: inline-flex;
   align-items: center;
 }
 
-.publicRoot details > summary {
-  min-height: 44px;
+/* White text on the brighter accent does not meet normal-text contrast.
+   Signup CTAs therefore darken on hover while the bright orange remains
+   available for non-text accents. */
+.publicRoot.publicRoot a[href^="/login?mode=signup"]:hover {
+  background: var(--cf-orange-dark);
+  color: #fff;
 }
 
 @media (max-width: 820px) {
   .publicRoot {
-    --cf-scroll-offset-home: 120px;
-    --cf-scroll-offset-standard: 166px;
+    --cf-scroll-offset-home: 132px;
+    --cf-scroll-offset-standard: 186px;
   }
 }
 
