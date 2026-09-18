@@ -2,15 +2,19 @@ from __future__ import annotations
 
 import argparse
 import json
+import sys
 from collections import Counter
 from pathlib import Path
 from typing import Any
 
 import numpy as np
 
+PROJECT_ROOT = Path(__file__).resolve().parent.parent
+if str(PROJECT_ROOT) not in sys.path:
+    sys.path.insert(0, str(PROJECT_ROOT))
+
 from services.p2.airborne_classifier_v1 import AirborneClassifierV1
 
-PROJECT_ROOT = Path(__file__).resolve().parent.parent
 CLASSES = AirborneClassifierV1.CLASSES
 FEATURES = AirborneClassifierV1.FEATURE_NAMES
 CLASS_TO_INDEX = {label: index for index, label in enumerate(CLASSES)}
@@ -183,7 +187,7 @@ def train(
             "calibration_rows": len(calibration_rows),
             "train_video_ids": sorted(train_videos),
             "calibration_video_ids": sorted(calibration_videos),
-            "V1_V5_used_for_training_or_calibration": false,
+            "V1_V5_used_for_training_or_calibration": False,
         },
         "development_report": report,
     }
