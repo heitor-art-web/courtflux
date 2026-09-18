@@ -25,54 +25,49 @@
   color: var(--cf-ink);
 }
 
-.homeRoot h1 {
+.publicRoot.homeRoot h1 {
   font-size: var(--cf-type-home-hero);
   line-height: 0.98;
   letter-spacing: -0.048em;
   text-wrap: balance;
 }
 
-.standardRoot h1 {
+.publicRoot.standardRoot h1 {
   font-size: var(--cf-type-page-hero);
   line-height: 0.98;
   letter-spacing: -0.048em;
   text-wrap: balance;
 }
 
-.legalRoot h1 {
+.publicRoot.legalRoot h1 {
   font-size: var(--cf-type-legal-hero);
   line-height: 1;
   letter-spacing: -0.045em;
 }
 
-.homeRoot h2,
-.standardRoot h2 {
+.publicRoot.homeRoot h2,
+.publicRoot.standardRoot h2 {
   font-size: var(--cf-type-section);
   line-height: 1;
   letter-spacing: -0.045em;
   text-wrap: balance;
 }
 
-.homeRoot :where(#understand, #evidence, #for-you, #how, #pricing, #faq) {
+.publicRoot.homeRoot :where(#understand, #evidence, #for-you, #how, #pricing, #faq) {
   padding-top: var(--cf-space-section);
   scroll-margin-top: var(--cf-scroll-offset-home);
 }
 
-.standardRoot :where(#how-it-works, #capabilities, #workflow, #benefits) {
+.publicRoot.standardRoot :where(#how-it-works, #capabilities, #workflow, #benefits) {
   padding-top: var(--cf-space-section);
   scroll-margin-top: var(--cf-scroll-offset-standard);
 }
 
-/* Keep focus indication visible on both the light marketing canvas and dark panels.
-   Repeating the root class intentionally outranks legacy page-level focus rules
-   without introducing !important. */
 .publicRoot.publicRoot :where(a, button, summary, select):focus-visible {
   outline: 3px solid var(--cf-focus);
   outline-offset: 3px;
 }
 
-/* Interactive public navigation stays readable and touch-friendly at every
-   breakpoint, including the language selector and the compact mobile menu. */
 .publicRoot.publicRoot header a,
 .publicRoot.publicRoot header summary,
 .publicRoot.publicRoot header select,
@@ -86,9 +81,6 @@
   align-items: center;
 }
 
-/* White text on the brighter accent does not meet normal-text contrast.
-   Signup CTAs therefore darken on hover while the bright orange remains
-   available for non-text accents. */
 .publicRoot.publicRoot a[href^="/login?mode=signup"]:hover {
   background: var(--cf-orange-dark);
   color: #fff;
