@@ -9,6 +9,7 @@ from evaluation.p2_gate_c_scoreboard import (
     _evaluate_possessed_sample,
     _gate,
     _load_gt,
+    _scoring_samples,
 )
 
 
@@ -89,6 +90,44 @@ class GateCScoreboardTest(unittest.TestCase):
         self.assertFalse(second_result["attributed"])
         self.assertEqual(used, {0})
 
+    def test_explicit_possession_intervals_replace_broad_possessed_samples(self) -> None:
+        clip_gt = {
+            "samples": [
+                {
+                    "run_key": "V4_B",
+                    "state": "possessed",
+                    "frame_start": 240,
+                    "frame_end": 359,
+                    "team_id": "team_a",
+                    "scoring_status": "historical_broad_window_not_scored",
+                },
+                {
+                    "run_key": "V4_B",
+                    "state": "pass_flight",
+                    "frame_start": 0,
+                    "frame_end": 10,
+                    "team_id": "team_a",
+                },
+            ],
+            "possession_intervals": [
+                {
+                    "run_key": "V4_B",
+                    "frame_start": 245,
+                    "frame_end": 245,
+                    "team_id": "team_b",
+                    "verified_holder_track_id": 24,
+                }
+            ],
+        }
+        scoring = _scoring_samples(clip_gt)
+        possessed = [row for row in scoring if row["state"] == "possessed"]
+        self.assertEqual(len(possessed), 1)
+        self.assertEqual(possessed[0]["frame_start"], 245)
+        self.assertEqual(possessed[0]["team_id"], "team_b")
+        self.assertEqual(possessed[0]["verified_holder_track_id"], 24)
+        self.assertEqual(possessed[0]["source_kind"], "human_verified_possession_interval")
+        self.assertEqual(len([row for row in scoring if row["state"] == "pass_flight"]), 1)
+
     def test_gate_uses_frozen_thresholds(self) -> None:
         clips = [
             {
@@ -98,9 +137,7 @@ class GateCScoreboardTest(unittest.TestCase):
                 "correct_samples": 5,
                 "coverage": 1.0,
                 "accuracy": 1.0,
-                "sample_results": [
-                    {"contamination_rate": 0.0} for _ in range(5)
-                ],
+                "sample_results": [{"contamination_rate": 0.0} for _ in range(5)],
             },
             {
                 "clip": "V3",
@@ -121,14 +158,14 @@ class GateCScoreboardTest(unittest.TestCase):
         self.assertEqual(aggregate["cross_team_contamination"], 0.0)
         self.assertEqual(gate["status"], "PASS")
 
-    def test_ground_truth_uses_stable_team_slots_and_segmented_v4(self) -> None:
+    def test_ground_truth_uses_context_local_slots_and_verified_v4_possession(self) -> None:
         gt = _load_gt(DEFAULT_GT)
+        self.assertEqual(gt["version"], "courtflux_p2_gate_c_team_gt_v3")
         self.assertEqual(gt["clips"]["V1"]["teams"], ["team_a", "team_b"])
         self.assertEqual(gt["clips"]["V5"]["teams"], ["team_a", "team_b"])
-        v4_runs = gt["clips"]["V4"]["runs"]
+        v4 = gt["clips"]["V4"]
+        v4_runs = v4["runs"]
         self.assertEqual(set(v4_runs), {"V4_A", "V4_B", "V4_C"})
-        run_keys = {sample["run_key"] for sample in gt["clips"]["V4"]["samples"]}
-        self.assertEqual(run_keys, {"V4_A", "V4_B", "V4_C"})
         self.assertEqual(
             v4_runs["V4_A"]["match_config"],
             "evaluation/match_configs/gate_c_v4_a.json",
@@ -141,6 +178,14 @@ class GateCScoreboardTest(unittest.TestCase):
             v4_runs["V4_C"]["match_config"],
             "evaluation/match_configs/gate_c_v4_c.json",
         )
+        intervals = v4["possession_intervals"]
+        self.assertEqual(len(intervals), 1)
+        self.assertEqual(intervals[0]["run_key"], "V4_B")
+        self.assertEqual(intervals[0]["frame_start"], 245)
+        self.assertEqual(intervals[0]["team_id"], "team_b")
+        self.assertEqual(intervals[0]["verified_holder_track_id"], 24)
+        exclusions = {(row["run_key"], row["frame_start"]) for row in v4["possession_exclusions"]}
+        self.assertEqual(exclusions, {("V4_A", 549), ("V4_C", 170)})
 
 
 if __name__ == "__main__":
