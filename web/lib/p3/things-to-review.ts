@@ -55,6 +55,8 @@ export type P3SourceEventRow = {
   end_ms: number | null;
   frame_start: number;
   frame_end: number;
+  actor_game_player_id: string | null;
+  secondary_game_player_id: string | null;
 };
 
 export type P3ReviewRow = {
@@ -177,6 +179,15 @@ export function assembleThingsToReview(input: AssembleInput) {
   });
 
   const clipStatuses = input.clips.map((row) => row.status);
+  const availableGamePlayerIds = Array.from(
+    new Set(
+      input.sourceEvents.flatMap((row) =>
+        [row.actor_game_player_id, row.secondary_game_player_id].filter(
+          (value): value is string => typeof value === "string" && Boolean(value),
+        ),
+      ),
+    ),
+  ).sort();
   return {
     analysis_run_id: input.analysisRunId,
     game_id: input.gameId,
@@ -202,6 +213,7 @@ export function assembleThingsToReview(input: AssembleInput) {
         failed: clipStatuses.filter((value) => value === "failed").length,
       },
       reviewed_by_me: items.filter((row) => row.my_review !== null).length,
+      available_game_player_ids: availableGamePlayerIds,
       derivation_output: input.derivation.output_summary ?? {},
     },
     items,

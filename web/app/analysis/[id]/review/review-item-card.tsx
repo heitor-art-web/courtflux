@@ -1,8 +1,14 @@
+"use client";
+
+import { useState } from "react";
 import type { Dispatch, SetStateAction } from "react";
+import { HUMAN_REVIEW_EVENT_TYPES } from "@/lib/p3/human-review";
+import type { HumanReviewEventType } from "@/lib/p3/human-review";
 import type { P3ReviewActionsState } from "@/lib/p3/review-actions";
-import type { ReviewItem, SubmitReviewAction } from "./review-workspace-types";
+import type { ReviewItem, SubmitHumanReview, SubmitReviewAction } from "./review-workspace-types";
 import { formatConfidence, formatMetadataTime, formatTime, humanize, reasonLines } from "./review-workspace-types";
 import styles from "./review-workspace.module.css";
+import reviewStyles from "./human-review.module.css";
 
 type Props = {
   item: ReviewItem;
@@ -13,9 +19,186 @@ type Props = {
   noteDrafts: Record<string, string>;
   setNoteDrafts: Dispatch<SetStateAction<Record<string, string>>>;
   submit: SubmitReviewAction;
+  submitHumanReview: SubmitHumanReview;
+  availableGamePlayerIds: string[];
 };
 
-export function ReviewItemCard({ item, actions, saved, savedAt, busy, noteDrafts, setNoteDrafts, submit }: Props) {
+function HumanReviewEditor({
+  item,
+  busy,
+  submitHumanReview,
+  availableGamePlayerIds,
+}: {
+  item: ReviewItem;
+  busy: boolean;
+  submitHumanReview: SubmitHumanReview;
+  availableGamePlayerIds: string[];
+}) {
+  const review = item.my_review;
+  const initialEvent = review?.state === "corrected"
+    && review.corrected_event_type
+    && review.corrected_event_type !== "none"
+    ? review.corrected_event_type as HumanReviewEventType
+    : "";
+  const [eventType, setEventType] = useState<HumanReviewEventType | "">(initialEvent);
+  const [playerId, setPlayerId] = useState(review?.corrected_game_player_id ?? "");
+  const [rationale, setRationale] = useState(review?.note ?? "");
+  const canCorrect = Boolean(eventType || playerId);
+
+  const reviewSummary = review?.state === "confirmed"
+    ? "Confirmed"
+    : review?.state === "rejected"
+      ? "Rejected · NONE"
+      : review?.state === "corrected"
+        ? [
+            "Corrected",
+            review.corrected_event_type && review.corrected_event_type !== "none"
+              ? humanize(review.corrected_event_type)
+              : null,
+            review.corrected_game_player_id ? humanize(review.corrected_game_player_id) : null,
+          ].filter(Boolean).join(" · ")
+        : "Unreviewed";
+
+  return (
+    <section className={reviewStyles.humanReviewBox} aria-label={`Human review for ${humanize(item.review_type)}`}>
+      <div className={reviewStyles.humanReviewHeader}>
+        <div>
+          <strong>Human review</strong>
+          <span>
+            Original prediction stays {humanize(item.review_type)} · {formatConfidence(item.confidence)}
+          </span>
+        </div>
+        <div className={reviewStyles.reviewStateBadge} data-state={review?.state ?? "unreviewed"}>
+          {reviewSummary}
+        </div>
+      </div>
+
+      {review ? (
+        <p className={reviewStyles.reviewMetadata}>
+          Reviewed {formatMetadataTime(review.updated_at)}. Human truth is stored separately from the model prediction.
+        </p>
+      ) : (
+        <p className={reviewStyles.reviewMetadata}>
+          Leaving this item untouched remains distinct from rejecting it as NONE.
+        </p>
+      )}
+
+      <label className={reviewStyles.reviewNoteLabel}>
+        Review rationale <span>optional</span>
+        <textarea
+          className={reviewStyles.reviewNote}
+          value={rationale}
+          maxLength={2000}
+          disabled={busy}
+          onChange={(event) => setRationale(event.target.value)}
+          placeholder="Optional note about why you confirmed or corrected this moment"
+        />
+      </label>
+
+      <div className={reviewStyles.reviewDecisionRow}>
+        <button
+          type="button"
+          disabled={busy}
+          onClick={() => void submitHumanReview(
+            {
+              type: "confirm",
+              review_item_id: item.id,
+              note: rationale.trim() || null,
+            },
+            `human-confirm:${item.id}`,
+            "Prediction confirmed.",
+          )}
+        >
+          Confirm prediction
+        </button>
+        <button
+          type="button"
+          className={reviewStyles.rejectButton}
+          disabled={busy}
+          onClick={() => void submitHumanReview(
+            {
+              type: "reject",
+              review_item_id: item.id,
+              note: rationale.trim() || null,
+            },
+            `human-reject:${item.id}`,
+            "Marked as NONE. The original prediction was preserved.",
+          )}
+        >
+          NONE · reject event
+        </button>
+      </div>
+
+      <details className={reviewStyles.correctionPanel} open={review?.state === "corrected"}>
+        <summary>Correct action or player</summary>
+        <div className={reviewStyles.correctionGrid}>
+          <label>
+            Correct action
+            <select
+              value={eventType}
+              disabled={busy}
+              onChange={(event) => setEventType(event.target.value as HumanReviewEventType | "")}
+            >
+              <option value="">Keep action unchanged</option>
+              {HUMAN_REVIEW_EVENT_TYPES.map((value) => (
+                <option key={value} value={value}>{humanize(value)}</option>
+              ))}
+            </select>
+          </label>
+
+          <label>
+            Correct game player
+            <select
+              value={playerId}
+              disabled={busy || !availableGamePlayerIds.length}
+              onChange={(event) => setPlayerId(event.target.value)}
+            >
+              <option value="">
+                {availableGamePlayerIds.length ? "Keep player attribution unchanged" : "No known game-player IDs"}
+              </option>
+              {availableGamePlayerIds.map((value) => (
+                <option key={value} value={value}>{humanize(value)}</option>
+              ))}
+            </select>
+          </label>
+        </div>
+        <div className={reviewStyles.correctionActions}>
+          <button
+            type="button"
+            disabled={busy || !canCorrect}
+            onClick={() => void submitHumanReview(
+              {
+                type: "correct",
+                review_item_id: item.id,
+                corrected_event_type: eventType || null,
+                corrected_game_player_id: playerId || null,
+                note: rationale.trim() || null,
+              },
+              `human-correct:${item.id}`,
+              "Human correction saved. Original prediction preserved.",
+            )}
+          >
+            Save correction
+          </button>
+          {!canCorrect ? <span>Select an action or player correction.</span> : null}
+        </div>
+      </details>
+    </section>
+  );
+}
+
+export function ReviewItemCard({
+  item,
+  actions,
+  saved,
+  savedAt,
+  busy,
+  noteDrafts,
+  setNoteDrafts,
+  submit,
+  submitHumanReview,
+  availableGamePlayerIds,
+}: Props) {
   const noteMetadata = actions.notes_by_review_item[item.id] ?? null;
   const note = noteMetadata?.body ?? "";
   const draft = noteDrafts[item.id] ?? note;
@@ -70,9 +253,17 @@ export function ReviewItemCard({ item, actions, saved, savedAt, busy, noteDrafts
         </div>
       ) : null}
 
+      <HumanReviewEditor
+        key={`${item.id}:${item.my_review?.updated_at ?? "unreviewed"}`}
+        item={item}
+        busy={busy}
+        submitHumanReview={submitHumanReview}
+        availableGamePlayerIds={availableGamePlayerIds}
+      />
+
       <div className={styles.organizeGrid}>
         <details className={styles.organizer} open={Boolean(note)}>
-          <summary>Note {noteMetadata ? `· updated ${formatMetadataTime(noteMetadata.updated_at)}` : ""}</summary>
+          <summary>Personal note {noteMetadata ? `· updated ${formatMetadataTime(noteMetadata.updated_at)}` : ""}</summary>
           <textarea
             value={draft}
             maxLength={4000}
@@ -86,7 +277,7 @@ export function ReviewItemCard({ item, actions, saved, savedAt, busy, noteDrafts
               onClick={() => void submit(
                 { type: "set_note", review_item_id: item.id, body: draft.trim() },
                 `note:${item.id}`,
-                "Note saved.",
+                "Personal note saved.",
               )}
             >
               Save note
@@ -100,7 +291,7 @@ export function ReviewItemCard({ item, actions, saved, savedAt, busy, noteDrafts
                   const next = await submit(
                     { type: "delete_note", review_item_id: item.id },
                     `delete-note:${item.id}`,
-                    "Note removed.",
+                    "Personal note removed.",
                   );
                   if (next) setNoteDrafts((current) => ({ ...current, [item.id]: "" }));
                 }}

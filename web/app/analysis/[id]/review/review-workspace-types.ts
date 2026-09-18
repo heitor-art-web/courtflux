@@ -1,3 +1,4 @@
+import type { HumanReviewCommand, HumanReviewRecord } from "@/lib/p3/human-review";
 import type { P3ReviewActionsState } from "@/lib/p3/review-actions";
 
 export type ReviewItem = {
@@ -23,11 +24,7 @@ export type ReviewItem = {
     clip_end_ms: number;
     artifact: { playable_url: string | null } | null;
   } | null;
-  my_review: {
-    state: string;
-    corrected_event_type: string | null;
-    corrected_game_player_id: string | null;
-  } | null;
+  my_review: HumanReviewRecord | null;
 };
 
 export type ThingsToReviewResponse = {
@@ -45,6 +42,7 @@ export type ThingsToReviewResponse = {
     counts_by_support_state: Record<string, number>;
     clips: Record<string, number>;
     reviewed_by_me: number;
+    available_game_player_ids: string[];
   };
   items: ReviewItem[];
   error?: string;
@@ -52,6 +50,8 @@ export type ThingsToReviewResponse = {
 
 export type ViewMode =
   | { kind: "all" }
+  | { kind: "reviewed" }
+  | { kind: "unreviewed" }
   | { kind: "saved" }
   | { kind: "tag"; tagId: string }
   | { kind: "collection"; collectionId: string };
@@ -61,6 +61,12 @@ export type SubmitReviewAction = (
   key: string,
   successMessage: string,
 ) => Promise<P3ReviewActionsState | null>;
+
+export type SubmitHumanReview = (
+  command: HumanReviewCommand,
+  key: string,
+  successMessage: string,
+) => Promise<boolean>;
 
 export function humanize(value: string) {
   return value.replace(/_/g, " ").replace(/\b\w/g, (letter) => letter.toUpperCase());

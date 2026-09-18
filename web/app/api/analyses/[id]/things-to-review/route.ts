@@ -51,6 +51,7 @@ function emptyResponse(analysisRunId: string, gameId: string) {
       counts_by_support_state: {},
       clips: { planned: 0, generating: 0, ready: 0, failed: 0 },
       reviewed_by_me: 0,
+      available_game_player_ids: [],
       derivation_output: {},
     },
     items: [],
@@ -160,7 +161,7 @@ export async function GET(
       fetchPaged<P3SourceEventRow>((from, to) =>
         admin
           .from("p3_source_events")
-          .select("source_event_id,start_ms,end_ms,frame_start,frame_end")
+          .select("source_event_id,start_ms,end_ms,frame_start,frame_end,actor_game_player_id,secondary_game_player_id")
           .eq("workspace_id", workspaceId)
           .eq("analysis_run_id", run.id)
           .eq("derivation_id", derivationId)

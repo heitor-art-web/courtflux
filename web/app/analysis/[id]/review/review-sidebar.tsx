@@ -15,6 +15,7 @@ type Props = {
   view: ViewMode;
   setView: (view: ViewMode) => void;
   totalCount: number;
+  reviewedCount: number;
   newCollectionName: string;
   setNewCollectionName: (value: string) => void;
   newTagName: string;
@@ -158,6 +159,7 @@ export function ReviewSidebar(props: Props) {
     view,
     setView,
     totalCount,
+    reviewedCount,
     newCollectionName,
     setNewCollectionName,
     newTagName,
@@ -233,6 +235,20 @@ export function ReviewSidebar(props: Props) {
           <span>All review items</span><small>{totalCount}</small>
         </button>
         <button
+          className={view.kind === "reviewed" ? styles.navActive : styles.navButton}
+          type="button"
+          onClick={() => setView({ kind: "reviewed" })}
+        >
+          <span>Reviewed</span><small>{reviewedCount}</small>
+        </button>
+        <button
+          className={view.kind === "unreviewed" ? styles.navActive : styles.navButton}
+          type="button"
+          onClick={() => setView({ kind: "unreviewed" })}
+        >
+          <span>Unreviewed</span><small>{Math.max(0, totalCount - reviewedCount)}</small>
+        </button>
+        <button
           className={view.kind === "saved" ? styles.navActive : styles.navButton}
           type="button"
           onClick={() => setView({ kind: "saved" })}
@@ -292,7 +308,6 @@ export function ReviewSidebar(props: Props) {
             </button>
           ))}
           {!actions.tags.length ? <span className={styles.muted}>No tags yet.</span> : null}
-        </div>
         <form className={styles.createForm} onSubmit={createTag}>
           <label htmlFor="new-tag">New tag</label>
           <div className={styles.inputRow}>

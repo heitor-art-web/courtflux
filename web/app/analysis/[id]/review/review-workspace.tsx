@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useState } from "react";
+import type { HumanReviewCommand } from "@/lib/p3/human-review";
 import type { P3ReviewActionCommand, P3ReviewActionsState } from "@/lib/p3/review-actions";
 import { ReviewItemCard } from "./review-item-card";
 import { ReviewSidebar } from "./review-sidebar";
@@ -37,6 +38,8 @@ function syncUrl(derivationId: string | null, view: ViewMode) {
   url.searchParams.delete("view");
   url.searchParams.delete("collection");
   url.searchParams.delete("tag");
+  if (view.kind === "reviewed") url.searchParams.set("view", "reviewed");
+  if (view.kind === "unreviewed") url.searchParams.set("view", "unreviewed");
   if (view.kind === "saved") url.searchParams.set("view", "saved");
   if (view.kind === "collection") {
     url.searchParams.set("view", "collection");
@@ -162,6 +165,42 @@ export function ReviewWorkspace({ runId, initialDerivationId, initialView }: Pro
     }
   }
 
+
+  async function submitHumanReview(
+    command: HumanReviewCommand,
+    key: string,
+    successMessage: string,
+  ) {
+    setBusyKey(key);
+    setStatusMessage("");
+    setError("");
+    try {
+      const base = `/api/analyses/${encodeURIComponent(runId)}/human-review`;
+      const url = derivationId
+        ? `${base}?derivation_id=${encodeURIComponent(derivationId)}`
+        : base;
+      const response = await fetch(url, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(command),
+      });
+      const payload = (await response.json()) as { error?: string };
+      if (!response.ok) {
+        throw new Error(payload.error || `Human review failed (HTTP ${response.status})`);
+      }
+      const { reviewPayload, actionPayload } = await load(derivationId);
+      setReview(reviewPayload);
+      setActions(actionPayload);
+      setStatusMessage(successMessage);
+      return true;
+    } catch (reviewError) {
+      setError(reviewError instanceof Error ? reviewError.message : String(reviewError));
+      return false;
+    } finally {
+      setBusyKey(null);
+    }
+  }
+
   const savedIds = useMemo(
     () => new Set(actions?.saved_review_item_ids ?? []),
     [actions?.saved_review_item_ids],
@@ -174,6 +213,8 @@ export function ReviewWorkspace({ runId, initialDerivationId, initialView }: Pro
   const visibleItems = useMemo(() => {
     const items = review?.items ?? [];
     if (!actions) return items;
+    if (view.kind === "reviewed") return items.filter((item) => item.my_review !== null);
+    if (view.kind === "unreviewed") return items.filter((item) => item.my_review === null);
     if (view.kind === "saved") return items.filter((item) => savedIds.has(item.id));
     if (view.kind === "collection") {
       return items.filter((item) =>
@@ -202,26 +243,30 @@ export function ReviewWorkspace({ runId, initialDerivationId, initialView }: Pro
     : null;
   const viewTitle = view.kind === "all"
     ? "All review items"
-    : view.kind === "saved"
-      ? "Saved items"
-      : view.kind === "tag"
-        ? currentTag?.name ?? "Tag"
-        : currentCollection?.name ?? "Collection";
+    : view.kind === "reviewed"
+      ? "Reviewed items"
+      : view.kind === "unreviewed"
+        ? "Unreviewed items"
+        : view.kind === "saved"
+          ? "Saved items"
+          : view.kind === "tag"
+            ? currentTag?.name ?? "Tag"
+            : currentCollection?.name ?? "Collection";
 
   return (
     <section className={styles.workspace} aria-labelledby="review-workspace-title">
       <header className={styles.header}>
         <div>
-          <div className={styles.eyebrow}>P3 review actions</div>
-          <h1 id="review-workspace-title">Organize what matters</h1>
+          <div className={styles.eyebrow}>P3 human review</div>
+          <h1 id="review-workspace-title">Review the evidence</h1>
           <p>
-            Save moments, add personal notes, tags and collections without changing the underlying CourtFlux prediction.
+            Confirm or correct CourtFlux predictions, then save, tag and organize the moments that matter. Model output stays immutable.
           </p>
         </div>
-        <div className={styles.summaryGrid} aria-label="Review action summary">
+        <div className={styles.summaryGrid} aria-label="Review summary">
           <div><strong>{review.summary.total_items}</strong><span>review items</span></div>
-          <div><strong>{savedIds.size}</strong><span>saved in version</span></div>
-          <div><strong>{actions.collections.length}</strong><span>collections</span></div>
+          <div><strong>{review.summary.reviewed_by_me}</strong><span>reviewed</span></div>
+          <div><strong>{savedIds.size}</strong><span>saved</span></div>
         </div>
       </header>
 
@@ -248,6 +293,7 @@ export function ReviewWorkspace({ runId, initialDerivationId, initialView }: Pro
           view={view}
           setView={setView}
           totalCount={review.items.length}
+          reviewedCount={review.summary.reviewed_by_me}
           newCollectionName={newCollectionName}
           setNewCollectionName={setNewCollectionName}
           newTagName={newTagName}
@@ -291,6 +337,8 @@ export function ReviewWorkspace({ runId, initialDerivationId, initialView }: Pro
                 noteDrafts={noteDrafts}
                 setNoteDrafts={setNoteDrafts}
                 submit={submit}
+                submitHumanReview={submitHumanReview}
+                availableGamePlayerIds={review.summary.available_game_player_ids}
               />
             ))}
           </div>

@@ -15,6 +15,8 @@ function textParam(value: string | string[] | undefined) {
 
 function initialViewFromSearch(search: Record<string, string | string[] | undefined>): ViewMode {
   const view = textParam(search.view);
+  if (view === "reviewed") return { kind: "reviewed" };
+  if (view === "unreviewed") return { kind: "unreviewed" };
   if (view === "saved") return { kind: "saved" };
   if (view === "collection") {
     const collectionId = textParam(search.collection);
