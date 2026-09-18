@@ -1,14 +1,15 @@
 from typing import Any
 
 from . import engine_v1 as _engine_v1
-from .live_control_resolver_v1 import LiveControlP2EngineV1
 from .possession_tracker_v1 import PossessionTrackerV1
 from .shot_event_tracker_v1 import ShotEventTrackerV1
+from .trained_airborne_live_control_v1 import LiveControlP2EngineV1
 
-# Keep a single canonical event engine. The AIRBORNE v2 live-control resolver subclasses
-# the existing P2EngineV1 event path and only resolves published control-state semantics
-# afterwards. The raw-receiver experiment remains in the repository for auditability but
-# is intentionally not part of the canonical runtime after Gate-A regression testing.
+# Keep a single canonical event engine. The canonical live-control resolver subclasses the
+# existing P2EngineV1 event path and only resolves published control-state semantics after
+# the event engine has run once. AirborneClassifierV1 is optional: without a trained model
+# the resolver falls back exactly to AIRBORNE-v2 behavior; with a model it replaces only the
+# PASS/SHOT/UNRESOLVED classification of an active airborne hypothesis.
 _engine_v1.P2EngineV1 = LiveControlP2EngineV1
 P2EngineV1 = LiveControlP2EngineV1
 
