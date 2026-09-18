@@ -53,19 +53,19 @@ def _predict(
     bias: np.ndarray,
     *,
     minimum_probability: float,
-) -> tuple[np.ndarray, np.ndarray]:
+) -> np.ndarray:
     probabilities = _softmax(x @ weights.T + bias)
     indices = probabilities.argmax(axis=1)
     confidence = probabilities.max(axis=1)
     unresolved = CLASS_TO_INDEX["unresolved"]
-    indices = np.where(confidence >= minimum_probability, indices, unresolved)
-    return indices, probabilities
+    return np.where(confidence >= minimum_probability, indices, unresolved)
 
 
 def _metrics(y: np.ndarray, pred: np.ndarray) -> dict[str, Any]:
     confusion = np.zeros((len(CLASSES), len(CLASSES)), dtype=np.int64)
     for truth, guess in zip(y.tolist(), pred.tolist()):
         confusion[int(truth), int(guess)] += 1
+
     per_class: dict[str, Any] = {}
     f1_values: list[float] = []
     for index, label in enumerate(CLASSES):
@@ -82,6 +82,7 @@ def _metrics(y: np.ndarray, pred: np.ndarray) -> dict[str, Any]:
             "recall": round(recall, 4),
             "f1": round(f1, 4),
         }
+
     return {
         "rows": int(len(y)),
         "accuracy": round(float((y == pred).mean()) if len(y) else 0.0, 4),
@@ -97,6 +98,62 @@ def _metrics(y: np.ndarray, pred: np.ndarray) -> dict[str, Any]:
     }
 
 
+def _fit(
+    rows: list[dict[str, Any]],
+    *,
+    learning_rate: float,
+    epochs: int,
+    l2: float,
+) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
+    if not rows:
+        raise ValueError("cannot fit on an empty dataset")
+    counts = Counter(str(row.get("label")) for row in rows)
+    missing = [label for label in CLASSES if counts.get(label, 0) == 0]
+    if missing:
+        raise ValueError(f"training fold missing classes: {missing}")
+
+    x_raw, y = _matrix(rows)
+    mean = x_raw.mean(axis=0)
+    scale = x_raw.std(axis=0)
+    scale = np.where(scale < 1e-6, 1.0, scale)
+    x = (x_raw - mean) / scale
+
+    weights = np.zeros((len(CLASSES), len(FEATURES)), dtype=np.float64)
+    bias = np.zeros(len(CLASSES), dtype=np.float64)
+    one_hot = np.eye(len(CLASSES), dtype=np.float64)[y]
+    class_weight = {
+        CLASS_TO_INDEX[label]: len(rows) / (len(CLASSES) * count)
+        for label, count in counts.items()
+    }
+    sample_weight = np.asarray([class_weight[int(index)] for index in y], dtype=np.float64)
+    sample_weight = sample_weight / max(sample_weight.mean(), 1e-12)
+
+    for _ in range(max(1, int(epochs))):
+        probabilities = _softmax(x @ weights.T + bias)
+        error = (probabilities - one_hot) * sample_weight[:, None]
+        grad_w = error.T @ x / max(len(x), 1) + float(l2) * weights
+        grad_b = error.mean(axis=0)
+        weights -= float(learning_rate) * grad_w
+        bias -= float(learning_rate) * grad_b
+
+    return mean, scale, weights, bias
+
+
+def _predict_rows(
+    rows: list[dict[str, Any]],
+    *,
+    mean: np.ndarray,
+    scale: np.ndarray,
+    weights: np.ndarray,
+    bias: np.ndarray,
+    minimum_probability: float,
+) -> tuple[np.ndarray, np.ndarray]:
+    x_raw, y = _matrix(rows)
+    x = (x_raw - mean) / scale
+    pred = _predict(x, weights, bias, minimum_probability=minimum_probability)
+    return y, pred
+
+
 def train(
     rows: list[dict[str, Any]],
     *,
@@ -105,65 +162,78 @@ def train(
     l2: float,
     minimum_probability: float,
 ) -> tuple[dict[str, Any], dict[str, Any]]:
-    train_rows = [row for row in rows if str(row.get("split")) == "train"]
-    calibration_rows = [row for row in rows if str(row.get("split")) == "calibration"]
-    if not train_rows or not calibration_rows:
-        raise ValueError("dataset requires non-empty train and calibration splits")
+    if not rows:
+        raise ValueError("dataset is empty")
 
-    train_videos = {str(row.get("video_id")) for row in train_rows}
-    calibration_videos = {str(row.get("video_id")) for row in calibration_rows}
-    overlap = train_videos & calibration_videos
-    if overlap:
-        raise ValueError(f"train/calibration video leakage: {sorted(overlap)}")
+    video_ids = sorted({str(row.get("video_id") or "") for row in rows})
+    if len(video_ids) < 3:
+        raise ValueError("grouped cross-validation requires at least three videos")
 
-    train_counts = Counter(str(row.get("label")) for row in train_rows)
-    missing_train = [label for label in CLASSES if train_counts.get(label, 0) == 0]
-    if missing_train:
-        raise ValueError(f"training split missing classes: {missing_train}")
-    calibration_counts = Counter(str(row.get("label")) for row in calibration_rows)
-    for required in ("pass_flight", "shot_flight"):
-        if calibration_counts.get(required, 0) == 0:
-            raise ValueError(f"calibration split needs at least one {required} row")
+    overall_counts = Counter(str(row.get("label")) for row in rows)
+    missing = [label for label in CLASSES if overall_counts.get(label, 0) == 0]
+    if missing:
+        raise ValueError(f"development dataset missing classes: {missing}")
 
-    x_train_raw, y_train = _matrix(train_rows)
-    x_cal_raw, y_cal = _matrix(calibration_rows)
-    mean = x_train_raw.mean(axis=0)
-    scale = x_train_raw.std(axis=0)
-    scale = np.where(scale < 1e-6, 1.0, scale)
-    x_train = (x_train_raw - mean) / scale
-    x_cal = (x_cal_raw - mean) / scale
+    fold_reports: list[dict[str, Any]] = []
+    cv_truth: list[int] = []
+    cv_pred: list[int] = []
 
-    weights = np.zeros((len(CLASSES), len(FEATURES)), dtype=np.float64)
-    bias = np.zeros(len(CLASSES), dtype=np.float64)
-    one_hot = np.eye(len(CLASSES), dtype=np.float64)[y_train]
-    class_weight = {
-        CLASS_TO_INDEX[label]: len(train_rows) / (len(CLASSES) * count)
-        for label, count in train_counts.items()
-    }
-    sample_weight = np.asarray([class_weight[int(index)] for index in y_train], dtype=np.float64)
-    sample_weight = sample_weight / sample_weight.mean()
+    for held_out in video_ids:
+        train_rows = [row for row in rows if str(row.get("video_id")) != held_out]
+        test_rows = [row for row in rows if str(row.get("video_id")) == held_out]
+        mean, scale, weights, bias = _fit(
+            train_rows,
+            learning_rate=learning_rate,
+            epochs=epochs,
+            l2=l2,
+        )
+        truth, pred = _predict_rows(
+            test_rows,
+            mean=mean,
+            scale=scale,
+            weights=weights,
+            bias=bias,
+            minimum_probability=minimum_probability,
+        )
+        cv_truth.extend(int(value) for value in truth.tolist())
+        cv_pred.extend(int(value) for value in pred.tolist())
+        fold_reports.append(
+            {
+                "held_out_video_id": held_out,
+                "train_video_ids": [value for value in video_ids if value != held_out],
+                "metrics": _metrics(truth, pred),
+            }
+        )
 
-    for _ in range(max(1, int(epochs))):
-        probabilities = _softmax(x_train @ weights.T + bias)
-        error = (probabilities - one_hot) * sample_weight[:, None]
-        grad_w = error.T @ x_train / max(len(x_train), 1) + float(l2) * weights
-        grad_b = error.mean(axis=0)
-        weights -= float(learning_rate) * grad_w
-        bias -= float(learning_rate) * grad_b
+    cv_truth_array = np.asarray(cv_truth, dtype=np.int64)
+    cv_pred_array = np.asarray(cv_pred, dtype=np.int64)
+    cv_report = _metrics(cv_truth_array, cv_pred_array)
 
-    train_pred, _ = _predict(
-        x_train, weights, bias, minimum_probability=minimum_probability
+    mean, scale, weights, bias = _fit(
+        rows,
+        learning_rate=learning_rate,
+        epochs=epochs,
+        l2=l2,
     )
-    cal_pred, _ = _predict(
-        x_cal, weights, bias, minimum_probability=minimum_probability
+    train_truth, train_pred = _predict_rows(
+        rows,
+        mean=mean,
+        scale=scale,
+        weights=weights,
+        bias=bias,
+        minimum_probability=minimum_probability,
     )
+
     report = {
-        "train": _metrics(y_train, train_pred),
-        "calibration": _metrics(y_cal, cal_pred),
-        "train_label_counts": dict(sorted(train_counts.items())),
-        "calibration_label_counts": dict(sorted(calibration_counts.items())),
-        "train_video_ids": sorted(train_videos),
-        "calibration_video_ids": sorted(calibration_videos),
+        "contract": "V1-V5 development corpus; leave-one-video-out grouped cross-validation; V6-V7 final validation only",
+        "development_video_ids": video_ids,
+        "label_counts": dict(sorted(overall_counts.items())),
+        "minimum_probability": float(minimum_probability),
+        "grouped_cross_validation": {
+            "aggregate": cv_report,
+            "folds": fold_reports,
+        },
+        "fit_on_all_V1_V5": _metrics(train_truth, train_pred),
     }
 
     artifact = {
@@ -183,11 +253,11 @@ def train(
             "learning_rate": float(learning_rate),
             "epochs": int(epochs),
             "l2": float(l2),
-            "train_rows": len(train_rows),
-            "calibration_rows": len(calibration_rows),
-            "train_video_ids": sorted(train_videos),
-            "calibration_video_ids": sorted(calibration_videos),
-            "V1_V5_used_for_training_or_calibration": False,
+            "rows": len(rows),
+            "development_video_ids": video_ids,
+            "development_clips": ["V1", "V2", "V3", "V4", "V5"],
+            "grouped_cross_validation": "leave_one_video_out",
+            "final_validation_clips": ["V6", "V7"],
         },
         "development_report": report,
     }
@@ -195,7 +265,9 @@ def train(
 
 
 def parse_args() -> argparse.Namespace:
-    parser = argparse.ArgumentParser(description="Train AirborneClassifierV1 on disjoint development data.")
+    parser = argparse.ArgumentParser(
+        description="Train AirborneClassifierV1 on V1-V5 with grouped video cross-validation."
+    )
     parser.add_argument("--dataset", default="evaluation/airborne_dev/airborne_dataset.jsonl")
     parser.add_argument("--output", default="weights/p2_airborne_classifier_v1.json")
     parser.add_argument("--report", default="evaluation/airborne_dev/training_report.json")
@@ -210,6 +282,7 @@ def main() -> None:
     args = parse_args()
     if not (0.0 < args.minimum_probability <= 1.0):
         raise ValueError("--minimum-probability must be in (0, 1]")
+
     dataset = Path(args.dataset)
     output = Path(args.output)
     report_path = Path(args.report)
@@ -219,6 +292,7 @@ def main() -> None:
         output = PROJECT_ROOT / output
     if not report_path.is_absolute():
         report_path = PROJECT_ROOT / report_path
+
     rows = _load_jsonl(dataset)
     artifact, report = train(
         rows,
@@ -227,10 +301,15 @@ def main() -> None:
         l2=args.l2,
         minimum_probability=args.minimum_probability,
     )
+
     output.parent.mkdir(parents=True, exist_ok=True)
     report_path.parent.mkdir(parents=True, exist_ok=True)
-    output.write_text(json.dumps(artifact, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
-    report_path.write_text(json.dumps(report, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
+    output.write_text(
+        json.dumps(artifact, indent=2, ensure_ascii=False) + "\n", encoding="utf-8"
+    )
+    report_path.write_text(
+        json.dumps(report, indent=2, ensure_ascii=False) + "\n", encoding="utf-8"
+    )
     print(json.dumps(report, indent=2, ensure_ascii=False))
     print(f"model={output}")
 
