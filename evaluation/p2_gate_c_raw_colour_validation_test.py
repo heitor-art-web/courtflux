@@ -1,10 +1,15 @@
 from __future__ import annotations
 
 import unittest
+from pathlib import Path
+from unittest.mock import patch
+
+import numpy as np
 
 from evaluation.p2_gate_c_raw_colour_validation import (
     _best_raw_team,
     _prediction_for_track,
+    _recompute_prediction,
     _sample_raw_result,
 )
 
@@ -28,6 +33,14 @@ class GateCRawColourValidationTest(unittest.TestCase):
         self.assertEqual(best, "team_b")
         self.assertAlmostEqual(score or 0.0, 0.987)
         self.assertAlmostEqual(margin or 0.0, 0.974)
+
+    def test_zero_raw_mass_is_unattributed(self) -> None:
+        best, score, margin = _best_raw_team(
+            {"raw_scores": {"team_a": 0.0, "team_b": 0.0}}
+        )
+        self.assertIsNone(best)
+        self.assertEqual(score, 0.0)
+        self.assertEqual(margin, 0.0)
 
     def test_verified_holder_track_overrides_runtime_current_track(self) -> None:
         sample = {
@@ -53,6 +66,40 @@ class GateCRawColourValidationTest(unittest.TestCase):
         self.assertEqual(result["raw_observations"], 1)
         self.assertEqual(result["raw_correct"], 1)
         self.assertEqual(result["raw_team_votes"], {"team_b": 1})
+        self.assertEqual(result["score_source"], "archived_run")
+
+    def test_recompute_prediction_uses_archived_box_but_current_analyzer(self) -> None:
+        class FakeAnalyzer:
+            def score_teams(self, crop):
+                self.crop_shape = crop.shape
+                return {
+                    "raw_scores": {"team_a": 0.2, "team_b": 0.8},
+                    "colour_space": "current",
+                }
+
+        analyzer = FakeAnalyzer()
+        context = {"video_path": Path("fake.mp4"), "analyzer": analyzer}
+        row = {"frame_id": 12}
+        frame = np.zeros((100, 100, 3), dtype=np.uint8)
+        player = np.zeros((40, 20, 3), dtype=np.uint8)
+
+        with patch(
+            "evaluation.p2_gate_c_raw_colour_validation._box_for_track",
+            return_value=[10, 10, 30, 50],
+        ), patch(
+            "evaluation.p2_gate_c_raw_colour_validation._timestamp",
+            return_value=1.5,
+        ), patch(
+            "evaluation.p2_gate_c_raw_colour_validation._read_frame",
+            return_value=frame,
+        ), patch(
+            "evaluation.p2_gate_c_raw_colour_validation._safe_crop",
+            return_value=(player, [10, 10, 30, 50]),
+        ):
+            result = _recompute_prediction(row, 24, context)
+
+        self.assertEqual(result["raw_scores"]["team_b"], 0.8)
+        self.assertEqual(analyzer.crop_shape, (40, 20, 3))
 
 
 if __name__ == "__main__":
