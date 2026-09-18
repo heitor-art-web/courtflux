@@ -31,7 +31,7 @@ class DeferredSpatialConfirmationV12Test(unittest.TestCase):
         )
         self.assertIsNone(reason)
 
-    def test_persistent_near_x_confirms(self) -> None:
+    def test_sustained_near_x_confirms(self) -> None:
         reason = ShotEventTrackerV12._deferred_confirmation_reason(
             {
                 "rim_observations": 9,
@@ -44,6 +44,17 @@ class DeferredSpatialConfirmationV12Test(unittest.TestCase):
             reason,
             "deferred_rim_exit_persistent_near_x_confirmed",
         )
+
+    def test_short_near_x_run_does_not_confirm(self) -> None:
+        reason = ShotEventTrackerV12._deferred_confirmation_reason(
+            {
+                "rim_observations": 4,
+                "near_x_observations": 4,
+                "inside_mouth_observations": 0,
+                "incoherent_rim_steps": 0,
+            }
+        )
+        self.assertIsNone(reason)
 
     def test_partial_near_x_does_not_confirm(self) -> None:
         reason = ShotEventTrackerV12._deferred_confirmation_reason(
