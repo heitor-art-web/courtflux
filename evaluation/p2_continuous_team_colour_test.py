@@ -37,6 +37,11 @@ class ContinuousTeamColourTest(unittest.TestCase):
         red, green, blue = rgb
         return np.full((size, size, 3), (blue, green, red), dtype=np.uint8)
 
+    @staticmethod
+    def _solid_lab(lab: tuple[int, int, int], size: int = 96) -> np.ndarray:
+        lab_image = np.full((size, size, 3), lab, dtype=np.uint8)
+        return cv2.cvtColor(lab_image, cv2.COLOR_LAB2BGR)
+
     def test_arbitrary_hex_colours_do_not_require_named_mask(self) -> None:
         analyzer = self._analyzer(
             [{"name": "electric_magenta", "hex": "#D10A8C"}],
@@ -45,7 +50,7 @@ class ContinuousTeamColourTest(unittest.TestCase):
 
         result = analyzer.score_teams(self._solid_rgb((209, 10, 140)))
 
-        self.assertEqual(result["colour_space"], "CIELAB_continuous_discriminative_v2")
+        self.assertEqual(result["colour_space"], "CIELAB_continuous_chroma_luminance_v3")
         self.assertEqual(result["best_team"], "team_a")
         self.assertTrue(result["evidence_accepted"])
         self.assertGreater(result["raw_scores"]["team_a"], result["raw_scores"]["team_b"])
@@ -115,6 +120,36 @@ class ContinuousTeamColourTest(unittest.TestCase):
 
         self.assertFalse(result["evidence_accepted"])
         self.assertIsNone(result["best_team"])
+
+    def test_shadowed_desaturated_red_is_not_stolen_by_green_white(self) -> None:
+        analyzer = self._analyzer(["Green", "White"], ["Red"])
+        # V1 f141 human-verified red torso median in the actual camera-space audit.
+        crop = self._solid_lab((78, 149, 144))
+
+        result = analyzer.score_teams(crop)
+
+        self.assertEqual(result["best_team"], "team_b")
+        self.assertGreater(result["raw_scores"]["team_b"], result["raw_scores"]["team_a"])
+        self.assertGreater(result["discriminative_pixel_fraction"], 0.50)
+
+    def test_shadowed_green_is_not_stolen_by_white_blue(self) -> None:
+        analyzer = self._analyzer(["White", "Blue"], ["Green"])
+        # Dark/desaturated but still chromatically green: preserve hue under exposure loss.
+        crop = self._solid_lab((100, 105, 150))
+
+        result = analyzer.score_teams(crop)
+
+        self.assertEqual(result["best_team"], "team_b")
+        self.assertGreater(result["raw_scores"]["team_b"], result["raw_scores"]["team_a"])
+
+    def test_neutral_light_pixels_still_match_white_not_chromatic_colour(self) -> None:
+        analyzer = self._analyzer(["White"], ["Red"])
+        crop = self._solid_lab((210, 130, 129))
+
+        result = analyzer.score_teams(crop)
+
+        self.assertEqual(result["best_team"], "team_a")
+        self.assertGreater(result["raw_scores"]["team_a"], result["raw_scores"]["team_b"])
 
     def test_identity_compatibility_vector_is_continuous_not_mask_based(self) -> None:
         analyzer = self._analyzer(
