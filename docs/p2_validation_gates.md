@@ -6,14 +6,17 @@ P2 exists to provide a basketball timeline that P3 can aggregate, search, clip a
 
 The data contract is:
 
-- V1–V5: development/training corpus for AirborneClassifierV1;
-- grouped leave-one-video-out cross-validation is used inside V1–V5;
-- the final AirborneClassifierV1 artefact is fitted on all V1–V5 only after development choices are frozen;
-- V6–V7: new, unseen validation videos for the final P2 gates.
+- V1, V3, V4 and V5: normal development corpus for Gates A–D and AirborneClassifierV1 development;
+- V2: development challenge/outlier clip, always reported as a stress/regression test but not a blocker for closing development Gates A–D;
+- grouped leave-one-video-out cross-validation for normal development decisions uses V1, V3, V4 and V5;
+- the final AirborneClassifierV1 artefact is fitted only after development choices are frozen;
+- V6–V7: new, unseen videos reserved exclusively for the final P2 Exit Gate.
 
-V6–V7 must not be used to select features, weights, model family, confidence threshold or gate thresholds.
+V6–V7 must remain completely untouched while Gates A–D are being developed and closed. They must not be used for feature selection, model-family selection, weights, confidence thresholds, gate thresholds, iterative diagnostics or tuning.
 
-The validation order remains A → B → C → D.
+The development validation order remains A → B → C → D.
+
+After Gates A–D are closed and the P2 model, features, weights, confidence thresholds and gate thresholds are frozen, V6–V7 are evaluated once as the final P2 Exit Gate.
 
 ---
 
@@ -31,7 +34,7 @@ Frame accuracy, dominant-frame accuracy and exact boundary overlap are diagnosti
 
 ### Required checks
 
-Frozen before V6–V7 validation:
+Frozen before final Exit Gate validation:
 
 - GT-window prediction coverage: aggregate >= 0.98; every clip >= 0.95.
 - Core interval detection recall (`possessed`, `pass_flight`, `shot_flight`): aggregate >= 0.70.
@@ -46,6 +49,8 @@ Frozen before V6–V7 validation:
 - Per-clip core unresolved interval rate <= 0.45.
 
 `loose` remains reported but is not a required Gate-A check until sufficient independent human loose-ball intervals exist.
+
+During development, required Gate-A checks are evaluated on the normal development set V1/V3/V4/V5. V2 is reported separately as a challenge/outlier regression clip and does not block development Gate A.
 
 ### Interval resolution contract
 
@@ -101,9 +106,11 @@ Stage 1 exists because the dominant development error is not only PASS-vs-SHOT: 
 
 Stage 2 trains only on GT `pass_flight` and `shot_flight` rows. A low-confidence Stage-2 result may abstain to `unresolved`.
 
-Development uses V1–V5 with leave-one-video-out grouped cross-validation. Each fold trains on four videos and evaluates on the fifth. Training weighting gives comparable mass to human intervals and source videos so long clips or long intervals do not dominate the model.
+Normal development uses V1, V3, V4 and V5 with grouped leave-one-video-out cross-validation. Each fold trains on the remaining normal development videos and evaluates on the held-out video. Training weighting gives comparable mass to human intervals and source videos so long clips or long intervals do not dominate the model.
 
-After development choices are frozen, the final artefact is fit on all V1–V5 and evaluated once on V6–V7.
+V2 remains available throughout development as a challenge/outlier stress and regression clip, but its score is reported separately and does not block development Gates A–D.
+
+After development choices are frozen, the final artefact is fit on the frozen development corpus. V6–V7 remain untouched until all Gates A–D are closed and the final P2 Exit Gate is run.
 
 ---
 
@@ -149,11 +156,23 @@ Track IDs may change. The evaluated identity is the stable game-player entity, n
 
 ---
 
+## Final P2 Exit Gate
+
+The final P2 Exit Gate is evaluated only after development Gates A–D are closed and all P2 development decisions are frozen.
+
+- V6–V7 are the only final unseen Exit Gate videos.
+- V6–V7 are evaluated once with the frozen P2 stack and frozen Gate A–D contracts.
+- V6–V7 must not be used for iterative tuning or threshold selection.
+- If the Exit Gate exposes a defect that requires model, feature, policy or threshold changes, the affected layer is remediated using development data; a subsequent independent final validation requires fresh unseen videos rather than reusing V6–V7 as if they were still unseen.
+
+---
+
 ## Gate policy
 
-- Gate thresholds are frozen before V6–V7 evaluation.
-- Development and final validation videos are disjoint.
-- V1–V5 may be used for AirborneClassifierV1 development, grouped CV and final fitting.
-- V6–V7 are final validation-only and must remain untouched until model and thresholds are frozen.
-- A failed gate triggers remediation of the responsible layer; thresholds are not changed in response to observed validation scores.
-- P2 exits validation when Gates A–D pass their applicable contracts with reviewed GT.
+- Gate thresholds are frozen before the final V6–V7 Exit Gate.
+- Normal development and final validation videos are disjoint.
+- V1/V3/V4/V5 are the normal development set for Gates A–D.
+- V2 is a development challenge/outlier set: always reported, never hidden, but non-blocking for development Gate closure.
+- V6–V7 are final Exit Gate-only and must remain untouched until Gates A–D, model, features, weights and thresholds are frozen.
+- A failed development gate triggers remediation of the responsible layer; thresholds are not changed in response to observed scores.
+- P2 exits validation only after Gates A–D pass their applicable development contracts and the frozen stack passes the final V6–V7 Exit Gate with reviewed GT.
