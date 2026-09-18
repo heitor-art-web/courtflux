@@ -31,6 +31,7 @@ EVENT_TYPE_BY_STATE = {
     "pass_flight": "pass_candidate",
     "shot_flight": "shot_attempt",
 }
+NON_SCORING_STATUSES = {"historical_broad_window_not_scored", "excluded", "diagnostic_only"}
 
 
 def _run_path(run_id: str, filename: str) -> Path:
@@ -50,8 +51,8 @@ def _load_gt(path: Path) -> dict[str, Any]:
     payload = json.loads(path.read_text(encoding="utf-8"))
     if not isinstance(payload, dict):
         raise ValueError("Gate C ground truth must be a JSON object")
-    if str(payload.get("version") or "") != "courtflux_p2_gate_c_team_gt_v2":
-        raise ValueError("Gate C ground truth version must be courtflux_p2_gate_c_team_gt_v2")
+    if str(payload.get("version") or "") != "courtflux_p2_gate_c_team_gt_v3":
+        raise ValueError("Gate C ground truth version must be courtflux_p2_gate_c_team_gt_v3")
     return payload
 
 
@@ -59,6 +60,41 @@ def _sample_window(sample: dict[str, Any]) -> tuple[int, int]:
     start = int(sample.get("frame_start", sample.get("frame_end", 0)))
     end = int(sample.get("frame_end", start))
     return (end, start) if end < start else (start, end)
+
+
+def _scoring_samples(clip_gt: dict[str, Any]) -> list[dict[str, Any]]:
+    """Return scoring truth without allowing broad V4 possession windows to leak in.
+
+    When a clip declares ``possession_intervals``, those intervals are the only possessed
+    scoring truth for that clip. Event samples remain active unless explicitly marked as
+    non-scoring. This lets human-reviewed possession boundaries replace historical broad
+    windows without deleting provenance from the sidecar.
+    """
+    samples = [
+        dict(row)
+        for row in list(clip_gt.get("samples", []) or [])
+        if isinstance(row, dict)
+        and str(row.get("scoring_status") or "active") not in NON_SCORING_STATUSES
+    ]
+    explicit = clip_gt.get("possession_intervals")
+    if explicit is None:
+        return samples
+
+    event_samples = [row for row in samples if str(row.get("state") or "") != "possessed"]
+    possession_samples: list[dict[str, Any]] = []
+    for raw in list(explicit or []):
+        if not isinstance(raw, dict):
+            continue
+        row = dict(raw)
+        row["state"] = "possessed"
+        row["source_kind"] = "human_verified_possession_interval"
+        if not str(row.get("run_key") or "").strip():
+            raise ValueError("Gate C possession interval is missing run_key")
+        if not str(row.get("team_id") or "").strip():
+            raise ValueError("Gate C possession interval is missing team_id")
+        _sample_window(row)
+        possession_samples.append(row)
+    return event_samples + possession_samples
 
 
 def _modal_team(teams: list[str]) -> tuple[str | None, Counter[str]]:
@@ -75,7 +111,7 @@ def _evaluate_possessed_sample(
 ) -> dict[str, Any]:
     start, end = _sample_window(sample)
     truth_team = str(sample["team_id"])
-    evidence = []
+    evidence: list[str] = []
     for row in states:
         frame_id = int(row.get("frame_id", -1))
         if frame_id < start or frame_id > end:
@@ -194,11 +230,11 @@ def evaluate_clip(
         for key, value in dict(clip_gt.get("runs", {}) or {}).items()
         if isinstance(value, dict)
     }
-    samples = [row for row in list(clip_gt.get("samples", []) or []) if isinstance(row, dict)]
+    samples = _scoring_samples(clip_gt)
 
     required_run_keys = sorted({str(sample.get("run_key") or "") for sample in samples})
     if not required_run_keys or any(not key for key in required_run_keys):
-        raise ValueError(f"Gate C clip {clip} has a sample without run_key")
+        raise ValueError(f"Gate C clip {clip} has a scoring sample without run_key")
 
     artifacts: dict[str, tuple[list[dict[str, Any]], list[dict[str, Any]]]] = {}
     for run_key in required_run_keys:
@@ -237,10 +273,12 @@ def evaluate_clip(
                 "run_id": run_ids[run_key],
                 "match_config": run_spec.get("match_config"),
                 "state": state,
+                "source_kind": sample.get("source_kind", "sample"),
                 "frame_start": start,
                 "frame_end": end,
                 "original_frame_start": sample.get("original_frame_start", start),
                 "original_frame_end": sample.get("original_frame_end", end),
+                "verified_holder_track_id": sample.get("verified_holder_track_id"),
                 "human_note": sample.get("human_note"),
                 **result,
             }
@@ -257,15 +295,14 @@ def evaluate_clip(
     coverage = attributed / max(total, 1)
     accuracy = correct / max(attributed, 1)
     contamination = (
-        None
-        if not contamination_values
-        else sum(contamination_values) / len(contamination_values)
+        None if not contamination_values else sum(contamination_values) / len(contamination_values)
     )
     return {
         "clip": clip,
         "run_ids": {key: run_ids[key] for key in required_run_keys},
         "match_configs": {key: run_specs[key].get("match_config") for key in required_run_keys},
         "teams": list(clip_gt.get("teams", []) or []),
+        "possession_gt_status": clip_gt.get("possession_gt_status"),
         "samples": total,
         "attributed_samples": attributed,
         "correct_samples": correct,
@@ -280,21 +317,15 @@ def _aggregate(clips: list[dict[str, Any]]) -> dict[str, Any]:
     samples = sum(int(row["samples"]) for row in clips)
     attributed = sum(int(row["attributed_samples"]) for row in clips)
     correct = sum(int(row["correct_samples"]) for row in clips)
-
     contamination_values: list[float] = []
     for clip in clips:
         for sample in clip.get("sample_results", []):
             value = sample.get("contamination_rate")
             if value is not None:
                 contamination_values.append(float(value))
-
     coverage = attributed / max(samples, 1)
     accuracy = correct / max(attributed, 1)
-    contamination = (
-        None
-        if not contamination_values
-        else sum(contamination_values) / len(contamination_values)
-    )
+    contamination = None if not contamination_values else sum(contamination_values) / len(contamination_values)
     return {
         "samples": samples,
         "attributed_samples": attributed,
@@ -395,11 +426,13 @@ def main() -> None:
     challenge_gate = _gate(challenge_aggregate, challenge)
 
     result = {
-        "version": "courtflux_p2_gate_c_team_attribution_v2",
+        "version": "courtflux_p2_gate_c_team_attribution_v3",
         "contract": (
-            "Gate C uses prediction-blind human team slots and audited kit contexts; V4 is split into "
-            "three colour-stable runtime segments but remains one clip for per-clip scoring; V1/V3/V4/V5 "
-            "block development, V2 is challenge-only; unknown/unattributed is separate from wrong-team attribution"
+            "Gate C uses prediction-blind human team slots and audited kit contexts; clips declaring "
+            "possession_intervals score possession only on those human-verified intervals; historical broad "
+            "possession windows remain provenance-only; V4 remains one clip across three colour-stable runtime "
+            "segments; V1/V3/V4/V5 block development, V2 is challenge-only; unknown/unattributed is separate "
+            "from wrong-team attribution"
         ),
         "thresholds": {
             "coverage_min": TEAM_ATTRIBUTION_COVERAGE_MIN,
