@@ -28,6 +28,11 @@ class TeamOnlyAnalyzer:
     low chroma plus compatible lightness. Team scoring remains discriminative per pixel:
     every torso pixel compares all teams on the same evidence and ambiguous pixels can
     abstain.
+
+    Spatially, the classifier prefers a central jersey core inside the existing chest
+    ROI. The exact same acceptance thresholds are applied to that core; the full chest
+    is used only when the core abstains. This limits arms/background/adjacent-player
+    contamination without weakening any colour or Gate-C threshold.
     """
 
     # These are classifier-internal development parameters, not Gate-C thresholds.
@@ -52,6 +57,15 @@ class TeamOnlyAnalyzer:
     SHARED_COLOUR_FLOOR = 0.12
     DISTINCTIVENESS_SIGMA = 38.0
     EMBEDDING_BINS = 4
+
+    # Relative to the existing chest ROI, not the full player crop. These bounds were
+    # selected from the prediction-blind spatial audit contract: center 50% of width and
+    # middle 60% of height. They are a geometry policy, not colour-specific tuning.
+    CORE_X_MIN = 0.25
+    CORE_X_MAX = 0.75
+    CORE_Y_MIN = 0.20
+    CORE_Y_MAX = 0.80
+    SPATIAL_POLICY = "central_jersey_core_first_v1"
 
     # Compatibility aliases for existing match configs. This table is not the decision
     # space: callers can configure any colour numerically without adding Python code.
@@ -407,6 +421,43 @@ class TeamOnlyAnalyzer:
             for team, items in self.active_colour_prototypes.items()
         }
 
+    def _accepted_team(
+        self,
+        raw_scores: dict[str, float],
+        evidence_fraction: float,
+    ) -> tuple[str | None, float, float]:
+        ordered = sorted(raw_scores.items(), key=lambda item: item[1], reverse=True)
+        best_team, best_score = ordered[0] if ordered else (None, 0.0)
+        second_score = ordered[1][1] if len(ordered) > 1 else 0.0
+        margin = max(0.0, float(best_score) - float(second_score))
+        accepted = (
+            str(best_team)
+            if best_team is not None
+            and evidence_fraction >= self.MIN_DISCRIMINATIVE_PIXEL_FRACTION
+            and float(best_score) >= self.MIN_TEAM_SCORE
+            and margin >= self.MIN_TEAM_MARGIN
+            else None
+        )
+        return accepted, float(best_score), margin
+
+    def _score_lab_region(self, lab: np.ndarray) -> dict[str, Any] | None:
+        pixels = lab.reshape(-1, 3).astype(np.float32)
+        if pixels.size == 0:
+            return None
+        raw_scores, prototype_affinity, evidence_fraction, discriminative_count = self._team_scores(pixels)
+        accepted, best_score, margin = self._accepted_team(raw_scores, evidence_fraction)
+        return {
+            "lab": lab,
+            "pixels": pixels,
+            "raw_scores": raw_scores,
+            "prototype_affinity": prototype_affinity,
+            "evidence_fraction": evidence_fraction,
+            "discriminative_count": discriminative_count,
+            "accepted": accepted,
+            "best_score": best_score,
+            "margin": margin,
+        }
+
     def score_teams(self, crop: np.ndarray) -> dict:
         """Return selective team evidence using continuous discriminative CIELAB affinity."""
         colour_space = "CIELAB_continuous_chroma_luminance_v3"
@@ -425,6 +476,8 @@ class TeamOnlyAnalyzer:
             "active_kits": self.active_kits,
             "active_colour_prototypes": self._public_prototypes(),
             "colour_space": colour_space,
+            "spatial_policy": self.SPATIAL_POLICY,
+            "evidence_region": None,
         }
         if crop is None or crop.size == 0 or not self.rosters:
             return empty
@@ -433,34 +486,51 @@ class TeamOnlyAnalyzer:
         if h < 10 or w < 10:
             return empty
 
-        # Tighter torso ROI reduces head/arms/background while still tolerating angled
-        # player boxes. Shorts and lettering remain audit context, not implicit votes.
+        # Primary chest ROI. Shorts and lettering remain audit context, not implicit votes.
         chest = crop[int(h * 0.22):int(h * 0.58), int(w * 0.22):int(w * 0.78)]
         if chest.size == 0:
             chest = crop[int(h * 0.18):int(h * 0.62), int(w * 0.18):int(w * 0.82)]
         if chest.size == 0:
             chest = crop[: int(h * 0.65), :]
-
-        lab = cv2.cvtColor(chest, cv2.COLOR_BGR2LAB)
-        lab_pixels = lab.reshape(-1, 3).astype(np.float32)
-        if lab_pixels.size == 0:
+        if chest.size == 0:
             return empty
 
-        raw_scores, prototype_affinity, evidence_fraction, discriminative_count = self._team_scores(lab_pixels)
-        ordered = sorted(raw_scores.items(), key=lambda item: item[1], reverse=True)
-        best_team, best_score = ordered[0] if ordered else (None, 0.0)
-        second_score = ordered[1][1] if len(ordered) > 1 else 0.0
-        margin = max(0.0, best_score - second_score)
+        full_lab = cv2.cvtColor(chest, cv2.COLOR_BGR2LAB)
+        full_result = self._score_lab_region(full_lab)
+        if full_result is None:
+            return empty
 
-        accepted = (
-            best_team
-            if evidence_fraction >= self.MIN_DISCRIMINATIVE_PIXEL_FRACTION
-            and best_score >= self.MIN_TEAM_SCORE
-            and margin >= self.MIN_TEAM_MARGIN
+        chest_h, chest_w = chest.shape[:2]
+        core_y1 = max(0, min(chest_h - 1, int(round(chest_h * self.CORE_Y_MIN))))
+        core_y2 = max(core_y1 + 1, min(chest_h, int(round(chest_h * self.CORE_Y_MAX))))
+        core_x1 = max(0, min(chest_w - 1, int(round(chest_w * self.CORE_X_MIN))))
+        core_x2 = max(core_x1 + 1, min(chest_w, int(round(chest_w * self.CORE_X_MAX))))
+        core = chest[core_y1:core_y2, core_x1:core_x2]
+        core_result = (
+            self._score_lab_region(cv2.cvtColor(core, cv2.COLOR_BGR2LAB))
+            if core.size
             else None
         )
+
+        if core_result is not None and core_result["accepted"] is not None:
+            selected = core_result
+            evidence_region = "inner_core"
+        else:
+            selected = full_result
+            evidence_region = "full_fallback"
+
+        raw_scores = dict(selected["raw_scores"])
+        prototype_affinity = dict(selected["prototype_affinity"])
+        evidence_fraction = float(selected["evidence_fraction"])
+        discriminative_count = int(selected["discriminative_count"])
+        accepted = selected["accepted"]
+        best_score = float(selected["best_score"])
+        margin = float(selected["margin"])
+        selected_lab = selected["lab"]
+        selected_pixels = selected["pixels"]
+
         evidence_scores = raw_scores if accepted is not None else {}
-        basis_projection = self._continuous_basis_projection(lab_pixels)
+        basis_projection = self._continuous_basis_projection(selected_pixels)
 
         return {
             "scores": {name: round(value, 6) for name, value in evidence_scores.items()},
@@ -472,15 +542,17 @@ class TeamOnlyAnalyzer:
             "discriminative_pixel_fraction": round(float(evidence_fraction), 6),
             "discriminative_pixels": int(discriminative_count),
             # Backward-compatible field consumed by Identity v2. Values are continuous
-            # anchor affinities, not binary/named masks.
+            # anchor affinities, not binary/named masks, over the selected evidence region.
             "color_coverage": {name: round(value, 6) for name, value in basis_projection.items()},
-            "color_embedding": self._colour_embedding(lab),
+            "color_embedding": self._colour_embedding(selected_lab),
             "prototype_affinity": {
                 name: round(value, 6) for name, value in prototype_affinity.items()
             },
             "active_kits": self.active_kits,
             "active_colour_prototypes": self._public_prototypes(),
             "colour_space": colour_space,
+            "spatial_policy": self.SPATIAL_POLICY,
+            "evidence_region": evidence_region,
         }
 
     def get_team_color(self, crop: np.ndarray) -> Optional[str]:
