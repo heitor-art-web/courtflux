@@ -42,6 +42,24 @@ class GateAP3ReadinessTest(unittest.TestCase):
         self.assertEqual(result["by_state"]["pass_flight"]["correct"], 1)
         self.assertEqual(result["by_state"]["pass_flight"]["unresolved"], 1)
 
+    def test_sequence_order_is_conditioned_on_both_episodes_detected(self) -> None:
+        truth = [
+            {"truth_index": 0, "state": "possessed", "frame_start": 0, "frame_end": 10},
+            {"truth_index": 1, "state": "pass_flight", "frame_start": 20, "frame_end": 30},
+            {"truth_index": 2, "state": "possessed", "frame_start": 40, "frame_end": 50},
+        ]
+        predicted = [
+            {"prediction_index": 0, "state": "possessed", "frame_start": 2, "frame_end": 8},
+            {"prediction_index": 1, "state": "pass_flight", "frame_start": 22, "frame_end": 28},
+        ]
+        result = _match_intervals(truth, predicted, tolerance_frames=8)
+        sequence = result["semantic_transitions"]
+        self.assertEqual(sequence["gt_total"], 2)
+        self.assertEqual(sequence["eligible_detected"], 1)
+        self.assertEqual(sequence["correct_order"], 1)
+        self.assertEqual(sequence["order_accuracy"], 1.0)
+        self.assertEqual(sequence["detected_transition_coverage"], 0.5)
+
     def test_predicted_state_rows_are_collapsed_into_intervals(self) -> None:
         rows = [
             {"frame_id": 0, "control_state": "possessed"},
