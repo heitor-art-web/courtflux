@@ -1,15 +1,17 @@
 {
   "metadata": {
-    "home_team": "black",
-    "away_team": "white",
+    "home_team": "team_a",
+    "away_team": "team_b",
     "active_kits": {
-      "black": "current",
-      "white": "current"
+      "team_a": "observed_union",
+      "team_b": "observed_union"
     },
-    "evaluation_scope": "p2_gate_c_development_v3"
+    "evaluation_scope": "p2_gate_c_development_v3",
+    "human_kit_audit_ref": "evaluation/ground_truth/v3.json#human_kit_audit",
+    "note": "V3 is a highlight clip with time-varying Team A kit. The runtime config uses the prediction-blind union of audited torso colours; exact temporal variants remain recorded in v3.json."
   },
   "teams": {
-    "black": {"kits": {"current": ["Black"]}, "roster": {}},
-    "white": {"kits": {"current": ["White"]}, "roster": {}}
+    "team_a": {"kits": {"observed_union": ["Black", "Red"]}, "roster": {}},
+    "team_b": {"kits": {"observed_union": ["White"]}, "roster": {}}
   }
 }
