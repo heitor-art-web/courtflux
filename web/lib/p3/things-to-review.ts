@@ -1,5 +1,6 @@
 export type P3DerivationRow = {
   id: string;
+  status: string;
   derivation_version: string;
   configuration_version: string;
   source_versions: Record<string, unknown> | null;
@@ -181,6 +182,7 @@ export function assembleThingsToReview(input: AssembleInput) {
     game_id: input.gameId,
     derivation: {
       id: input.derivation.id,
+      status: input.derivation.status,
       derivation_version: input.derivation.derivation_version,
       configuration_version: input.derivation.configuration_version,
       source_versions: input.derivation.source_versions ?? {},

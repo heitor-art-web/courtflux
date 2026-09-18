@@ -33,7 +33,11 @@ export type ReviewItem = {
 export type ThingsToReviewResponse = {
   analysis_run_id: string;
   game_id: string;
-  derivation: { id: string; generated_at: string } | null;
+  derivation: {
+    id: string;
+    status: string;
+    generated_at: string;
+  } | null;
   ranking_applied: boolean;
   summary: {
     total_items: number;
@@ -49,6 +53,7 @@ export type ThingsToReviewResponse = {
 export type ViewMode =
   | { kind: "all" }
   | { kind: "saved" }
+  | { kind: "tag"; tagId: string }
   | { kind: "collection"; collectionId: string };
 
 export type SubmitReviewAction = (
@@ -75,6 +80,15 @@ export function formatTime(milliseconds: number | null) {
 export function formatConfidence(value: number | null) {
   if (value == null || !Number.isFinite(value)) return "Unknown confidence";
   return `${Math.round(Math.max(0, Math.min(1, value)) * 100)}% confidence`;
+}
+
+export function formatMetadataTime(value: string) {
+  const date = new Date(value);
+  if (!Number.isFinite(date.getTime())) return "Unknown time";
+  return new Intl.DateTimeFormat(undefined, {
+    dateStyle: "medium",
+    timeStyle: "short",
+  }).format(date);
 }
 
 export function reasonLines(reason: Record<string, unknown>) {

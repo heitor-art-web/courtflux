@@ -1,21 +1,23 @@
 import type { Dispatch, SetStateAction } from "react";
 import type { P3ReviewActionsState } from "@/lib/p3/review-actions";
 import type { ReviewItem, SubmitReviewAction } from "./review-workspace-types";
-import { formatConfidence, formatTime, humanize, reasonLines } from "./review-workspace-types";
+import { formatConfidence, formatMetadataTime, formatTime, humanize, reasonLines } from "./review-workspace-types";
 import styles from "./review-workspace.module.css";
 
 type Props = {
   item: ReviewItem;
   actions: P3ReviewActionsState;
   saved: boolean;
+  savedAt: string | null;
   busy: boolean;
   noteDrafts: Record<string, string>;
   setNoteDrafts: Dispatch<SetStateAction<Record<string, string>>>;
   submit: SubmitReviewAction;
 };
 
-export function ReviewItemCard({ item, actions, saved, busy, noteDrafts, setNoteDrafts, submit }: Props) {
-  const note = actions.notes_by_review_item[item.id]?.body ?? "";
+export function ReviewItemCard({ item, actions, saved, savedAt, busy, noteDrafts, setNoteDrafts, submit }: Props) {
+  const noteMetadata = actions.notes_by_review_item[item.id] ?? null;
+  const note = noteMetadata?.body ?? "";
   const draft = noteDrafts[item.id] ?? note;
   const itemTagIds = new Set(actions.tag_ids_by_review_item[item.id] ?? []);
   const itemCollectionIds = new Set(actions.collection_ids_by_review_item[item.id] ?? []);
@@ -70,7 +72,7 @@ export function ReviewItemCard({ item, actions, saved, busy, noteDrafts, setNote
 
       <div className={styles.organizeGrid}>
         <details className={styles.organizer} open={Boolean(note)}>
-          <summary>Note {note ? "· added" : ""}</summary>
+          <summary>Note {noteMetadata ? `· updated ${formatMetadataTime(noteMetadata.updated_at)}` : ""}</summary>
           <textarea
             value={draft}
             maxLength={4000}
@@ -168,7 +170,7 @@ export function ReviewItemCard({ item, actions, saved, busy, noteDrafts, setNote
 
       <footer className={styles.cardFooter}>
         <span>{item.my_review ? `Human review: ${humanize(item.my_review.state)}` : "Not human-reviewed"}</span>
-        <span>{item.completeness === "unknown" ? "Completeness unknown" : humanize(item.completeness)}</span>
+        <span>{savedAt ? `Saved ${formatMetadataTime(savedAt)}` : item.completeness === "unknown" ? "Completeness unknown" : humanize(item.completeness)}</span>
       </footer>
     </article>
   );

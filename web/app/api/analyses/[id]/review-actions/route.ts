@@ -5,16 +5,29 @@ import { createClient } from "@/lib/supabase/server";
 
 export const dynamic = "force-dynamic";
 
+type DerivationSummary = {
+  id: string;
+  status: string;
+  generated_at: string;
+};
+
 type Context = {
   userId: string;
   workspaceId: string;
   analysisRunId: string;
   gameId: string;
   derivationId: string | null;
+  derivationStatus: string | null;
+  availableDerivations: DerivationSummary[];
   reviewItemIds: string[];
 };
 
-async function loadContext(id: string) {
+function requestedDerivationId(request: Request) {
+  const value = new URL(request.url).searchParams.get("derivation_id");
+  return value?.trim() || null;
+}
+
+async function loadContext(id: string, requestedDerivation: string | null) {
   const supabase = await createClient();
   const {
     data: { user },
@@ -50,28 +63,44 @@ async function loadContext(id: string) {
     };
   }
 
-  const { data: derivation, error: derivationError } = await admin
+  const { data: derivations, error: derivationError } = await admin
     .from("analysis_derivations")
-    .select("id")
+    .select("id,status,generated_at")
     .eq("workspace_id", workspaceId)
     .eq("analysis_run_id", run.id)
     .eq("game_id", run.game_id)
     .eq("layer", "p3")
     .eq("derivation_key", "things_to_review")
-    .eq("status", "current")
     .order("created_at", { ascending: false })
-    .limit(1)
-    .maybeSingle();
+    .limit(100);
   if (derivationError) throw derivationError;
 
+  const availableDerivations = (derivations ?? []).map((row) => ({
+    id: row.id as string,
+    status: row.status as string,
+    generated_at: row.generated_at as string,
+  }));
+
+  let selected: DerivationSummary | null = null;
+  if (requestedDerivation) {
+    selected = availableDerivations.find((row) => row.id === requestedDerivation) ?? null;
+    if (!selected) {
+      return {
+        error: Response.json({ error: "P3 review derivation not found" }, { status: 404 }),
+      };
+    }
+  } else {
+    selected = availableDerivations.find((row) => row.status === "current") ?? null;
+  }
+
   let reviewItemIds: string[] = [];
-  if (derivation?.id) {
+  if (selected?.id) {
     const { data: items, error: itemError } = await admin
       .from("p3_review_items")
       .select("id")
       .eq("workspace_id", workspaceId)
       .eq("analysis_run_id", run.id)
-      .eq("derivation_id", derivation.id);
+      .eq("derivation_id", selected.id);
     if (itemError) throw itemError;
     reviewItemIds = (items ?? []).map((row) => row.id as string);
   }
@@ -83,7 +112,9 @@ async function loadContext(id: string) {
       workspaceId,
       analysisRunId: run.id as string,
       gameId: run.game_id as string,
-      derivationId: (derivation?.id as string | undefined) ?? null,
+      derivationId: selected?.id ?? null,
+      derivationStatus: selected?.status ?? null,
+      availableDerivations,
       reviewItemIds,
     } satisfies Context,
   };
@@ -95,23 +126,23 @@ async function readState(admin: ReturnType<typeof createAdminClient>, context: C
     await Promise.all([
       admin
         .from("p3_saved_items")
-        .select("review_item_id")
+        .select("review_item_id,created_at")
         .eq("workspace_id", workspaceId)
         .eq("user_id", userId),
       admin
         .from("p3_notes")
-        .select("review_item_id,body,updated_at")
+        .select("review_item_id,body,created_at,updated_at")
         .eq("workspace_id", workspaceId)
         .eq("user_id", userId),
       admin
         .from("p3_tags")
-        .select("id,name")
+        .select("id,name,created_at,updated_at")
         .eq("workspace_id", workspaceId)
         .eq("user_id", userId)
         .order("normalized_name", { ascending: true }),
       admin
         .from("p3_collections")
-        .select("id,name,description")
+        .select("id,name,description,created_at,updated_at")
         .eq("workspace_id", workspaceId)
         .eq("user_id", userId)
         .order("updated_at", { ascending: false }),
@@ -139,9 +170,13 @@ async function readState(admin: ReturnType<typeof createAdminClient>, context: C
   }
 
   const allowed = new Set(reviewItemIds);
-  const savedReviewItemIds = (savedResult.data ?? [])
-    .map((row) => row.review_item_id as string)
-    .filter((id) => allowed.has(id));
+  const savedItems = (savedResult.data ?? [])
+    .filter((row) => allowed.has(row.review_item_id as string))
+    .map((row) => ({
+      review_item_id: row.review_item_id as string,
+      created_at: row.created_at as string,
+    }))
+    .sort((left, right) => left.created_at.localeCompare(right.created_at));
 
   const notesByReviewItem: P3ReviewActionsState["notes_by_review_item"] = {};
   for (const row of notesResult.data ?? []) {
@@ -149,24 +184,32 @@ async function readState(admin: ReturnType<typeof createAdminClient>, context: C
     if (!allowed.has(id)) continue;
     notesByReviewItem[id] = {
       body: row.body as string,
+      created_at: row.created_at as string,
       updated_at: row.updated_at as string,
     };
   }
 
+  const totalTagCounts = new Map<string, number>();
+  const currentTagCounts = new Map<string, number>();
   const tagIdsByReviewItem: Record<string, string[]> = {};
   for (const row of tagLinksResult.data ?? []) {
-    const id = row.review_item_id as string;
-    if (!allowed.has(id)) continue;
-    (tagIdsByReviewItem[id] ??= []).push(row.tag_id as string);
+    const tagId = row.tag_id as string;
+    totalTagCounts.set(tagId, (totalTagCounts.get(tagId) ?? 0) + 1);
+    const reviewItemId = row.review_item_id as string;
+    if (!allowed.has(reviewItemId)) continue;
+    currentTagCounts.set(tagId, (currentTagCounts.get(tagId) ?? 0) + 1);
+    (tagIdsByReviewItem[reviewItemId] ??= []).push(tagId);
   }
 
-  const collectionCounts = new Map<string, number>();
+  const totalCollectionCounts = new Map<string, number>();
+  const currentCollectionCounts = new Map<string, number>();
   const collectionIdsByReviewItem: Record<string, string[]> = {};
   for (const row of collectionItemsResult.data ?? []) {
     const collectionId = row.collection_id as string;
-    collectionCounts.set(collectionId, (collectionCounts.get(collectionId) ?? 0) + 1);
+    totalCollectionCounts.set(collectionId, (totalCollectionCounts.get(collectionId) ?? 0) + 1);
     const reviewItemId = row.review_item_id as string;
     if (!allowed.has(reviewItemId)) continue;
+    currentCollectionCounts.set(collectionId, (currentCollectionCounts.get(collectionId) ?? 0) + 1);
     (collectionIdsByReviewItem[reviewItemId] ??= []).push(collectionId);
   }
 
@@ -174,33 +217,72 @@ async function readState(admin: ReturnType<typeof createAdminClient>, context: C
     analysis_run_id: context.analysisRunId,
     game_id: context.gameId,
     derivation_id: context.derivationId,
-    saved_review_item_ids: savedReviewItemIds.sort(),
+    derivation_status: context.derivationStatus,
+    available_derivations: context.availableDerivations,
+    saved_review_item_ids: savedItems.map((row) => row.review_item_id),
+    saved_items: savedItems,
     notes_by_review_item: notesByReviewItem,
-    tags: (tagsResult.data ?? []).map((row) => ({ id: row.id as string, name: row.name as string })),
+    tags: (tagsResult.data ?? []).map((row) => ({
+      id: row.id as string,
+      name: row.name as string,
+      created_at: row.created_at as string,
+      updated_at: row.updated_at as string,
+      item_count: currentTagCounts.get(row.id as string) ?? 0,
+      total_item_count: totalTagCounts.get(row.id as string) ?? 0,
+    })),
     tag_ids_by_review_item: tagIdsByReviewItem,
     collections: (collectionsResult.data ?? []).map((row) => ({
       id: row.id as string,
       name: row.name as string,
       description: (row.description as string | null) ?? null,
-      item_count: collectionCounts.get(row.id as string) ?? 0,
+      created_at: row.created_at as string,
+      updated_at: row.updated_at as string,
+      item_count: currentCollectionCounts.get(row.id as string) ?? 0,
+      total_item_count: totalCollectionCounts.get(row.id as string) ?? 0,
     })),
     collection_ids_by_review_item: collectionIdsByReviewItem,
   } satisfies P3ReviewActionsState;
 }
 
-function requireCurrentReviewItem(context: Context, reviewItemId: string) {
-  if (!context.reviewItemIds.includes(reviewItemId)) {
-    throw new Error("Review item does not belong to the current P3 derivation");
-  }
+async function ownedTag(
+  admin: ReturnType<typeof createAdminClient>,
+  context: Context,
+  tagId: string,
+) {
+  const { data, error } = await admin
+    .from("p3_tags")
+    .select("id")
+    .eq("id", tagId)
+    .eq("workspace_id", context.workspaceId)
+    .eq("user_id", context.userId)
+    .maybeSingle();
+  if (error) throw error;
+  return data;
+}
+
+async function ownedCollection(
+  admin: ReturnType<typeof createAdminClient>,
+  context: Context,
+  collectionId: string,
+) {
+  const { data, error } = await admin
+    .from("p3_collections")
+    .select("id")
+    .eq("id", collectionId)
+    .eq("workspace_id", context.workspaceId)
+    .eq("user_id", context.userId)
+    .maybeSingle();
+  if (error) throw error;
+  return data;
 }
 
 export async function GET(
-  _request: Request,
+  request: Request,
   routeContext: { params: Promise<{ id: string }> },
 ) {
   try {
     const { id } = await routeContext.params;
-    const loaded = await loadContext(id);
+    const loaded = await loadContext(id, requestedDerivationId(request));
     if ("error" in loaded) return loaded.error;
     return Response.json(await readState(loaded.admin, loaded.context), {
       headers: { "Cache-Control": "private, no-store" },
@@ -219,7 +301,7 @@ export async function POST(
 ) {
   try {
     const { id } = await routeContext.params;
-    const loaded = await loadContext(id);
+    const loaded = await loadContext(id, requestedDerivationId(request));
     if ("error" in loaded) return loaded.error;
     const { admin, context } = loaded;
 
@@ -233,8 +315,11 @@ export async function POST(
       );
     }
 
-    if ("review_item_id" in command) {
-      requireCurrentReviewItem(context, command.review_item_id);
+    if ("review_item_id" in command && !context.reviewItemIds.includes(command.review_item_id)) {
+      return Response.json(
+        { error: "Review item does not belong to the selected P3 derivation" },
+        { status: 409 },
+      );
     }
 
     switch (command.type) {
@@ -297,18 +382,37 @@ export async function POST(
         if (error) throw error;
         break;
       }
-      case "tag":
-      case "untag": {
-        const { data: tag, error: tagError } = await admin
+      case "rename_tag": {
+        if (!(await ownedTag(admin, context, command.tag_id))) {
+          return Response.json({ error: "Tag not found" }, { status: 404 });
+        }
+        const { error } = await admin
           .from("p3_tags")
-          .select("id")
+          .update({ name: command.name, normalized_name: normalizeTagName(command.name) })
           .eq("id", command.tag_id)
           .eq("workspace_id", context.workspaceId)
-          .eq("user_id", context.userId)
-          .maybeSingle();
-        if (tagError) throw tagError;
-        if (!tag) return Response.json({ error: "Tag not found" }, { status: 404 });
-
+          .eq("user_id", context.userId);
+        if (error) throw error;
+        break;
+      }
+      case "delete_tag": {
+        if (!(await ownedTag(admin, context, command.tag_id))) {
+          return Response.json({ error: "Tag not found" }, { status: 404 });
+        }
+        const { error } = await admin
+          .from("p3_tags")
+          .delete()
+          .eq("id", command.tag_id)
+          .eq("workspace_id", context.workspaceId)
+          .eq("user_id", context.userId);
+        if (error) throw error;
+        break;
+      }
+      case "tag":
+      case "untag": {
+        if (!(await ownedTag(admin, context, command.tag_id))) {
+          return Response.json({ error: "Tag not found" }, { status: 404 });
+        }
         if (command.type === "tag") {
           const { error } = await admin.from("p3_review_item_tags").upsert(
             {
@@ -342,18 +446,37 @@ export async function POST(
         if (error) throw error;
         break;
       }
-      case "add_to_collection":
-      case "remove_from_collection": {
-        const { data: collection, error: collectionError } = await admin
+      case "update_collection": {
+        if (!(await ownedCollection(admin, context, command.collection_id))) {
+          return Response.json({ error: "Collection not found" }, { status: 404 });
+        }
+        const { error } = await admin
           .from("p3_collections")
-          .select("id")
+          .update({ name: command.name, description: command.description ?? null })
           .eq("id", command.collection_id)
           .eq("workspace_id", context.workspaceId)
-          .eq("user_id", context.userId)
-          .maybeSingle();
-        if (collectionError) throw collectionError;
-        if (!collection) return Response.json({ error: "Collection not found" }, { status: 404 });
-
+          .eq("user_id", context.userId);
+        if (error) throw error;
+        break;
+      }
+      case "delete_collection": {
+        if (!(await ownedCollection(admin, context, command.collection_id))) {
+          return Response.json({ error: "Collection not found" }, { status: 404 });
+        }
+        const { error } = await admin
+          .from("p3_collections")
+          .delete()
+          .eq("id", command.collection_id)
+          .eq("workspace_id", context.workspaceId)
+          .eq("user_id", context.userId);
+        if (error) throw error;
+        break;
+      }
+      case "add_to_collection":
+      case "remove_from_collection": {
+        if (!(await ownedCollection(admin, context, command.collection_id))) {
+          return Response.json({ error: "Collection not found" }, { status: 404 });
+        }
         if (command.type === "add_to_collection") {
           const { error } = await admin.from("p3_collection_items").upsert(
             {
@@ -383,9 +506,12 @@ export async function POST(
       headers: { "Cache-Control": "private, no-store" },
     });
   } catch (error) {
+    const code = typeof error === "object" && error !== null && "code" in error
+      ? String((error as { code?: unknown }).code ?? "")
+      : "";
     return Response.json(
       { error: error instanceof Error ? error.message : String(error) },
-      { status: 503 },
+      { status: code === "23505" ? 409 : 503 },
     );
   }
 }

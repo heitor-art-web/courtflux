@@ -38,7 +38,6 @@ function chunked<T>(rows: T[], size = 200) {
   return chunks;
 }
 
-
 function emptyResponse(analysisRunId: string, gameId: string) {
   return {
     analysis_run_id: analysisRunId,
@@ -59,7 +58,7 @@ function emptyResponse(analysisRunId: string, gameId: string) {
 }
 
 export async function GET(
-  _request: Request,
+  request: Request,
   context: { params: Promise<{ id: string }> },
 ) {
   try {
@@ -103,22 +102,33 @@ export async function GET(
       );
     }
 
-    const { data: derivation, error: derivationError } = await admin
+    const requestedDerivationId = new URL(request.url).searchParams.get("derivation_id")?.trim() || null;
+    let derivationQuery = admin
       .from("analysis_derivations")
       .select(
-        "id,derivation_version,configuration_version,source_versions,configuration,output_summary,generated_at",
+        "id,status,derivation_version,configuration_version,source_versions,configuration,output_summary,generated_at",
       )
       .eq("workspace_id", workspaceId)
       .eq("analysis_run_id", run.id)
       .eq("game_id", run.game_id)
       .eq("layer", "p3")
-      .eq("derivation_key", "things_to_review")
-      .eq("status", "current")
+      .eq("derivation_key", "things_to_review");
+
+    if (requestedDerivationId) {
+      derivationQuery = derivationQuery.eq("id", requestedDerivationId);
+    } else {
+      derivationQuery = derivationQuery.eq("status", "current");
+    }
+
+    const { data: derivation, error: derivationError } = await derivationQuery
       .order("created_at", { ascending: false })
       .limit(1)
       .maybeSingle();
     if (derivationError) throw derivationError;
     if (!derivation) {
+      if (requestedDerivationId) {
+        return Response.json({ error: "P3 review derivation not found" }, { status: 404 });
+      }
       return Response.json(emptyResponse(run.id, run.game_id));
     }
 
@@ -192,9 +202,7 @@ export async function GET(
         chunked(artifactIds).map(async (ids) => {
           const { data, error } = await admin
             .from("analysis_artifacts")
-            .select(
-              "id,kind,bucket,object_path,content_type,size_bytes,checksum,metadata",
-            )
+            .select("id,kind,bucket,object_path,content_type,size_bytes,checksum,metadata")
             .eq("run_id", run.id)
             .eq("kind", "p3_evidence_clip")
             .in("id", ids);
@@ -219,9 +227,7 @@ export async function GET(
         const { data, error } = await admin.storage
           .from("analysis-artifacts")
           .createSignedUrl(artifact.object_path, 3600);
-        if (!error) {
-          signedUrlsByArtifactId[artifact.id] = data?.signedUrl ?? null;
-        }
+        if (!error) signedUrlsByArtifactId[artifact.id] = data?.signedUrl ?? null;
       }),
     );
 
@@ -237,11 +243,7 @@ export async function GET(
         myReviews,
         signedUrlsByArtifactId,
       }),
-      {
-        headers: {
-          "Cache-Control": "private, no-store",
-        },
-      },
+      { headers: { "Cache-Control": "private, no-store" } },
     );
   } catch (error) {
     return Response.json(
