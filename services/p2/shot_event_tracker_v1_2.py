@@ -16,7 +16,7 @@ class ShotEventTrackerV12(ShotEventTrackerV1):
     a deferred rim-exit window would otherwise expire UNKNOWN:
 
     * repeated mouth support: at least two direct observations inside the rim mouth;
-    * persistent lateral alignment: at least three rim observations and every one is
+    * sustained lateral alignment: at least five rim observations and every one is
       horizontally near the rim.
 
     Both require coherent rim geometry throughout the observed deferred window. These
@@ -24,6 +24,7 @@ class ShotEventTrackerV12(ShotEventTrackerV1):
     """
 
     OUTCOME_POLICY_REVISION = "shot_outcome_v1_2"
+    MIN_PERSISTENT_NEAR_X_OBSERVATIONS = 5
 
     @staticmethod
     def _deferred_confirmation_reason(
@@ -45,7 +46,10 @@ class ShotEventTrackerV12(ShotEventTrackerV1):
         if inside_mouth_observations >= 2:
             return "deferred_rim_exit_repeated_inside_mouth_confirmed"
 
-        if rim_observations >= 3 and near_x_observations == rim_observations:
+        if (
+            rim_observations >= ShotEventTrackerV12.MIN_PERSISTENT_NEAR_X_OBSERVATIONS
+            and near_x_observations == rim_observations
+        ):
             return "deferred_rim_exit_persistent_near_x_confirmed"
 
         return None
@@ -71,7 +75,7 @@ class ShotEventTrackerV12(ShotEventTrackerV1):
         )
         event.provenance["outcome_policy_revision"] = self.OUTCOME_POLICY_REVISION
         event.provenance["deferred_confirmation_policy"] = (
-            "repeated_inside_mouth_or_persistent_near_x_with_coherent_rim"
+            "repeated_inside_mouth_or_sustained_near_x_with_coherent_rim"
         )
         if reason is None:
             return event
@@ -117,6 +121,9 @@ class ShotEventTrackerV12(ShotEventTrackerV1):
         result = dict(super().diagnostics())
         result["outcome_policy_revision"] = self.OUTCOME_POLICY_REVISION
         result["deferred_confirmation_policy"] = (
-            "repeated_inside_mouth_or_persistent_near_x_with_coherent_rim"
+            "repeated_inside_mouth_or_sustained_near_x_with_coherent_rim"
+        )
+        result["min_persistent_near_x_observations"] = (
+            self.MIN_PERSISTENT_NEAR_X_OBSERVATIONS
         )
         return result
