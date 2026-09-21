@@ -227,6 +227,11 @@ class PerformanceDetector(LegacyPerformanceDetector):
         profile["team"] = best_team
 
     def _team_score_due(self, profile: dict[str, Any], frame_id: int) -> bool:
+        pending_reversal = bool(profile.get("team_reversal_candidate")) and int(
+            profile.get("team_reversal_streak", 0) or 0
+        ) > 0
+        if pending_reversal:
+            return True
         stable = bool(
             profile.get("team")
             and int(profile.get("team_observations", 0) or 0) >= self.team_stable_min_observations
