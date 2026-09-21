@@ -256,19 +256,29 @@ class PerformanceDetector(LegacyPerformanceDetector):
 
     @staticmethod
     def _team_eligible_players(frame_state: Any) -> list[dict[str, Any]]:
-        """Use P2 gameplay presence for team-only evidence; keep Jersey gating unchanged."""
+        """Use gameplay presence, but require positive on-court evidence in limited frames."""
         court_state = getattr(frame_state, "court_state", None)
+        gameplay_present = None
+        analysis_eligible = True
         if court_state is not None:
             gameplay_present = getattr(court_state, "gameplay_present", None)
+            analysis_eligible = bool(getattr(court_state, "analysis_eligible", False))
             if gameplay_present is not None:
                 if not bool(gameplay_present):
                     return []
-            elif not bool(getattr(court_state, "analysis_eligible", False)):
+            elif not analysis_eligible:
                 return []
+
+        limited_gameplay = bool(gameplay_present is True and not analysis_eligible)
         return [
             player
             for player in list(getattr(frame_state, "players", []) or [])
-            if isinstance(player, dict) and player.get("active_on_court") is not False
+            if isinstance(player, dict)
+            and (
+                player.get("active_on_court") is True
+                if limited_gameplay
+                else player.get("active_on_court") is not False
+            )
         ]
 
     def _assign_teams(self, frame_state: Any):
@@ -385,10 +395,11 @@ class PerformanceDetector(LegacyPerformanceDetector):
             "team_reversal_policy": "consecutive_accepted_opposing_rescores_v1",
             "team_reversal_min_observations": self.team_reversal_min_observations,
             "identity_lock_blocks_team_rescore": False,
-            "team_eligibility_policy": "gameplay_present_fallback_analysis_eligible;exclude_explicit_off_court",
+            "team_eligibility_policy": "gameplay_present;limited_requires_explicit_on_court;analysis_eligible_excludes_explicit_off_court",
             "gameplay_present": gameplay_present,
             "analysis_eligible": analysis_eligible,
             "limited_gameplay_team_evidence": bool(gameplay_present is True and not analysis_eligible),
+            "limited_gameplay_requires_explicit_on_court": True,
         }
 
     def _aggregate_jersey_evidence(
