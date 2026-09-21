@@ -1,6 +1,7 @@
 import type { Metadata, Viewport } from "next";
 import "./globals.css";
 import "./accessibility.css";
+import { isPublicLaunchEnabled } from "@/lib/launch";
 import { getSiteUrl } from "@/lib/site";
 import { getRequestLocale, isPublicRequest } from "@/lib/i18n/request";
 import { AppLanguageSwitcherBridge } from "./language-switcher";
@@ -10,9 +11,7 @@ import { PageSurfaceBridge } from "./page-surface-bridge";
 import { Analytics } from "@vercel/analytics/next";
 
 const siteUrl = getSiteUrl();
-const publicLaunchEnabled = new Set(["1", "true", "yes", "on"]).has(
-  (process.env.COURTFLUX_PUBLIC_LAUNCH_ENABLED ?? "").trim().toLowerCase(),
-);
+const publicLaunchEnabled = isPublicLaunchEnabled();
 
 export const metadata: Metadata = {
   metadataBase: new URL(siteUrl),
