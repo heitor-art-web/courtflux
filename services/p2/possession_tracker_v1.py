@@ -32,6 +32,7 @@ class PossessionTrackerV1(_BasePossessionTrackerV1):
     TEAM_ATTRIBUTION_POLICY = (
         "publish_team_for_supported_owner_or_stale_owner_still_raw_best;"
         "distinct_pending_challenger_or_unsupported_stale_owner_abstains;"
+        "recent_strong_team_evidence_may_fill_public_unknown_across_owner_lock;"
         "internal_possession_memory_unchanged"
     )
 
@@ -40,6 +41,8 @@ class PossessionTrackerV1(_BasePossessionTrackerV1):
         self._recent_owner_flight_seed_count = 0
         self._recent_owner_flight_last_seed_frame: int | None = None
         self._recent_owner_flight_last_origin_track_id: int | None = None
+        self._public_team_hint_cache: dict[int, tuple[str, float, int]] = {}
+        self._last_update_frame: int | None = None
 
     def _rank(
         self,
@@ -65,6 +68,50 @@ class PossessionTrackerV1(_BasePossessionTrackerV1):
         if flight is None or self._candidate_track_id is None:
             return False
         return int(self._candidate_track_id) != int(flight.origin_track_id)
+
+    def _public_team_hint_max_age_frames(self) -> int:
+        """Keep a trusted team label only long enough to survive owner confirmation."""
+        return max(int(self.lock_frames), int(self.switch_frames)) + 1
+
+    def _observe_public_team_hints(
+        self,
+        *,
+        frame_id: int,
+        team_evidence: dict[int, tuple[str | None, float]] | None,
+    ) -> None:
+        frame_id = int(frame_id)
+        self._last_update_frame = frame_id
+        max_age = self._public_team_hint_max_age_frames()
+        self._public_team_hint_cache = {
+            track_id: hint
+            for track_id, hint in self._public_team_hint_cache.items()
+            if 0 <= frame_id - int(hint[2]) <= max_age
+        }
+        for raw_track_id, raw_evidence in dict(team_evidence or {}).items():
+            try:
+                track_id = int(raw_track_id)
+                team_id, confidence = raw_evidence
+                confidence = max(0.0, min(float(confidence), 1.0))
+            except (TypeError, ValueError):
+                continue
+            if team_id is None or confidence < float(self.team_evidence_threshold):
+                continue
+            self._public_team_hint_cache[track_id] = (str(team_id), confidence, frame_id)
+
+    def _recent_public_team_hint(
+        self,
+        track_id: int | None,
+    ) -> tuple[str | None, float, int | None]:
+        if track_id is None or self._last_update_frame is None:
+            return None, 0.0, None
+        hint = self._public_team_hint_cache.get(int(track_id))
+        if hint is None:
+            return None, 0.0, None
+        team_id, confidence, hint_frame = hint
+        age = int(self._last_update_frame) - int(hint_frame)
+        if age < 0 or age > self._public_team_hint_max_age_frames():
+            return None, 0.0, None
+        return str(team_id), float(confidence), int(age)
 
     def _seed_flight_on_owner_expiry(
         self,
@@ -111,6 +158,7 @@ class PossessionTrackerV1(_BasePossessionTrackerV1):
         team_evidence: dict[int, tuple[str | None, float]] | None = None,
         semantic_evidence: list[dict[str, Any]] | None = None,
     ) -> list[BasketballEvent]:
+        self._observe_public_team_hints(frame_id=frame_id, team_evidence=team_evidence)
         owner_before_update = self.current_track_id
         events = super().update(
             frame_id=frame_id,
@@ -143,7 +191,7 @@ class PossessionTrackerV1(_BasePossessionTrackerV1):
 
     def _team_attribution_abstention_reason(self) -> str | None:
         """Return why public team attribution must abstain without mutating owner memory."""
-        if self.current_track_id is None or self.current_team_id is None:
+        if self.current_track_id is None:
             return None
         if (
             self._candidate_track_id is not None
@@ -159,6 +207,11 @@ class PossessionTrackerV1(_BasePossessionTrackerV1):
         if int(self._lost_frames) > 0 and not raw_best_matches_current_owner:
             return "owner_not_currently_supported"
         return None
+
+    def reset(self, *, reason: str = "external_reset") -> None:
+        super().reset(reason=reason)
+        self._public_team_hint_cache.clear()
+        self._last_update_frame = None
 
     def diagnostics(self) -> dict[str, Any]:
         diagnostics = super().diagnostics()
@@ -195,8 +248,19 @@ class PossessionTrackerV1(_BasePossessionTrackerV1):
         )
         attribution_reason = self._team_attribution_abstention_reason()
         internal_current_team_id = self.current_team_id
+        public_team_hint_id = None
+        public_team_hint_confidence = 0.0
+        public_team_hint_age_frames = None
         if attribution_reason is not None:
             diagnostics["current_team_id"] = None
+        elif internal_current_team_id is None and self.current_track_id is not None:
+            (
+                public_team_hint_id,
+                public_team_hint_confidence,
+                public_team_hint_age_frames,
+            ) = self._recent_public_team_hint(self.current_track_id)
+            if public_team_hint_id is not None:
+                diagnostics["current_team_id"] = public_team_hint_id
         diagnostics.update(
             {
                 "candidate_score": candidate_score,
@@ -221,6 +285,11 @@ class PossessionTrackerV1(_BasePossessionTrackerV1):
                 "team_attribution_abstained": attribution_reason is not None,
                 "team_attribution_abstention_reason": attribution_reason,
                 "internal_current_team_id": internal_current_team_id,
+                "public_team_hint_applied": public_team_hint_id is not None,
+                "public_team_hint_team_id": public_team_hint_id,
+                "public_team_hint_confidence": round(float(public_team_hint_confidence), 6),
+                "public_team_hint_age_frames": public_team_hint_age_frames,
+                "public_team_hint_max_age_frames": self._public_team_hint_max_age_frames(),
             }
         )
         return diagnostics
