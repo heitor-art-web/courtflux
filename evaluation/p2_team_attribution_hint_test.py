@@ -2,10 +2,15 @@ from types import SimpleNamespace
 
 from core.basketball_event import BallControlState
 from services.p2.engine_v1 import P2EngineV1
+from services.p2.live_control_resolver_v1 import LiveControlP2EngineV1
 
 
 def _frame(*, active_on_court, confidence=0.94, margin=0.88):
     return SimpleNamespace(
+        frame_id=0,
+        timestamp=0.0,
+        valid_gameplay=False,
+        player_states=[],
         players=[
             {
                 "track_id": 24,
@@ -95,11 +100,24 @@ def test_shot_actor_lookup_can_use_hint_without_entering_possession_evidence() -
     assert source == "fresh_on_court_team_hint"
 
 
+def test_live_control_ineligible_path_propagates_team_hints() -> None:
+    engine = LiveControlP2EngineV1(reset_after_ineligible_frames=1)
+    frame = _frame(active_on_court=True)
+
+    result = engine._process_ineligible(frame)
+
+    assert result is frame
+    p2 = frame.diagnostics["p2"]
+    assert p2["engine_eligible"] is False
+    assert p2["team_attribution_hint_tracks"] == 1
+
+
 def main() -> None:
     test_fresh_hint_requires_explicit_on_court_support()
     test_fresh_hint_keeps_existing_team_thresholds()
     test_public_diagnostics_can_fill_unknown_without_mutating_internal_team()
     test_shot_actor_lookup_can_use_hint_without_entering_possession_evidence()
+    test_live_control_ineligible_path_propagates_team_hints()
     print("p2_team_attribution_hint_test: PASS")
 
 
