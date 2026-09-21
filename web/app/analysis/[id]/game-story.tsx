@@ -5,7 +5,6 @@ type UnknownRecord = Record<string, unknown>;
 
 type GameStoryProps = {
   summary: UnknownRecord | null;
-  runId: string;
   startTimeSec: number | null;
   endTimeSec: number | null;
 };
@@ -62,7 +61,7 @@ function metricFromEventCounts(eventCounts: UnknownRecord, key: string) {
   return count(eventCounts[key]);
 }
 
-export function GameStory({ summary, runId, startTimeSec, endTimeSec }: GameStoryProps) {
+export function GameStory({ summary, startTimeSec, endTimeSec }: GameStoryProps) {
   if (!summary) return null;
 
   const p2 = record(summary.p2);
