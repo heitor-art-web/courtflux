@@ -17,13 +17,21 @@ def _frame(*, gameplay_present: bool | None, analysis_eligible: bool):
     )
 
 
-def test_team_evidence_uses_gameplay_presence_during_limited_gameplay() -> None:
+def test_team_evidence_uses_only_positive_on_court_players_during_limited_gameplay() -> None:
     frame = _frame(gameplay_present=True, analysis_eligible=False)
 
     eligible = PerformanceDetector._team_eligible_players(frame)
 
-    assert [row["track_id"] for row in eligible] == [1, 2]
+    assert [row["track_id"] for row in eligible] == [1]
     assert PerformanceDetector._identity_eligible_players(frame) == []
+
+
+def test_analysis_eligible_gameplay_keeps_unknown_on_court_players() -> None:
+    frame = _frame(gameplay_present=True, analysis_eligible=True)
+
+    eligible = PerformanceDetector._team_eligible_players(frame)
+
+    assert [row["track_id"] for row in eligible] == [1, 2]
 
 
 def test_team_evidence_stays_off_when_gameplay_is_absent() -> None:
@@ -44,7 +52,8 @@ def test_team_evidence_falls_back_to_analysis_eligible_for_legacy_court_state() 
 
 
 def main() -> None:
-    test_team_evidence_uses_gameplay_presence_during_limited_gameplay()
+    test_team_evidence_uses_only_positive_on_court_players_during_limited_gameplay()
+    test_analysis_eligible_gameplay_keeps_unknown_on_court_players()
     test_team_evidence_stays_off_when_gameplay_is_absent()
     test_team_evidence_falls_back_to_analysis_eligible_for_legacy_court_state()
     print("p2_team_gameplay_presence_test: PASS")
