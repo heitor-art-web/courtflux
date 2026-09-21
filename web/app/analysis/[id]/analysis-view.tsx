@@ -3,6 +3,7 @@
 import Image from "next/image";
 import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
+import { GameStory } from "./game-story";
 import styles from "./page.module.css";
 
 type BallSummary = {
@@ -41,6 +42,7 @@ type Summary = {
   detector_timing?: Record<string, { calls?: number; total_sec?: number; avg_ms?: number }>;
   players?: PlayerSummary;
   ball?: BallSummary;
+  p2?: Record<string, unknown>;
   extra?: { status?: string; error?: string; mode?: string };
   [key: string]: unknown;
 };
@@ -414,7 +416,7 @@ export function AnalysisView({ runId }: { runId: string }) {
           <h1 id="analysis-title">{title}</h1>
           <p>
             {isComplete
-              ? "Review the tracking evidence CourtFlux can currently support from this video. Unavailable basketball-event and tactical layers are kept clearly separate from measured beta output."
+              ? "Start with the game story, then drill into the video and evidence behind it. CourtFlux keeps confidence and attribution limits visible alongside every beta result."
               : "You can leave this page and return later. The run is durable in your CourtFlux workspace and this page updates automatically while processing is active."}
           </p>
         </div>
@@ -435,6 +437,15 @@ export function AnalysisView({ runId }: { runId: string }) {
           {data.job?.error || "The processing worker stopped before a complete tracking summary was produced."}
           {" "}Your allowance is only recorded when a run completes. You can adjust the source or analysis window and try again.
         </div>
+      ) : null}
+
+      {isComplete && summary ? (
+        <GameStory
+          summary={summary}
+          runId={runId}
+          startTimeSec={data.run.start_time_sec}
+          endTimeSec={data.run.end_time_sec}
+        />
       ) : null}
 
       <section className={styles.progressPanel} aria-labelledby="progress-title">
@@ -597,7 +608,7 @@ export function AnalysisView({ runId }: { runId: string }) {
           {isComplete && summary ? (
             <section className={styles.panel} aria-labelledby="evidence-title">
               <div className={styles.panelHeader}>
-                <div><h2 id="evidence-title">Tracking evidence</h2><p>Diagnostics from this completed beta run, separated by evidence type.</p></div>
+                <div><h2 id="evidence-title">Tracking & quality evidence</h2><p>Diagnostics behind the story, separated by evidence type.</p></div>
                 <div className={styles.exportActions}>
                   <button className={styles.exportButton} type="button" onClick={exportCsv}>Export metrics CSV</button>
                   <button className={styles.exportButton} type="button" onClick={exportJson}>Export summary JSON</button>
@@ -632,7 +643,7 @@ export function AnalysisView({ runId }: { runId: string }) {
                     <ul className={styles.betaList}>
                       <li>Direct ball detections are observed evidence; predicted hold fills only conservative short gaps.</li>
                       <li>Team and jersey rates are diagnostic quality signals, not finished player-attribution statistics.</li>
-                      <li>Possessions, passes, shots, rebounds and tactical actions are not presented as results until those layers are validated.</li>
+                      <li>Possession and event summaries are shown only when canonical P2 produced them; tactical recommendations remain outside this beta result.</li>
                     </ul>
                   </div>
                 </>
@@ -670,7 +681,7 @@ export function AnalysisView({ runId }: { runId: string }) {
                   <div className={styles.dataRow}><span>Elapsed processing time</span><strong>{summary.elapsed_sec == null ? "—" : `${formatNumber(summary.elapsed_sec, 1)} sec`}</strong></div>
                   <div className={styles.dataRow}><span>Analysis FPS</span><strong>{formatNumber(performance?.analysis_fps, 2)}</strong></div>
                   <div className={styles.dataRow}><span>Real-time factor</span><strong>{performance?.realtime_factor == null ? "—" : `${formatNumber(performance.realtime_factor, 2)}x`}</strong></div>
-                  <div className={styles.dataRow}><span>Mode</span><strong>{summary.detection_only ? "Detection-only beta" : summary.extra?.mode || "Full pipeline"}</strong></div>
+                  <div className={styles.dataRow}><span>Mode</span><strong>{summary.detection_only ? "Legacy detection-only run" : summary.extra?.mode || (summary.p2 ? "Canonical P1 → P2" : "Full pipeline")}</strong></div>
                   <div className={styles.dataRow}><span>Jersey recognition</span><strong>{summary.jersey_enabled ? "Enabled" : "Disabled"}</strong></div>
                   <div className={styles.dataRow}><span>Started</span><strong>{formatDateTime(data.run.started_at || data.job?.started_at)}</strong></div>
                   <div className={styles.dataRow}><span>Completed</span><strong>{formatDateTime(data.run.completed_at || data.job?.completed_at)}</strong></div>
@@ -701,7 +712,8 @@ export function AnalysisView({ runId }: { runId: string }) {
             <div className={styles.eyebrow}>Evidence boundary</div>
             <h2>What this page does not invent</h2>
             <ul className={styles.betaList}>
-              <li>No possession or event attribution before the event primitives are validated.</li>
+              <li>Possession and event counts appear only when the canonical P2 layer emitted supporting evidence.</li>
+              <li>Low-confidence candidates and unresolved outcomes remain labelled rather than silently promoted to facts.</li>
               <li>No player identity claims from anonymous tracks unless jersey/identity evidence supports them.</li>
               <li>No tactical recommendations presented as measured facts before the tactical layer exists.</li>
             </ul>
