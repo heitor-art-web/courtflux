@@ -30,8 +30,8 @@ class PossessionTrackerV1(_BasePossessionTrackerV1):
         "seed_is_hypothesis_only;existing_flight_support_thresholds_unchanged"
     )
     TEAM_ATTRIBUTION_POLICY = (
-        "publish_team_only_for_currently_supported_owner;"
-        "stale_owner_or_distinct_pending_challenger_abstains;"
+        "publish_team_for_supported_owner_or_stale_owner_still_raw_best;"
+        "distinct_pending_challenger_or_unsupported_stale_owner_abstains;"
         "internal_possession_memory_unchanged"
     )
 
@@ -145,14 +145,19 @@ class PossessionTrackerV1(_BasePossessionTrackerV1):
         """Return why public team attribution must abstain without mutating owner memory."""
         if self.current_track_id is None or self.current_team_id is None:
             return None
-        if int(self._lost_frames) > 0:
-            return "owner_not_currently_supported"
         if (
             self._candidate_track_id is not None
             and int(self._candidate_track_id) != int(self.current_track_id)
             and int(self._candidate_frames) > 0
         ):
             return "distinct_challenger_pending"
+        raw_best_track_id = getattr(self, "_raw_best_track_id", None)
+        raw_best_matches_current_owner = bool(
+            raw_best_track_id is not None
+            and int(raw_best_track_id) == int(self.current_track_id)
+        )
+        if int(self._lost_frames) > 0 and not raw_best_matches_current_owner:
+            return "owner_not_currently_supported"
         return None
 
     def diagnostics(self) -> dict[str, Any]:
@@ -170,6 +175,11 @@ class PossessionTrackerV1(_BasePossessionTrackerV1):
         candidate_score = round(float(self._candidate_score), 6)
         raw_best_track_id = getattr(self, "_raw_best_track_id", None)
         raw_best_score = round(float(getattr(self, "_raw_best_score", 0.0)), 6)
+        raw_best_matches_current_owner = bool(
+            self.current_track_id is not None
+            and raw_best_track_id is not None
+            and int(raw_best_track_id) == int(self.current_track_id)
+        )
         flight = self._flight
         raw_best_distinct_from_flight_origin = bool(
             flight is not None
@@ -198,6 +208,7 @@ class PossessionTrackerV1(_BasePossessionTrackerV1):
                 "raw_best_above_threshold": bool(
                     raw_best_track_id is not None and raw_best_score >= float(threshold)
                 ),
+                "raw_best_matches_current_owner": raw_best_matches_current_owner,
                 "raw_best_distinct_from_flight_origin": raw_best_distinct_from_flight_origin,
                 "pass_flight_receiver_evidence": self._pass_receiver_evidence(),
                 "flight_classification_policy": self.FLIGHT_CLASSIFICATION_POLICY,
