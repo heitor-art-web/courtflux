@@ -22,6 +22,8 @@ class P2EngineV1:
     possession/shot candidates never bridge replay/camera/non-gameplay gaps.
     """
 
+    TEAM_ATTRIBUTION_HINT_MARGIN = 0.18
+
     def __init__(
         self,
         *,
@@ -73,6 +75,74 @@ class P2EngineV1:
             if previous is None or confidence > previous[1]:
                 evidence[track_id] = (str(team_id), confidence)
         return evidence
+
+    def _team_attribution_hints(
+        self,
+        frame_state: Any,
+    ) -> dict[int, tuple[str, float]]:
+        """Return fresh strong team hints only for explicitly on-court players.
+
+        Hints are deliberately separate from possession/team memory: they may fill a
+        public UNKNOWN attribution for the current owner or a shot actor, but they never
+        enter ``PossessionTrackerV1.update`` and therefore cannot acquire/switch an owner,
+        reverse a team profile, or classify a pass/turnover.
+        """
+        on_court_tracks: set[int] = set()
+        for player in list(getattr(frame_state, "players", []) or []):
+            if not isinstance(player, dict) or player.get("active_on_court") is not True:
+                continue
+            raw_track_id = player.get("track_id", player.get("id"))
+            try:
+                on_court_tracks.add(int(raw_track_id))
+            except (TypeError, ValueError):
+                continue
+
+        diagnostics = dict(getattr(frame_state, "diagnostics", {}) or {})
+        detector = dict(diagnostics.get("detector", {}) or {})
+        threshold = float(self.possession_tracker.team_evidence_threshold)
+        hints: dict[int, tuple[str, float]] = {}
+        for row in list(detector.get("team_predictions", []) or []):
+            if not isinstance(row, dict) or not bool(row.get("rescored", False)):
+                continue
+            try:
+                track_id = int(row.get("track_id"))
+                confidence = float(row.get("fused_confidence", 0.0) or 0.0)
+                margin = float(row.get("fused_margin", 0.0) or 0.0)
+            except (TypeError, ValueError):
+                continue
+            if track_id not in on_court_tracks:
+                continue
+            team_id = row.get("fused_best_team")
+            if (
+                team_id is None
+                or confidence < threshold
+                or margin < self.TEAM_ATTRIBUTION_HINT_MARGIN
+            ):
+                continue
+            previous = hints.get(track_id)
+            if previous is None or confidence > previous[1]:
+                hints[track_id] = (str(team_id), max(0.0, min(confidence, 1.0)))
+        return hints
+
+    def _attributed_team_for_track(
+        self,
+        track_id: int | None,
+        *,
+        team_evidence: dict[int, tuple[str | None, float]],
+        team_hints: dict[int, tuple[str, float]],
+    ) -> tuple[str | None, float, str]:
+        if track_id is None:
+            return None, 0.0, "unknown"
+        threshold = float(self.possession_tracker.team_evidence_threshold)
+        evidence = team_evidence.get(int(track_id))
+        if evidence is not None:
+            team_id, confidence = evidence
+            if team_id is not None and float(confidence) >= threshold:
+                return str(team_id), float(confidence), "current_player_team"
+        hint = team_hints.get(int(track_id))
+        if hint is not None:
+            return str(hint[0]), float(hint[1]), "fresh_on_court_team_hint"
+        return None, 0.0, "unknown"
 
     @staticmethod
     def _semantic_evidence(frame_state: Any) -> list[dict[str, Any]]:
@@ -395,6 +465,7 @@ class P2EngineV1:
         emitted: list[BasketballEvent],
         semantic_evidence: list[dict[str, Any]],
         team_evidence: dict[int, tuple[str | None, float]],
+        team_hints: dict[int, tuple[str, float]],
         engine_eligible: bool,
         skipped_reason: str | None = None,
     ) -> None:
@@ -402,15 +473,36 @@ class P2EngineV1:
         if diagnostics is None:
             frame_state.diagnostics = {}
             diagnostics = frame_state.diagnostics
+
+        possession = self.possession_tracker.diagnostics()
+        fallback_team_id = None
+        fallback_confidence = 0.0
+        fallback_source = "none"
+        if possession.get("current_track_id") is not None and possession.get("current_team_id") is None:
+            fallback_team_id, fallback_confidence, fallback_source = self._attributed_team_for_track(
+                int(possession["current_track_id"]),
+                team_evidence=team_evidence,
+                team_hints=team_hints,
+            )
+            if fallback_team_id is not None:
+                possession["current_team_id"] = fallback_team_id
+        possession["team_attribution_fallback_applied"] = fallback_team_id is not None
+        possession["team_attribution_fallback_source"] = fallback_source
+        possession["team_attribution_fallback_confidence"] = round(float(fallback_confidence), 6)
+        possession["team_attribution_fallback_policy"] = (
+            "public_diagnostics_only;current_owner_only;strong_current_player_team_or_fresh_rescore;"
+            "fresh_rescore_requires_explicit_on_court;internal_possession_memory_unchanged"
+        )
+
         diagnostics["p2"] = {
             "version": "p2_engine_v1",
-            "behavior_revision": "control_state_v4_gameplay_presence",
+            "behavior_revision": "control_state_v4_gameplay_presence_team_attribution_hint_v1",
             "eligibility_policy": "court_state_gameplay_present_fallback_analysis_eligible",
             "engine_eligible": bool(engine_eligible),
             "skipped_reason": skipped_reason,
             "event_count": len(emitted),
             "events": [event.as_dict() for event in emitted],
-            "possession": self.possession_tracker.diagnostics(),
+            "possession": possession,
             "shot": self.shot_tracker.diagnostics(),
             "pending_missed_shot_event_id": (
                 None
@@ -419,6 +511,7 @@ class P2EngineV1:
             ),
             "semantic_evidence_rows": len(semantic_evidence),
             "team_evidence_tracks": len(team_evidence),
+            "team_attribution_hint_tracks": len(team_hints),
             "temporal_reset": {
                 "count": self._reset_count,
                 "last_reason": self._last_reset_reason,
@@ -443,6 +536,7 @@ class P2EngineV1:
         ball_state = getattr(frame_state, "ball_state", None)
         court_state = getattr(frame_state, "court_state", None)
         team_evidence = self._team_evidence(frame_state)
+        team_hints = self._team_attribution_hints(frame_state)
         semantic_evidence = self._semantic_evidence(frame_state)
         boundary_events: list[BasketballEvent] = []
 
@@ -481,6 +575,7 @@ class P2EngineV1:
                 emitted=boundary_events,
                 semantic_evidence=semantic_evidence,
                 team_evidence=team_evidence,
+                team_hints=team_hints,
                 engine_eligible=False,
                 skipped_reason="gameplay_not_present",
             )
@@ -504,6 +599,16 @@ class P2EngineV1:
                 pre_track_id = recent_track
                 pre_team_id = recent_team
                 pre_source = "recent_possession_before_release"
+
+        if pre_track_id is not None and pre_team_id is None:
+            attributed_team, _, attribution_source = self._attributed_team_for_track(
+                pre_track_id,
+                team_evidence=team_evidence,
+                team_hints=team_hints,
+            )
+            if attributed_team is not None:
+                pre_team_id = attributed_team
+                pre_source = f"{pre_source}+{attribution_source}"
 
         shot_was_active = bool(self.shot_tracker.diagnostics().get("active", False))
         shot_events = self.shot_tracker.update(
@@ -581,6 +686,7 @@ class P2EngineV1:
             emitted=emitted,
             semantic_evidence=semantic_evidence,
             team_evidence=team_evidence,
+            team_hints=team_hints,
             engine_eligible=True,
         )
         return frame_state
