@@ -26,6 +26,8 @@ def test_supported_owner_keeps_team_attribution() -> None:
 def test_stale_owner_abstains_without_mutating_internal_team_memory() -> None:
     tracker = _tracker()
     tracker._lost_frames = 1
+    tracker._raw_best_track_id = 14
+    tracker._raw_best_score = 0.55
 
     diagnostics = tracker.diagnostics()
 
@@ -33,12 +35,31 @@ def test_stale_owner_abstains_without_mutating_internal_team_memory() -> None:
     assert diagnostics["internal_current_team_id"] == "team_a"
     assert diagnostics["team_attribution_abstained"] is True
     assert diagnostics["team_attribution_abstention_reason"] == "owner_not_currently_supported"
+    assert diagnostics["raw_best_matches_current_owner"] is False
+    assert tracker.current_team_id == "team_a"
+
+
+def test_stale_owner_keeps_team_when_same_owner_is_still_raw_best() -> None:
+    tracker = _tracker()
+    tracker._lost_frames = 2
+    tracker._raw_best_track_id = 13
+    tracker._raw_best_score = 0.56
+
+    diagnostics = tracker.diagnostics()
+
+    assert diagnostics["current_team_id"] == "team_a"
+    assert diagnostics["internal_current_team_id"] == "team_a"
+    assert diagnostics["team_attribution_abstained"] is False
+    assert diagnostics["team_attribution_abstention_reason"] is None
+    assert diagnostics["raw_best_matches_current_owner"] is True
     assert tracker.current_team_id == "team_a"
 
 
 def test_distinct_pending_challenger_abstains_until_switch_is_confirmed() -> None:
     tracker = _tracker()
-    tracker._lost_frames = 0
+    tracker._lost_frames = 1
+    tracker._raw_best_track_id = 13
+    tracker._raw_best_score = 0.7
     tracker._candidate_track_id = 14
     tracker._candidate_frames = 1
 
@@ -48,6 +69,7 @@ def test_distinct_pending_challenger_abstains_until_switch_is_confirmed() -> Non
     assert diagnostics["internal_current_team_id"] == "team_a"
     assert diagnostics["team_attribution_abstained"] is True
     assert diagnostics["team_attribution_abstention_reason"] == "distinct_challenger_pending"
+    assert diagnostics["raw_best_matches_current_owner"] is True
     assert tracker.current_team_id == "team_a"
 
 
@@ -67,6 +89,7 @@ def test_same_owner_candidate_does_not_abstain() -> None:
 def main() -> None:
     test_supported_owner_keeps_team_attribution()
     test_stale_owner_abstains_without_mutating_internal_team_memory()
+    test_stale_owner_keeps_team_when_same_owner_is_still_raw_best()
     test_distinct_pending_challenger_abstains_until_switch_is_confirmed()
     test_same_owner_candidate_does_not_abstain()
     print("p2_team_attribution_abstention_test: PASS")
