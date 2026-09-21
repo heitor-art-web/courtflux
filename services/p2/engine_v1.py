@@ -28,6 +28,8 @@ class P2EngineV1:
         "recent_owner_may_supply_actor_but_not_team;"
         "pass_team_requires_recent_fresh_on_court_endpoint_support;"
         "turnover_team_requires_recent_fresh_on_court_actor_support;"
+        "fresh_same_team_endpoints_may_reclassify_turnover_as_pass;"
+        "confirmed_same_team_handler_switch_with_release_interval_may_emit_pass;"
         "event_publication_never_mutates_possession_memory"
     )
 
@@ -230,13 +232,36 @@ class P2EngineV1:
             return int(recent_track), None, "recent_possession_actor_team_abstained"
         return None, None, "unknown"
 
+    def _same_team_fresh_endpoint_hints(
+        self,
+        *,
+        actor_track_id: int | None,
+        secondary_track_id: int | None,
+        frame_id: int,
+    ) -> tuple[str | None, list[tuple[int, str, float, int]]]:
+        if actor_track_id is None or secondary_track_id is None:
+            return None, []
+        rows: list[tuple[int, str, float, int]] = []
+        for track_id in (int(actor_track_id), int(secondary_track_id)):
+            team_id, confidence, age = self._recent_event_team_hint(
+                track_id,
+                frame_id=int(frame_id),
+            )
+            if team_id is None or age is None:
+                return None, []
+            rows.append((track_id, str(team_id), float(confidence), int(age)))
+        teams = {row[1] for row in rows}
+        if len(teams) != 1:
+            return None, rows
+        return next(iter(teams)), rows
+
     def _normalize_event_team_publication(
         self,
         event: BasketballEvent,
         *,
         frame_id: int,
     ) -> BasketballEvent:
-        """Validate event team publication without changing event/control decisions."""
+        """Validate event team publication without changing control decisions."""
         if event.event_type not in {
             BasketballEventType.PASS_CANDIDATE,
             BasketballEventType.TURNOVER_CANDIDATE,
@@ -246,6 +271,33 @@ class P2EngineV1:
         original_team = None if event.team_id is None else str(event.team_id)
         event.attributes["internal_team_id_before_publication"] = original_team
         event.attributes["team_attribution_publication_policy"] = self.EVENT_TEAM_ATTRIBUTION_POLICY
+
+        if event.event_type is BasketballEventType.TURNOVER_CANDIDATE:
+            same_team, endpoint_rows = self._same_team_fresh_endpoint_hints(
+                actor_track_id=event.actor_track_id,
+                secondary_track_id=event.secondary_track_id,
+                frame_id=int(frame_id),
+            )
+            if same_team is not None:
+                event.event_type = BasketballEventType.PASS_CANDIDATE
+                event.team_id = same_team
+                event.evidence = tuple(
+                    sorted(
+                        set(event.evidence)
+                        | {
+                            "fresh_same_team_endpoint_reclassification",
+                            "temporal_possession_transition",
+                        }
+                    )
+                )
+                event.attributes["team_attribution_fresh_hint_tracks"] = [row[0] for row in endpoint_rows]
+                event.attributes["team_attribution_fresh_hint_ages"] = [row[3] for row in endpoint_rows]
+                event.attributes["event_type_before_publication"] = BasketballEventType.TURNOVER_CANDIDATE.value
+                event.attributes["team_attribution_publication_source"] = "recent_fresh_on_court_endpoints"
+                event.attributes["team_attribution_publication_reason"] = (
+                    "fresh_same_team_endpoints_reclassified_turnover_to_pass"
+                )
+                return event
 
         tracks: list[int] = []
         if event.actor_track_id is not None:
@@ -293,6 +345,114 @@ class P2EngineV1:
         event.attributes["team_attribution_publication_source"] = "recent_fresh_on_court_endpoint"
         event.attributes["team_attribution_publication_reason"] = "fresh_endpoint_support"
         return event
+
+    def _pass_from_confirmed_same_team_switch(
+        self,
+        event: BasketballEvent,
+        *,
+        frame_id: int,
+    ) -> BasketballEvent | None:
+        """Recover a pass only after a confirmed same-team handler switch.
+
+        This path does not lower possession lock or generic flight thresholds. It is used
+        only when the tracker already emitted a confirmed POSSESSION_CHANGE, a release
+        interval existed, and both endpoints have strong recent explicit-on-court team
+        evidence agreeing on the same team.
+        """
+        if event.event_type is not BasketballEventType.POSSESSION_CHANGE:
+            return None
+        new_track = event.actor_track_id
+        previous_track = event.secondary_track_id
+        if new_track is None or previous_track is None or int(new_track) == int(previous_track):
+            return None
+
+        attributes = dict(event.attributes or {})
+        try:
+            flight_frames = int(attributes.get("flight_frames", 0) or 0)
+            direct_observations = int(attributes.get("flight_direct_observations", 0) or 0)
+            predicted_observations = int(attributes.get("flight_predicted_observations", 0) or 0)
+        except (TypeError, ValueError):
+            return None
+        if flight_frames < int(self.possession_tracker.release_confirm_frames):
+            return None
+        if direct_observations + predicted_observations <= 0:
+            return None
+
+        same_team, endpoint_rows = self._same_team_fresh_endpoint_hints(
+            actor_track_id=int(previous_track),
+            secondary_track_id=int(new_track),
+            frame_id=int(frame_id),
+        )
+        if same_team is None:
+            return None
+
+        start_frame = max(0, int(event.frame_end) - max(1, flight_frames) + 1)
+        confidence = max(0.0, min(float(event.confidence) * 0.88, 1.0))
+        return BasketballEvent(
+            event_id=f"pass-candidate:confirmed-switch:{event.frame_end}:{previous_track}:{new_track}",
+            event_type=BasketballEventType.PASS_CANDIDATE,
+            frame_start=start_frame,
+            frame_end=int(event.frame_end),
+            timestamp_start_sec=event.timestamp_start_sec,
+            timestamp_end_sec=event.timestamp_end_sec,
+            confidence=confidence,
+            uncertainty=1.0 - confidence,
+            decision=EventDecision.CANDIDATE,
+            actor_track_id=int(previous_track),
+            secondary_track_id=int(new_track),
+            team_id=same_team,
+            location_court_m=event.location_court_m,
+            evidence=(
+                "confirmed_handler_switch",
+                "release_interval",
+                "fresh_same_team_endpoints",
+            ),
+            provenance={"version": "p2_engine_v1"},
+            attributes={
+                **attributes,
+                "transition_kind": "confirmed_same_team_switch_with_release_interval",
+                "team_attribution_publication_policy": self.EVENT_TEAM_ATTRIBUTION_POLICY,
+                "team_attribution_publication_source": "recent_fresh_on_court_endpoints",
+                "team_attribution_publication_reason": "confirmed_same_team_switch_release_interval",
+                "team_attribution_fresh_hint_tracks": [row[0] for row in endpoint_rows],
+                "team_attribution_fresh_hint_ages": [row[3] for row in endpoint_rows],
+                "source_possession_change_event_id": event.event_id,
+            },
+        )
+
+    def _normalize_and_recover_transition_events(
+        self,
+        events: list[BasketballEvent],
+        *,
+        frame_id: int,
+    ) -> list[BasketballEvent]:
+        transition_pairs = {
+            (int(event.actor_track_id), int(event.secondary_track_id))
+            for event in events
+            if event.event_type
+            in {BasketballEventType.PASS_CANDIDATE, BasketballEventType.TURNOVER_CANDIDATE}
+            and event.actor_track_id is not None
+            and event.secondary_track_id is not None
+        }
+        output: list[BasketballEvent] = []
+        for event in events:
+            normalized = self._normalize_event_team_publication(event, frame_id=int(frame_id))
+            output.append(normalized)
+            if normalized.event_type is not BasketballEventType.POSSESSION_CHANGE:
+                continue
+            if normalized.actor_track_id is None or normalized.secondary_track_id is None:
+                continue
+            transition_pair = (int(normalized.secondary_track_id), int(normalized.actor_track_id))
+            if transition_pair in transition_pairs:
+                continue
+            recovered = self._pass_from_confirmed_same_team_switch(
+                normalized,
+                frame_id=int(frame_id),
+            )
+            if recovered is not None:
+                output.append(recovered)
+                transition_pairs.add(transition_pair)
+        return output
 
     @staticmethod
     def _semantic_evidence(frame_state: Any) -> list[dict[str, Any]]:
@@ -654,7 +814,7 @@ class P2EngineV1:
 
         diagnostics["p2"] = {
             "version": "p2_engine_v1",
-            "behavior_revision": "control_state_v4_gameplay_presence_team_event_publication_v1",
+            "behavior_revision": "control_state_v4_gameplay_presence_team_event_publication_v2",
             "eligibility_policy": "court_state_gameplay_present_fallback_analysis_eligible",
             "engine_eligible": bool(engine_eligible),
             "skipped_reason": skipped_reason,
@@ -795,10 +955,10 @@ class P2EngineV1:
                 frame_id=frame_id,
                 timestamp=timestamp,
             )
-            possession_events = [
-                self._normalize_event_team_publication(event, frame_id=frame_id)
-                for event in possession_events
-            ]
+            possession_events = self._normalize_and_recover_transition_events(
+                possession_events,
+                frame_id=frame_id,
+            )
         elif shot_was_active or shot_is_active:
             self.possession_tracker.control_state = BallControlState.SHOT_FLIGHT
 
