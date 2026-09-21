@@ -1,14 +1,17 @@
 import type { Metadata, Viewport } from "next";
 import "./globals.css";
 import "./accessibility.css";
+import { isPublicLaunchEnabled } from "@/lib/launch";
 import { getSiteUrl } from "@/lib/site";
 import { getRequestLocale, isPublicRequest } from "@/lib/i18n/request";
 import { AppLanguageSwitcherBridge } from "./language-switcher";
 import { LocaleTextBridge } from "./locale-text-bridge";
 import { InteractionA11yBridge } from "./interaction-a11y-bridge";
+import { PageSurfaceBridge } from "./page-surface-bridge";
 import { Analytics } from "@vercel/analytics/next";
 
 const siteUrl = getSiteUrl();
+const publicLaunchEnabled = isPublicLaunchEnabled();
 
 export const metadata: Metadata = {
   metadataBase: new URL(siteUrl),
@@ -30,17 +33,23 @@ export const metadata: Metadata = {
     address: false,
     telephone: false,
   },
-  robots: {
-    index: true,
-    follow: true,
-    googleBot: {
-      index: true,
-      follow: true,
-      "max-image-preview": "large",
-      "max-snippet": -1,
-      "max-video-preview": -1,
-    },
-  },
+  robots: publicLaunchEnabled
+    ? {
+        index: true,
+        follow: true,
+        googleBot: {
+          index: true,
+          follow: true,
+          "max-image-preview": "large",
+          "max-snippet": -1,
+          "max-video-preview": -1,
+        },
+      }
+    : {
+        index: false,
+        follow: false,
+        nocache: true,
+      },
   icons: {
     icon: [
       { url: "/brand/courtflux_app_icon_32px.png", sizes: "32x32", type: "image/png" },
@@ -70,6 +79,7 @@ export default async function RootLayout({ children }: Readonly<{ children: Reac
         <div id="main-content" tabIndex={-1}>
           {children}
         </div>
+        <PageSurfaceBridge />
         <LocaleTextBridge locale={locale} />
         <AppLanguageSwitcherBridge initialLocale={locale} />
         <InteractionA11yBridge />

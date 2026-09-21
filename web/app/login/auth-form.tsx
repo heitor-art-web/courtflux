@@ -101,6 +101,7 @@ export function AuthForm({ initialMode }: { initialMode: AuthMode }) {
               {busy ? "Please wait…" : mode === "login" ? "Sign in" : "Create account"}
             </button>
             <button
+              className="secondary"
               type="button"
               onClick={() => {
                 setMode(mode === "login" ? "signup" : "login");
