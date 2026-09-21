@@ -5,6 +5,7 @@ type UnknownRecord = Record<string, unknown>;
 
 type GameStoryProps = {
   summary: UnknownRecord | null;
+  runId: string;
   startTimeSec: number | null;
   endTimeSec: number | null;
 };
