@@ -23,15 +23,18 @@ export default async function AnalysisPage({
   const { id } = await params;
   const p3FoundationEnabled = isP3FoundationEnabled();
   const p4SpatialFoundationEnabled = isP4SpatialDiagnosticsEnabled();
+  const showInternalFoundationPreview = p3FoundationEnabled || p4SpatialFoundationEnabled;
 
   return (
     <>
       <AnalysisView runId={id} />
-      <FoundationResultsPreview
-        runId={id}
-        p3FoundationEnabled={p3FoundationEnabled}
-        p4SpatialFoundationEnabled={p4SpatialFoundationEnabled}
-      />
+      {showInternalFoundationPreview ? (
+        <FoundationResultsPreview
+          runId={id}
+          p3FoundationEnabled={p3FoundationEnabled}
+          p4SpatialFoundationEnabled={p4SpatialFoundationEnabled}
+        />
+      ) : null}
       <AnalysisCancelControl runId={id} />
     </>
   );
