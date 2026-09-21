@@ -1,5 +1,6 @@
 import type { MetadataRoute } from "next";
 import { localizePublicHref, SUPPORTED_LOCALES } from "@/lib/i18n/config";
+import { isPublicLaunchEnabled } from "@/lib/launch";
 import { getSiteUrl } from "@/lib/site";
 
 const pages = [
@@ -15,6 +16,8 @@ const pages = [
 ];
 
 export default function sitemap(): MetadataRoute.Sitemap {
+  if (!isPublicLaunchEnabled()) return [];
+
   const siteUrl = getSiteUrl();
   const lastModified = new Date();
 
