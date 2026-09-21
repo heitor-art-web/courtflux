@@ -3,6 +3,7 @@
 import { FormEvent, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
+import { getAuthConfirmationUrl } from "@/lib/auth-url";
 import { createClient } from "@/lib/supabase/client";
 
 type AuthMode = "login" | "signup";
@@ -33,7 +34,10 @@ export function AuthForm({ initialMode }: { initialMode: AuthMode }) {
         return;
       }
 
-      const confirmationUrl = `${window.location.origin}/auth/confirm`;
+      const confirmationUrl = getAuthConfirmationUrl(
+        window.location.origin,
+        process.env.NEXT_PUBLIC_SITE_URL,
+      );
       const { data, error: authError } = await supabase.auth.signUp({
         email,
         password,
