@@ -29,6 +29,11 @@ class PossessionTrackerV1(_BasePossessionTrackerV1):
         "seed_on_confirmed_owner_expiry_only;requires_last_control_ball_anchor;"
         "seed_is_hypothesis_only;existing_flight_support_thresholds_unchanged"
     )
+    TEAM_ATTRIBUTION_POLICY = (
+        "publish_team_only_for_currently_supported_owner;"
+        "stale_owner_or_distinct_pending_challenger_abstains;"
+        "internal_possession_memory_unchanged"
+    )
 
     def __init__(self, *args: Any, **kwargs: Any) -> None:
         super().__init__(*args, **kwargs)
@@ -136,6 +141,20 @@ class PossessionTrackerV1(_BasePossessionTrackerV1):
             self.control_state = BallControlState.UNKNOWN
         return events
 
+    def _team_attribution_abstention_reason(self) -> str | None:
+        """Return why public team attribution must abstain without mutating owner memory."""
+        if self.current_track_id is None or self.current_team_id is None:
+            return None
+        if int(self._lost_frames) > 0:
+            return "owner_not_currently_supported"
+        if (
+            self._candidate_track_id is not None
+            and int(self._candidate_track_id) != int(self.current_track_id)
+            and int(self._candidate_frames) > 0
+        ):
+            return "distinct_challenger_pending"
+        return None
+
     def diagnostics(self) -> dict[str, Any]:
         diagnostics = super().diagnostics()
         threshold = (
@@ -164,6 +183,10 @@ class PossessionTrackerV1(_BasePossessionTrackerV1):
             and self._recent_owner_flight_last_origin_track_id is not None
             and int(flight.origin_track_id) == self._recent_owner_flight_last_origin_track_id
         )
+        attribution_reason = self._team_attribution_abstention_reason()
+        internal_current_team_id = self.current_team_id
+        if attribution_reason is not None:
+            diagnostics["current_team_id"] = None
         diagnostics.update(
             {
                 "candidate_score": candidate_score,
@@ -183,6 +206,10 @@ class PossessionTrackerV1(_BasePossessionTrackerV1):
                 "recent_owner_flight_last_seed_frame": self._recent_owner_flight_last_seed_frame,
                 "recent_owner_flight_last_origin_track_id": self._recent_owner_flight_last_origin_track_id,
                 "flight_seeded_from_recent_owner": current_flight_seeded_from_recent_owner,
+                "team_attribution_policy": self.TEAM_ATTRIBUTION_POLICY,
+                "team_attribution_abstained": attribution_reason is not None,
+                "team_attribution_abstention_reason": attribution_reason,
+                "internal_current_team_id": internal_current_team_id,
             }
         )
         return diagnostics
