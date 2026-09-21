@@ -8,6 +8,10 @@ def _detector() -> PerformanceDetector:
     detector.team_evidence_window_frames = 120
     detector.team_evidence_half_life_frames = 45.0
     detector.team_reversal_min_observations = 3
+    detector.team_stable_min_observations = 6
+    detector.team_stable_cadence_frames = 5
+    detector.team_stable_confidence = 0.60
+    detector.team_stable_margin = 0.02
     return detector
 
 
@@ -99,9 +103,32 @@ def test_weak_or_rejected_rescore_breaks_reversal_streak() -> None:
     assert profile["team_reversal_streak"] == 0
 
 
+def test_pending_reversal_bypasses_stable_profile_cadence() -> None:
+    detector = _detector()
+    profile = _profile()
+    profile.update(
+        team_observations=12,
+        team_confidence=0.90,
+        team_margin=0.80,
+        last_team_observation_frame=100,
+    )
+
+    assert detector._team_score_due(profile, 101) is False
+
+    profile["team_reversal_candidate"] = "team_b"
+    profile["team_reversal_streak"] = 1
+    assert detector._team_score_due(profile, 101) is True
+    assert detector._team_score_due(profile, 102) is True
+
+    profile["team_reversal_candidate"] = None
+    profile["team_reversal_streak"] = 0
+    assert detector._team_score_due(profile, 102) is False
+
+
 def main() -> None:
     test_three_consecutive_strong_fresh_rescores_reverse_stale_profile()
     test_weak_or_rejected_rescore_breaks_reversal_streak()
+    test_pending_reversal_bypasses_stable_profile_cadence()
     print("p2_team_reversal_temporal_test: PASS")
 
 
