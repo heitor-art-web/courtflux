@@ -471,6 +471,7 @@ class LiveControlP2EngineV1(_BaseP2EngineV1):
         timestamp = self._timestamp(frame_state)
         semantic_evidence = self._semantic_evidence(frame_state)
         team_evidence = self._team_evidence(frame_state)
+        team_hints = self._team_attribution_hints(frame_state)
         boundary_events = []
 
         discontinuity = self._detect_discontinuity(frame_id=frame_id, timestamp=timestamp)
@@ -503,6 +504,7 @@ class LiveControlP2EngineV1(_BaseP2EngineV1):
                 emitted=boundary_events,
                 semantic_evidence=semantic_evidence,
                 team_evidence=team_evidence,
+                team_hints=team_hints,
                 engine_eligible=True,
                 skipped_reason="gameplay_continuity_grace",
             )
@@ -535,6 +537,7 @@ class LiveControlP2EngineV1(_BaseP2EngineV1):
             emitted=boundary_events,
             semantic_evidence=semantic_evidence,
             team_evidence=team_evidence,
+            team_hints=team_hints,
             engine_eligible=False,
             skipped_reason="gameplay_not_present",
         )
