@@ -67,21 +67,40 @@ export function GameStory({ summary, startTimeSec, endTimeSec }: GameStoryProps)
 
   const p2 = record(summary.p2);
   if (!Object.keys(p2).length) {
+    const ball = record(summary.ball);
+    const players = record(summary.players);
+    const directBall = percent(ball.selected_detection_frame_rate);
+    const predictedBall = percent(ball.predicted_hold_frame_rate);
+    const effectiveBall = directBall === null && predictedBall === null
+      ? null
+      : Math.min(100, (directBall ?? 0) + (predictedBall ?? 0));
+    const playersPerFrame = number(players.final_per_gameplay_frame);
+    const teamClassification = percent(players.team_classification_rate);
+    const jerseyIdentification = percent(players.jersey_identification_rate);
+
     return (
       <section className={styles.storyPanel} aria-labelledby="game-story-title">
-        <div className={styles.eyebrow}>Game story</div>
+        <div className={styles.eyebrow}>Tracking story</div>
         <div className={styles.legacyGrid}>
           <div>
-            <h2 id="game-story-title">This run predates CourtFlux game-story metrics.</h2>
+            <h2 id="game-story-title">This run can describe the tracking quality, but not the basketball event story.</h2>
             <p>
-              This completed analysis contains tracking diagnostics, but it does not contain the canonical P2
-              possession and event summary used by current runs. CourtFlux will not invent passes, turnovers,
-              rebounds or shot outcomes from data that was never produced.
+              {directBall !== null ? `CourtFlux directly associated the ball on ${directBall.toFixed(1)}% of analysed frames. ` : ""}
+              {effectiveBall !== null ? `With conservative short-gap hold, effective ball trajectory coverage reached ${effectiveBall.toFixed(1)}%. ` : ""}
+              {playersPerFrame !== null ? `The run retained about ${playersPerFrame.toFixed(1)} players per gameplay frame. ` : ""}
+              This older result predates the canonical P2 possession and event summary, so CourtFlux will not invent passes, turnovers, rebounds or shot outcomes that were never produced.
             </p>
+            <div className={styles.storyMetrics} aria-label="Legacy tracking story metrics">
+              <article><span>Direct ball</span><strong>{directBall === null ? "—" : `${directBall.toFixed(1)}%`}</strong><small>Observed associated detections</small></article>
+              <article><span>Effective trajectory</span><strong>{effectiveBall === null ? "—" : `${effectiveBall.toFixed(1)}%`}</strong><small>Direct plus short-gap hold</small></article>
+              <article><span>Players / frame</span><strong>{playersPerFrame === null ? "—" : playersPerFrame.toFixed(1)}</strong><small>Final gameplay-frame average</small></article>
+              <article><span>Team classified</span><strong>{teamClassification === null ? "—" : `${teamClassification.toFixed(1)}%`}</strong><small>Team-label diagnostic</small></article>
+              <article><span>Jersey identified</span><strong>{jerseyIdentification === null ? "—" : `${jerseyIdentification.toFixed(1)}%`}</strong><small>Identity evidence diagnostic</small></article>
+            </div>
           </div>
           <div className={styles.legacyAction}>
-            <strong>For a game narrative</strong>
-            <span>Run the clip again with the current local pipeline.</span>
+            <strong>For possessions and events</strong>
+            <span>Run the clip again with the current local P1 → P2 pipeline.</span>
             <Link href="/analysis/new">Start a current analysis</Link>
           </div>
         </div>
@@ -104,7 +123,7 @@ export function GameStory({ summary, startTimeSec, endTimeSec }: GameStoryProps)
   const madeShots = count(outcomes.made);
   const missedShots = count(outcomes.missed);
   const unknownShots = count(outcomes.unknown);
-  const totalEvents = count(events.total);
+  const totalEvents = count(events.total) || Object.values(eventCounts).reduce((total, value) => total + count(value), 0);
   const possessionRate = percent(possession.possessed_rate);
   const actorAttribution = percent(events.actor_attribution_rate);
   const teamAttribution = percent(events.team_attribution_rate);
