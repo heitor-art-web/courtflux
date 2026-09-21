@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
+import { isPublicLaunchEnabled } from "@/lib/launch";
 import { isP3FoundationEnabled } from "@/lib/p3/feature-flag";
 import { updateSession } from "@/lib/supabase/proxy";
 import {
@@ -18,6 +19,17 @@ function cookieLocale(request: NextRequest): Locale {
 
 function copyResponseCookies(from: NextResponse, to: NextResponse) {
   from.cookies.getAll().forEach((cookie) => to.cookies.set(cookie));
+}
+
+function privateBetaDeploymentResponse() {
+  if (isPublicLaunchEnabled() || !process.env.VERCEL) return null;
+  return new NextResponse("CourtFlux is currently a local private beta.", {
+    status: 404,
+    headers: {
+      "Cache-Control": "no-store",
+      "X-Robots-Tag": "noindex, nofollow, noarchive",
+    },
+  });
 }
 
 function p3FoundationSurface(pathname: string): "review" | "api" | null {
@@ -53,6 +65,9 @@ function disabledP3Response(request: NextRequest, cleanPath: string, pathLocale:
 }
 
 export async function proxy(request: NextRequest) {
+  const privateBetaResponse = privateBetaDeploymentResponse();
+  if (privateBetaResponse) return privateBetaResponse;
+
   const { pathname } = request.nextUrl;
   const pathLocale = localeFromPathname(pathname);
   const cleanPath = stripLocalePrefix(pathname);
