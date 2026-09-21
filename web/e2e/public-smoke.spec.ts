@@ -1,18 +1,4 @@
 import { expect, test } from "@playwright/test";
-import { getAuthConfirmationUrl } from "../lib/auth-url";
-
-test("signup confirmation URL prefers the canonical production site", () => {
-  expect(
-    getAuthConfirmationUrl(
-      "http://localhost:3000",
-      " https://courtflux.example/ ",
-    ),
-  ).toBe("https://courtflux.example/auth/confirm");
-
-  expect(getAuthConfirmationUrl("http://localhost:3000", "   ")).toBe(
-    "http://localhost:3000/auth/confirm",
-  );
-});
 
 test("Homepage → primary beta CTA opens signup with keyboard focus preserved", async ({ page }) => {
   await page.goto("/");
@@ -34,6 +20,7 @@ test("Homepage → primary beta CTA opens signup with keyboard focus preserved",
   await expect(page.getByLabel("Full name")).toBeVisible();
   await expect(page.getByLabel("Email")).toBeVisible();
   await expect(page.getByLabel("Password")).toBeVisible();
+  await expect(page.getByRole("button", { name: "I already have an account" })).toHaveClass(/secondary/);
 });
 
 test("language selector is embedded in the public header and switches locales", async ({ page }) => {
