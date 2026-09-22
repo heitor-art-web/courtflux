@@ -10,6 +10,12 @@ function directLabEnabled() {
 }
 
 async function canonicalMatchConfig() {
+  // Repository-local config is a development fallback only. Vercel should never
+  // trace or read repo-local data files into a serverless function bundle.
+  if (process.env.VERCEL) {
+    throw new Error("Canonical local match_config.json is unavailable on Vercel");
+  }
+
   const candidates = [
     resolve(process.cwd(), "..", "data", "match_config.json"),
     resolve(process.cwd(), "data", "match_config.json"),
