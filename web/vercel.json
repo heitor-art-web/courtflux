@@ -3,7 +3,8 @@
   "framework": "nextjs",
   "git": {
     "deploymentEnabled": {
-      "assistant-*": false
+      "courtflux-preview": true,
+      "*": false
     }
   }
 }
