@@ -2,7 +2,7 @@ name: Web quality
 
 on:
   push:
-    branches: [main, p2-rebuilt, p3_foundation, p4_spatial_foundation]
+    branches: [main]
     paths:
       - "web/**"
       - "package.json"
@@ -11,6 +11,17 @@ on:
       - ".github/workflows/web-ci.yml"
   pull_request:
     branches: [main]
+    paths:
+      - "web/**"
+      - "package.json"
+      - "package-lock.json"
+      - "vercel.json"
+      - ".github/workflows/web-ci.yml"
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
 
 permissions:
   contents: read

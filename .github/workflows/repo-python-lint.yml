@@ -2,9 +2,24 @@ name: Repository Python lint
 
 on:
   push:
-    branches: [main, p2-rebuilt, p3_foundation, p4_spatial_foundation]
+    branches: [main]
+    paths:
+      - "**/*.py"
+      - "requirements*.txt"
+      - "ui/**"
+      - ".github/workflows/repo-python-lint.yml"
   pull_request:
     branches: [main]
+    paths:
+      - "**/*.py"
+      - "requirements*.txt"
+      - "ui/**"
+      - ".github/workflows/repo-python-lint.yml"
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
 
 permissions:
   contents: read
