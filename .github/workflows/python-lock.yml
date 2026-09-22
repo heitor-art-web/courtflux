@@ -13,6 +13,11 @@ on:
       - "requirements*.txt"
       - "requirements*.lock"
       - ".github/workflows/python-lock.yml"
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
 
 permissions:
   contents: read

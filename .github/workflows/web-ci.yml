@@ -55,34 +55,37 @@ jobs:
         run: npm run build
 
       - name: Install browser test tools
+        if: github.event_name != 'push'
         run: npm install --no-save --ignore-scripts @playwright/test@1.55.0 @axe-core/playwright@4.10.2
 
       - name: Install Chromium
+        if: github.event_name != 'push'
         run: npx playwright install --with-deps chromium
 
       - name: Public flow smoke tests
+        if: github.event_name != 'push'
         run: npx playwright test --config web/playwright.config.ts public-smoke.spec.ts
 
       - name: Axe accessibility smoke tests
-        if: always()
+        if: always() && github.event_name != 'push'
         run: npx playwright test --config web/playwright.config.ts accessibility.spec.ts
 
       - name: Authenticated flow tests
-        if: always()
+        if: always() && github.event_name != 'push'
         env:
           COURTFLUX_E2E_EMAIL: ${{ secrets.COURTFLUX_E2E_EMAIL }}
           COURTFLUX_E2E_PASSWORD: ${{ secrets.COURTFLUX_E2E_PASSWORD }}
         run: npx playwright test --config web/playwright.config.ts authenticated.spec.ts
 
       - name: Onboarding keyboard tests
-        if: always()
+        if: always() && github.event_name != 'push'
         env:
           COURTFLUX_E2E_ONBOARDING_EMAIL: ${{ secrets.COURTFLUX_E2E_ONBOARDING_EMAIL }}
           COURTFLUX_E2E_ONBOARDING_PASSWORD: ${{ secrets.COURTFLUX_E2E_ONBOARDING_PASSWORD }}
         run: npx playwright test --config web/playwright.config.ts onboarding.spec.ts
 
       - name: Upload Playwright diagnostics
-        if: failure()
+        if: failure() && github.event_name != 'push'
         uses: actions/upload-artifact@v6
         with:
           name: playwright-diagnostics
