@@ -22,7 +22,13 @@ function copyResponseCookies(from: NextResponse, to: NextResponse) {
 }
 
 function privateBetaDeploymentResponse() {
-  if (isPublicLaunchEnabled() || !process.env.VERCEL) return null;
+  if (
+    isPublicLaunchEnabled()
+    || !process.env.VERCEL
+    || process.env.VERCEL_ENV === "preview"
+  ) {
+    return null;
+  }
   return new NextResponse("CourtFlux is currently a local private beta.", {
     status: 404,
     headers: {
