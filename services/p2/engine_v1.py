@@ -22,6 +22,17 @@ class P2EngineV1:
     possession/shot candidates never bridge replay/camera/non-gameplay gaps.
     """
 
+    TEAM_ATTRIBUTION_HINT_MARGIN = 0.18
+    EVENT_TEAM_ATTRIBUTION_POLICY = (
+        "shot_team_requires_current_public_owner_team;"
+        "recent_owner_may_supply_actor_but_not_team;"
+        "pass_team_requires_recent_fresh_on_court_endpoint_support;"
+        "turnover_team_requires_recent_fresh_on_court_actor_support;"
+        "fresh_same_team_endpoints_may_reclassify_turnover_as_pass;"
+        "confirmed_same_team_handler_switch_with_release_interval_may_emit_pass;"
+        "event_publication_never_mutates_possession_memory"
+    )
+
     def __init__(
         self,
         *,
@@ -44,6 +55,7 @@ class P2EngineV1:
         self._shot_actor_source: str = "unknown"
         self._shot_actor_location: tuple[float, float] | None = None
         self._pending_missed_shot: BasketballEvent | None = None
+        self._event_team_hint_cache: dict[int, tuple[str, float, int]] = {}
 
         self._ineligible_frames = 0
         self._reset_done_for_ineligible_gap = False
@@ -73,6 +85,374 @@ class P2EngineV1:
             if previous is None or confidence > previous[1]:
                 evidence[track_id] = (str(team_id), confidence)
         return evidence
+
+    def _team_attribution_hints(
+        self,
+        frame_state: Any,
+    ) -> dict[int, tuple[str, float]]:
+        """Return fresh strong team hints only for explicitly on-court players.
+
+        Hints are deliberately separate from possession/team memory: they may fill a
+        public UNKNOWN attribution for the current owner or a shot actor, but they never
+        enter ``PossessionTrackerV1.update`` and therefore cannot acquire/switch an owner,
+        reverse a team profile, or classify a pass/turnover.
+        """
+        on_court_tracks: set[int] = set()
+        for player in list(getattr(frame_state, "players", []) or []):
+            if not isinstance(player, dict) or player.get("active_on_court") is not True:
+                continue
+            raw_track_id = player.get("track_id", player.get("id"))
+            try:
+                on_court_tracks.add(int(raw_track_id))
+            except (TypeError, ValueError):
+                continue
+
+        diagnostics = dict(getattr(frame_state, "diagnostics", {}) or {})
+        detector = dict(diagnostics.get("detector", {}) or {})
+        threshold = float(self.possession_tracker.team_evidence_threshold)
+        hints: dict[int, tuple[str, float]] = {}
+        for row in list(detector.get("team_predictions", []) or []):
+            if not isinstance(row, dict) or not bool(row.get("rescored", False)):
+                continue
+            try:
+                track_id = int(row.get("track_id"))
+                confidence = float(row.get("fused_confidence", 0.0) or 0.0)
+                margin = float(row.get("fused_margin", 0.0) or 0.0)
+            except (TypeError, ValueError):
+                continue
+            if track_id not in on_court_tracks:
+                continue
+            team_id = row.get("fused_best_team")
+            if (
+                team_id is None
+                or confidence < threshold
+                or margin < self.TEAM_ATTRIBUTION_HINT_MARGIN
+            ):
+                continue
+            previous = hints.get(track_id)
+            if previous is None or confidence > previous[1]:
+                hints[track_id] = (str(team_id), max(0.0, min(confidence, 1.0)))
+        return hints
+
+    def _attributed_team_for_track(
+        self,
+        track_id: int | None,
+        *,
+        team_evidence: dict[int, tuple[str | None, float]],
+        team_hints: dict[int, tuple[str, float]],
+    ) -> tuple[str | None, float, str]:
+        if track_id is None:
+            return None, 0.0, "unknown"
+        threshold = float(self.possession_tracker.team_evidence_threshold)
+        evidence = team_evidence.get(int(track_id))
+        if evidence is not None:
+            team_id, confidence = evidence
+            if team_id is not None and float(confidence) >= threshold:
+                return str(team_id), float(confidence), "current_player_team"
+        hint = team_hints.get(int(track_id))
+        if hint is not None:
+            return str(hint[0]), float(hint[1]), "fresh_on_court_team_hint"
+        return None, 0.0, "unknown"
+
+    def _event_team_hint_max_age_frames(self) -> int:
+        return max(
+            int(self.possession_tracker.lock_frames),
+            int(self.possession_tracker.switch_frames),
+        ) + 1
+
+    def _observe_event_team_hints(
+        self,
+        *,
+        frame_id: int,
+        team_hints: dict[int, tuple[str, float]],
+    ) -> None:
+        frame_id = int(frame_id)
+        max_age = self._event_team_hint_max_age_frames()
+        self._event_team_hint_cache = {
+            track_id: hint
+            for track_id, hint in self._event_team_hint_cache.items()
+            if 0 <= frame_id - int(hint[2]) <= max_age
+        }
+        for raw_track_id, raw_hint in dict(team_hints or {}).items():
+            try:
+                track_id = int(raw_track_id)
+                team_id, confidence = raw_hint
+                confidence = max(0.0, min(float(confidence), 1.0))
+            except (TypeError, ValueError):
+                continue
+            self._event_team_hint_cache[track_id] = (str(team_id), confidence, frame_id)
+
+    def _recent_event_team_hint(
+        self,
+        track_id: int | None,
+        *,
+        frame_id: int,
+    ) -> tuple[str | None, float, int | None]:
+        if track_id is None:
+            return None, 0.0, None
+        hint = self._event_team_hint_cache.get(int(track_id))
+        if hint is None:
+            return None, 0.0, None
+        team_id, confidence, hint_frame = hint
+        age = int(frame_id) - int(hint_frame)
+        if age < 0 or age > self._event_team_hint_max_age_frames():
+            return None, 0.0, None
+        return str(team_id), float(confidence), int(age)
+
+    def _pre_release_public_attribution(
+        self,
+        *,
+        frame_id: int,
+    ) -> tuple[int | None, str | None, str]:
+        """Use the public possession contract for shot team publication.
+
+        Internal possession memory may still preserve a team while the public tracker is
+        abstaining. That memory remains useful for control continuity, but it must not be
+        promoted back into a public shot team. A recent owner may still identify the actor
+        after release; its team is deliberately withheld until fresh/current public support
+        exists.
+        """
+        current_track = self.possession_tracker.current_track_id
+        if current_track is not None:
+            possession = self.possession_tracker.diagnostics()
+            public_team = possession.get("current_team_id")
+            if public_team is None:
+                return int(current_track), None, "pre_release_possession_public_abstained"
+            return (
+                int(current_track),
+                str(public_team),
+                "pre_release_possession_public_team",
+            )
+
+        recent_track, _, _ = self.possession_tracker.recent_owner(
+            frame_id=int(frame_id),
+            max_age_frames=self.recent_shot_actor_frames,
+        )
+        if recent_track is not None:
+            return int(recent_track), None, "recent_possession_actor_team_abstained"
+        return None, None, "unknown"
+
+    def _same_team_fresh_endpoint_hints(
+        self,
+        *,
+        actor_track_id: int | None,
+        secondary_track_id: int | None,
+        frame_id: int,
+    ) -> tuple[str | None, list[tuple[int, str, float, int]]]:
+        if actor_track_id is None or secondary_track_id is None:
+            return None, []
+        rows: list[tuple[int, str, float, int]] = []
+        for track_id in (int(actor_track_id), int(secondary_track_id)):
+            team_id, confidence, age = self._recent_event_team_hint(
+                track_id,
+                frame_id=int(frame_id),
+            )
+            if team_id is None or age is None:
+                return None, []
+            rows.append((track_id, str(team_id), float(confidence), int(age)))
+        teams = {row[1] for row in rows}
+        if len(teams) != 1:
+            return None, rows
+        return next(iter(teams)), rows
+
+    def _normalize_event_team_publication(
+        self,
+        event: BasketballEvent,
+        *,
+        frame_id: int,
+    ) -> BasketballEvent:
+        """Validate event team publication without changing control decisions."""
+        if event.event_type not in {
+            BasketballEventType.PASS_CANDIDATE,
+            BasketballEventType.TURNOVER_CANDIDATE,
+        }:
+            return event
+
+        original_team = None if event.team_id is None else str(event.team_id)
+        event.attributes["internal_team_id_before_publication"] = original_team
+        event.attributes["team_attribution_publication_policy"] = self.EVENT_TEAM_ATTRIBUTION_POLICY
+
+        if event.event_type is BasketballEventType.TURNOVER_CANDIDATE:
+            same_team, endpoint_rows = self._same_team_fresh_endpoint_hints(
+                actor_track_id=event.actor_track_id,
+                secondary_track_id=event.secondary_track_id,
+                frame_id=int(frame_id),
+            )
+            if same_team is not None:
+                event.event_type = BasketballEventType.PASS_CANDIDATE
+                event.team_id = same_team
+                event.evidence = tuple(
+                    sorted(
+                        set(event.evidence)
+                        | {
+                            "fresh_same_team_endpoint_reclassification",
+                            "temporal_possession_transition",
+                        }
+                    )
+                )
+                event.attributes["team_attribution_fresh_hint_tracks"] = [row[0] for row in endpoint_rows]
+                event.attributes["team_attribution_fresh_hint_ages"] = [row[3] for row in endpoint_rows]
+                event.attributes["event_type_before_publication"] = BasketballEventType.TURNOVER_CANDIDATE.value
+                event.attributes["team_attribution_publication_source"] = "recent_fresh_on_court_endpoints"
+                event.attributes["team_attribution_publication_reason"] = (
+                    "fresh_same_team_endpoints_reclassified_turnover_to_pass"
+                )
+                return event
+
+        tracks: list[int] = []
+        if event.actor_track_id is not None:
+            tracks.append(int(event.actor_track_id))
+        if (
+            event.event_type is BasketballEventType.PASS_CANDIDATE
+            and event.secondary_track_id is not None
+        ):
+            secondary = int(event.secondary_track_id)
+            if secondary not in tracks:
+                tracks.append(secondary)
+
+        hints: list[tuple[int, str, float, int]] = []
+        for track_id in tracks:
+            team_id, confidence, age = self._recent_event_team_hint(
+                track_id,
+                frame_id=int(frame_id),
+            )
+            if team_id is not None and age is not None:
+                hints.append((track_id, team_id, confidence, age))
+
+        if not hints:
+            event.team_id = None
+            event.attributes["team_attribution_publication_source"] = "abstained"
+            event.attributes["team_attribution_publication_reason"] = "no_recent_fresh_endpoint_team_support"
+            return event
+
+        hinted_teams = {team_id for _, team_id, _, _ in hints}
+        event.attributes["team_attribution_fresh_hint_tracks"] = [row[0] for row in hints]
+        event.attributes["team_attribution_fresh_hint_ages"] = [row[3] for row in hints]
+        if len(hinted_teams) != 1:
+            event.team_id = None
+            event.attributes["team_attribution_publication_source"] = "abstained"
+            event.attributes["team_attribution_publication_reason"] = "fresh_endpoint_team_conflict"
+            return event
+
+        fresh_team = next(iter(hinted_teams))
+        if original_team is not None and original_team != fresh_team:
+            event.team_id = None
+            event.attributes["team_attribution_publication_source"] = "abstained"
+            event.attributes["team_attribution_publication_reason"] = "fresh_endpoint_conflicts_with_internal_team"
+            return event
+
+        event.team_id = fresh_team
+        event.attributes["team_attribution_publication_source"] = "recent_fresh_on_court_endpoint"
+        event.attributes["team_attribution_publication_reason"] = "fresh_endpoint_support"
+        return event
+
+    def _pass_from_confirmed_same_team_switch(
+        self,
+        event: BasketballEvent,
+        *,
+        frame_id: int,
+    ) -> BasketballEvent | None:
+        """Recover a pass only after a confirmed same-team handler switch.
+
+        This path does not lower possession lock or generic flight thresholds. It is used
+        only when the tracker already emitted a confirmed POSSESSION_CHANGE, a release
+        interval existed, and both endpoints have strong recent explicit-on-court team
+        evidence agreeing on the same team.
+        """
+        if event.event_type is not BasketballEventType.POSSESSION_CHANGE:
+            return None
+        new_track = event.actor_track_id
+        previous_track = event.secondary_track_id
+        if new_track is None or previous_track is None or int(new_track) == int(previous_track):
+            return None
+
+        attributes = dict(event.attributes or {})
+        try:
+            flight_frames = int(attributes.get("flight_frames", 0) or 0)
+            direct_observations = int(attributes.get("flight_direct_observations", 0) or 0)
+            predicted_observations = int(attributes.get("flight_predicted_observations", 0) or 0)
+        except (TypeError, ValueError):
+            return None
+        if flight_frames < int(self.possession_tracker.release_confirm_frames):
+            return None
+        if direct_observations + predicted_observations <= 0:
+            return None
+
+        same_team, endpoint_rows = self._same_team_fresh_endpoint_hints(
+            actor_track_id=int(previous_track),
+            secondary_track_id=int(new_track),
+            frame_id=int(frame_id),
+        )
+        if same_team is None:
+            return None
+
+        start_frame = max(0, int(event.frame_end) - max(1, flight_frames) + 1)
+        confidence = max(0.0, min(float(event.confidence) * 0.88, 1.0))
+        return BasketballEvent(
+            event_id=f"pass-candidate:confirmed-switch:{event.frame_end}:{previous_track}:{new_track}",
+            event_type=BasketballEventType.PASS_CANDIDATE,
+            frame_start=start_frame,
+            frame_end=int(event.frame_end),
+            timestamp_start_sec=event.timestamp_start_sec,
+            timestamp_end_sec=event.timestamp_end_sec,
+            confidence=confidence,
+            uncertainty=1.0 - confidence,
+            decision=EventDecision.CANDIDATE,
+            actor_track_id=int(previous_track),
+            secondary_track_id=int(new_track),
+            team_id=same_team,
+            location_court_m=event.location_court_m,
+            evidence=(
+                "confirmed_handler_switch",
+                "release_interval",
+                "fresh_same_team_endpoints",
+            ),
+            provenance={"version": "p2_engine_v1"},
+            attributes={
+                **attributes,
+                "transition_kind": "confirmed_same_team_switch_with_release_interval",
+                "team_attribution_publication_policy": self.EVENT_TEAM_ATTRIBUTION_POLICY,
+                "team_attribution_publication_source": "recent_fresh_on_court_endpoints",
+                "team_attribution_publication_reason": "confirmed_same_team_switch_release_interval",
+                "team_attribution_fresh_hint_tracks": [row[0] for row in endpoint_rows],
+                "team_attribution_fresh_hint_ages": [row[3] for row in endpoint_rows],
+                "source_possession_change_event_id": event.event_id,
+            },
+        )
+
+    def _normalize_and_recover_transition_events(
+        self,
+        events: list[BasketballEvent],
+        *,
+        frame_id: int,
+    ) -> list[BasketballEvent]:
+        transition_pairs = {
+            (int(event.actor_track_id), int(event.secondary_track_id))
+            for event in events
+            if event.event_type
+            in {BasketballEventType.PASS_CANDIDATE, BasketballEventType.TURNOVER_CANDIDATE}
+            and event.actor_track_id is not None
+            and event.secondary_track_id is not None
+        }
+        output: list[BasketballEvent] = []
+        for event in events:
+            normalized = self._normalize_event_team_publication(event, frame_id=int(frame_id))
+            output.append(normalized)
+            if normalized.event_type is not BasketballEventType.POSSESSION_CHANGE:
+                continue
+            if normalized.actor_track_id is None or normalized.secondary_track_id is None:
+                continue
+            transition_pair = (int(normalized.secondary_track_id), int(normalized.actor_track_id))
+            if transition_pair in transition_pairs:
+                continue
+            recovered = self._pass_from_confirmed_same_team_switch(
+                normalized,
+                frame_id=int(frame_id),
+            )
+            if recovered is not None:
+                output.append(recovered)
+                transition_pairs.add(transition_pair)
+        return output
 
     @staticmethod
     def _semantic_evidence(frame_state: Any) -> list[dict[str, Any]]:
@@ -292,6 +672,7 @@ class P2EngineV1:
         self._shot_actor_source = "unknown"
         self._shot_actor_location = None
         self._pending_missed_shot = None
+        self._event_team_hint_cache.clear()
         self._reset_count += 1
         self._last_reset_reason = str(reason)
         self._last_reset_frame = int(frame_id)
@@ -328,6 +709,13 @@ class P2EngineV1:
                 sorted(set(event.evidence) | {"pre_release_possession_actor"})
             )
         event.attributes["actor_attribution_source"] = self._shot_actor_source
+        event.attributes["team_attribution_publication_policy"] = self.EVENT_TEAM_ATTRIBUTION_POLICY
+        event.attributes["team_attribution_publication_source"] = self._shot_actor_source
+        event.attributes["team_attribution_publication_reason"] = (
+            "public_pre_release_team_supported"
+            if self._shot_team_id is not None
+            else "public_pre_release_team_abstained"
+        )
         return event
 
     def _rebound_from_possession(
@@ -395,6 +783,7 @@ class P2EngineV1:
         emitted: list[BasketballEvent],
         semantic_evidence: list[dict[str, Any]],
         team_evidence: dict[int, tuple[str | None, float]],
+        team_hints: dict[int, tuple[str, float]],
         engine_eligible: bool,
         skipped_reason: str | None = None,
     ) -> None:
@@ -402,15 +791,36 @@ class P2EngineV1:
         if diagnostics is None:
             frame_state.diagnostics = {}
             diagnostics = frame_state.diagnostics
+
+        possession = self.possession_tracker.diagnostics()
+        fallback_team_id = None
+        fallback_confidence = 0.0
+        fallback_source = "none"
+        if possession.get("current_track_id") is not None and possession.get("current_team_id") is None:
+            fallback_team_id, fallback_confidence, fallback_source = self._attributed_team_for_track(
+                int(possession["current_track_id"]),
+                team_evidence=team_evidence,
+                team_hints=team_hints,
+            )
+            if fallback_team_id is not None:
+                possession["current_team_id"] = fallback_team_id
+        possession["team_attribution_fallback_applied"] = fallback_team_id is not None
+        possession["team_attribution_fallback_source"] = fallback_source
+        possession["team_attribution_fallback_confidence"] = round(float(fallback_confidence), 6)
+        possession["team_attribution_fallback_policy"] = (
+            "public_diagnostics_only;current_owner_only;strong_current_player_team_or_fresh_rescore;"
+            "fresh_rescore_requires_explicit_on_court;internal_possession_memory_unchanged"
+        )
+
         diagnostics["p2"] = {
             "version": "p2_engine_v1",
-            "behavior_revision": "control_state_v4_gameplay_presence",
+            "behavior_revision": "control_state_v4_gameplay_presence_team_event_publication_v2",
             "eligibility_policy": "court_state_gameplay_present_fallback_analysis_eligible",
             "engine_eligible": bool(engine_eligible),
             "skipped_reason": skipped_reason,
             "event_count": len(emitted),
             "events": [event.as_dict() for event in emitted],
-            "possession": self.possession_tracker.diagnostics(),
+            "possession": possession,
             "shot": self.shot_tracker.diagnostics(),
             "pending_missed_shot_event_id": (
                 None
@@ -419,6 +829,9 @@ class P2EngineV1:
             ),
             "semantic_evidence_rows": len(semantic_evidence),
             "team_evidence_tracks": len(team_evidence),
+            "team_attribution_hint_tracks": len(team_hints),
+            "event_team_hint_cache_tracks": len(self._event_team_hint_cache),
+            "event_team_attribution_policy": self.EVENT_TEAM_ATTRIBUTION_POLICY,
             "temporal_reset": {
                 "count": self._reset_count,
                 "last_reason": self._last_reset_reason,
@@ -443,6 +856,7 @@ class P2EngineV1:
         ball_state = getattr(frame_state, "ball_state", None)
         court_state = getattr(frame_state, "court_state", None)
         team_evidence = self._team_evidence(frame_state)
+        team_hints = self._team_attribution_hints(frame_state)
         semantic_evidence = self._semantic_evidence(frame_state)
         boundary_events: list[BasketballEvent] = []
 
@@ -481,6 +895,7 @@ class P2EngineV1:
                 emitted=boundary_events,
                 semantic_evidence=semantic_evidence,
                 team_evidence=team_evidence,
+                team_hints=team_hints,
                 engine_eligible=False,
                 skipped_reason="gameplay_not_present",
             )
@@ -488,22 +903,14 @@ class P2EngineV1:
 
         self._ineligible_frames = 0
         self._reset_done_for_ineligible_gap = False
+        self._observe_event_team_hints(frame_id=frame_id, team_hints=team_hints)
         loose_before_control = self._loose_snapshot()
 
         # Shot state is evaluated before possession for the current frame. If a shot is
         # active, airborne ball must not be reinterpreted as possession/pass/turnover.
-        pre_track_id = self.possession_tracker.current_track_id
-        pre_team_id = self.possession_tracker.current_team_id
-        pre_source = "pre_release_possession" if pre_track_id is not None else "unknown"
-        if pre_track_id is None:
-            recent_track, recent_team, _ = self.possession_tracker.recent_owner(
-                frame_id=frame_id,
-                max_age_frames=self.recent_shot_actor_frames,
-            )
-            if recent_track is not None:
-                pre_track_id = recent_track
-                pre_team_id = recent_team
-                pre_source = "recent_possession_before_release"
+        pre_track_id, pre_team_id, pre_source = self._pre_release_public_attribution(
+            frame_id=frame_id,
+        )
 
         shot_was_active = bool(self.shot_tracker.diagnostics().get("active", False))
         shot_events = self.shot_tracker.update(
@@ -548,6 +955,10 @@ class P2EngineV1:
                 frame_id=frame_id,
                 timestamp=timestamp,
             )
+            possession_events = self._normalize_and_recover_transition_events(
+                possession_events,
+                frame_id=frame_id,
+            )
         elif shot_was_active or shot_is_active:
             self.possession_tracker.control_state = BallControlState.SHOT_FLIGHT
 
@@ -581,6 +992,7 @@ class P2EngineV1:
             emitted=emitted,
             semantic_evidence=semantic_evidence,
             team_evidence=team_evidence,
+            team_hints=team_hints,
             engine_eligible=True,
         )
         return frame_state

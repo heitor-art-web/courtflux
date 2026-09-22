@@ -1,0 +1,256 @@
+{
+  "version": "courtflux_p2_gt_v1",
+  "annotation_status": "pass_a_frozen_human_windows",
+  "evaluation_ready": true,
+  "video": {
+    "source": "https://www.youtube.com/watch?v=ULUpcQXsRII",
+    "start_time_sec": 0.0,
+    "end_time_sec": 30.0,
+    "fps": 50.0,
+    "frame_mapping": "frame_id = round(source_time_sec * 50.0)"
+  },
+  "annotation_policy": {
+    "identity": "stable_track_id_when_visible; null_when_not_reliably_identifiable",
+    "team": "neutral_clip; leave team_id null",
+    "unknown_preferred_over_guess": true,
+    "event_timing": "human_event_window; exact release frame is optional",
+    "event_window_scoring": "prediction inside window has zero temporal error; tolerance applies only beyond window edges",
+    "control_scoring": "human interval continuity is primary; frame accuracy remains diagnostic",
+    "control_states": [
+      "unknown",
+      "possessed",
+      "loose",
+      "pass_flight",
+      "shot_flight"
+    ],
+    "coarse_boundary_precision_sec": 1.0
+  },
+  "baseline": {
+    "run_id": "20260917_141201_062495",
+    "jersey_enabled": false,
+    "match_config": "evaluation/match_configs/unknown.json",
+    "frames_seen": 1501,
+    "video_fps": 50.0,
+    "note": "Metadata only. Human GT was authored blind from video and was not bootstrapped from P2 predictions."
+  },
+  "human_kit_audit": {
+    "version": "courtflux_p2_human_kit_audit_v1",
+    "review_scope": "Gate C team-colour context only; does not rewrite frozen Gate A/B labels",
+    "prediction_blind": true,
+    "audit_status": "partial_existing_gt_only_not_reaudited_in_2026_09_18_kit_pass",
+    "classifier_feature_policy": "only jersey_body colours explicitly supported by human notes are configured; shorts and lettering remain null rather than guessed",
+    "segments": [
+      {
+        "source_time_start_sec": 0.0,
+        "source_time_end_sec": 30.0,
+        "team_a": {
+          "name": null,
+          "shorts": null,
+          "jersey_body": ["Red"],
+          "lettering": null
+        },
+        "team_b": {
+          "name": null,
+          "shorts": null,
+          "jersey_body": ["White"],
+          "lettering": null
+        }
+      }
+    ]
+  },
+  "control_intervals": [
+    {
+      "state": "shot_flight",
+      "frame_start": 400,
+      "frame_end": 550,
+      "source_time_start_sec": 8.0,
+      "source_time_end_sec": 11.0,
+      "human_note": "shot flight; made; jogador/equipa visualmente vermelho",
+      "boundary_precision": "coarse_1s"
+    },
+    {
+      "state": "possessed",
+      "frame_start": 600,
+      "frame_end": 650,
+      "source_time_start_sec": 12.0,
+      "source_time_end_sec": 13.0,
+      "human_note": "posse visualmente da equipa vermelha",
+      "boundary_precision": "coarse_1s"
+    },
+    {
+      "state": "shot_flight",
+      "frame_start": 700,
+      "frame_end": 800,
+      "source_time_start_sec": 14.0,
+      "source_time_end_sec": 16.0,
+      "human_note": "shot flight; made; jogador/equipa visualmente vermelho",
+      "boundary_precision": "coarse_1s"
+    },
+    {
+      "state": "pass_flight",
+      "frame_start": 850,
+      "frame_end": 900,
+      "source_time_start_sec": 17.0,
+      "source_time_end_sec": 18.0,
+      "human_note": "pass flight; equipa visualmente vermelha",
+      "boundary_precision": "coarse_1s"
+    },
+    {
+      "state": "shot_flight",
+      "frame_start": 900,
+      "frame_end": 1000,
+      "source_time_start_sec": 18.0,
+      "source_time_end_sec": 20.0,
+      "human_note": "shot flight; made; equipa visualmente vermelha",
+      "boundary_precision": "coarse_1s"
+    },
+    {
+      "state": "pass_flight",
+      "frame_start": 1050,
+      "frame_end": 1050,
+      "source_time_start_sec": 21.0,
+      "source_time_end_sec": 21.0,
+      "human_note": "human annotation verbatim: pass flight missed; 'missed' retained as note only because Gate A scores control state",
+      "boundary_precision": "human_second_marker"
+    },
+    {
+      "state": "possessed",
+      "frame_start": 1100,
+      "frame_end": 1150,
+      "source_time_start_sec": 22.0,
+      "source_time_end_sec": 23.0,
+      "human_note": "posse visualmente da equipa branca",
+      "boundary_precision": "coarse_1s"
+    },
+    {
+      "state": "shot_flight",
+      "frame_start": 1200,
+      "frame_end": 1300,
+      "source_time_start_sec": 24.0,
+      "source_time_end_sec": 26.0,
+      "human_note": "shot/dunk flight; made; equipa visualmente branca",
+      "boundary_precision": "coarse_1s"
+    },
+    {
+      "state": "possessed",
+      "frame_start": 1350,
+      "frame_end": 1450,
+      "source_time_start_sec": 27.0,
+      "source_time_end_sec": 29.0,
+      "human_note": "posse visualmente da equipa vermelha; human also observed two passes and a made dunk around 30s, but exact sub-second control boundaries were not supplied",
+      "boundary_precision": "coarse_1s"
+    }
+  ],
+  "excluded_intervals": [
+    {
+      "reason": "non_game",
+      "frame_start": 0,
+      "frame_end": 350,
+      "source_time_start_sec": 0.0,
+      "source_time_end_sec": 7.0,
+      "human_note": "non game play"
+    },
+    {
+      "reason": "ambiguous_subsecond_sequence",
+      "frame_start": 1500,
+      "frame_end": 1500,
+      "source_time_start_sec": 30.0,
+      "source_time_end_sec": 30.0,
+      "human_note": "human observed two passes and a made dunk around 30s; exact control-state boundaries inside this second were not supplied, so Gate A abstains"
+    }
+  ],
+  "events": [
+    {
+      "event_type": "shot_attempt",
+      "frame_start": 400,
+      "frame_end": 550,
+      "outcome": "made",
+      "team_id": null,
+      "actor_track_id": null,
+      "secondary_track_id": null,
+      "source_time_start_sec": 8.0,
+      "source_time_end_sec": 11.0,
+      "human_note": "made; visually red team"
+    },
+    {
+      "event_type": "shot_attempt",
+      "frame_start": 700,
+      "frame_end": 800,
+      "outcome": "made",
+      "team_id": null,
+      "actor_track_id": null,
+      "secondary_track_id": null,
+      "source_time_start_sec": 14.0,
+      "source_time_end_sec": 16.0,
+      "human_note": "made; visually red team"
+    },
+    {
+      "event_type": "shot_attempt",
+      "frame_start": 900,
+      "frame_end": 1000,
+      "outcome": "made",
+      "team_id": null,
+      "actor_track_id": null,
+      "secondary_track_id": null,
+      "source_time_start_sec": 18.0,
+      "source_time_end_sec": 20.0,
+      "human_note": "made; visually red team"
+    },
+    {
+      "event_type": "shot_attempt",
+      "frame_start": 1200,
+      "frame_end": 1300,
+      "outcome": "made",
+      "team_id": null,
+      "actor_track_id": null,
+      "secondary_track_id": null,
+      "source_time_start_sec": 24.0,
+      "source_time_end_sec": 26.0,
+      "human_note": "dunk; made; visually white team"
+    },
+    {
+      "event_type": "shot_attempt",
+      "frame_start": 1500,
+      "frame_end": 1500,
+      "outcome": "made",
+      "team_id": null,
+      "actor_track_id": null,
+      "secondary_track_id": null,
+      "source_time_start_sec": 30.0,
+      "source_time_end_sec": 30.0,
+      "human_note": "made dunk around 30s; human also observed two passes in the same coarse second"
+    }
+  ],
+  "unresolved_event_windows": [
+    {
+      "event_type": "pass_sequence",
+      "frame_start": 1500,
+      "frame_end": 1500,
+      "source_time_start_sec": 30.0,
+      "source_time_end_sec": 30.0,
+      "expected_count": 2,
+      "human_note": "human explicitly observed two passes around 30s; exact sub-second timing/order relative to the made dunk was not supplied, so preserve as unresolved context rather than invent individual pass windows"
+    }
+  ],
+  "human_source_notes": [
+    "0-7 non game play",
+    "8-11 shot_flight made red team",
+    "12-13 possessed red team",
+    "14-16 shot flight made red team",
+    "17-18 pass_flight red team",
+    "18-20 shot flight made red team",
+    "21 pass flight missed",
+    "22-23 possessed white team",
+    "24-26 shot dunk made white team",
+    "27-30 possessed red team, two passes and a dunk in the 30 made"
+  ],
+  "notes": [
+    "Pass A is frozen using human windows rather than millisecond/frame-exact labels.",
+    "Team colours are retained only as human notes because V2 is a neutral clip and event team_id remains null.",
+    "V2 was not part of the 2026-09-18 detailed kit re-audit; human_kit_audit records only the red/white torso evidence already supported by prior blind GT.",
+    "The 21s annotation is scored as pass_flight for Gate A; the word 'missed' is preserved verbatim as a note and is not converted into a shot outcome.",
+    "At 30s the human observed two passes and a made dunk inside one coarse second. Exact pass/shot control-state boundaries were not supplied, so frame 1500 is excluded from Gate A control scoring rather than guessed.",
+    "The two passes around 30s are preserved as an unresolved pass_sequence with expected_count=2; this is context only and does not invent individual pass event timing.",
+    "Do not inspect P2 predictions before freezing this Pass A GT."
+  ]
+}

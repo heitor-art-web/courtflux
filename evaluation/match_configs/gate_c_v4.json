@@ -1,0 +1,14 @@
+{
+  "metadata": {
+    "evaluation_scope": "p2_gate_c_v4_segment_manifest",
+    "deprecated_for_scoring": true,
+    "reason": "Human kit audit found three distinct equipment contexts inside V4; one static 0-30s team-colour config is invalid.",
+    "replacement_configs": [
+      "evaluation/match_configs/gate_c_v4_a.json",
+      "evaluation/match_configs/gate_c_v4_b.json",
+      "evaluation/match_configs/gate_c_v4_c.json"
+    ],
+    "human_kit_audit_ref": "evaluation/ground_truth/v4.json#human_kit_audit"
+  },
+  "teams": {}
+}

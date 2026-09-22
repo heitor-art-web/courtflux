@@ -1,0 +1,36 @@
+{
+  "version": "courtflux_airborne_dev_manifest_v2",
+  "policy": "V1-V5 are development/training data; grouped cross-validation is video-held-out; final Gate A validation uses new V6-V7 videos only",
+  "clips": [
+    {
+      "id": "V1",
+      "video_id": "hILf-ySowIo",
+      "gt_file": "evaluation/ground_truth/v1.json",
+      "run_id": "20260917_165024_441761"
+    },
+    {
+      "id": "V2",
+      "video_id": "ULUpcQXsRII",
+      "gt_file": "evaluation/ground_truth/v2.json",
+      "run_id": "20260917_165113_811539"
+    },
+    {
+      "id": "V3",
+      "video_id": "Vr4105n-cPM",
+      "gt_file": "evaluation/ground_truth/v3.json",
+      "run_id": "20260917_165223_075513"
+    },
+    {
+      "id": "V4",
+      "video_id": "WMWTbS8J2ec",
+      "gt_file": "evaluation/ground_truth/v4.json",
+      "run_id": "20260917_165301_107385"
+    },
+    {
+      "id": "V5",
+      "video_id": "C-JjAlX2Dyc",
+      "gt_file": "evaluation/ground_truth/v5.json",
+      "run_id": "20260917_165410_762353"
+    }
+  ]
+}

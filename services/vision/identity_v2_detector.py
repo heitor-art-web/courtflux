@@ -49,6 +49,8 @@ class PerformanceDetector(LegacyPerformanceDetector):
             "team_evidence": [],
             "jersey_evidence": [],
             "team_corrections": 0,
+            "team_reversal_candidate": None,
+            "team_reversal_streak": 0,
             "identity_revision": 0,
             "identity_lock_frame": None,
             "identity_status": "unknown",
@@ -146,6 +148,44 @@ class PerformanceDetector(LegacyPerformanceDetector):
         second = ordered[1][1] if len(ordered) > 1 else 0.0
         return best_team, confidence, max(0.0, confidence - second), len(evidence)
 
+    def _observe_team_reversal_candidate(
+        self,
+        profile: dict[str, Any],
+        *,
+        candidate: str | None,
+        confidence: float,
+        margin: float,
+        accepted: bool,
+    ) -> bool:
+        """Confirm a stale-profile reversal only from consecutive fresh accepted rescores.
+
+        The confirmation thresholds intentionally match the existing reversal thresholds.
+        Reused profile frames never advance this streak because this method is called only
+        from the rescore path. Once confirmed, callers may discard older contradictory
+        evidence so the decay window cannot outvote three consecutive strong fresh crops.
+        """
+        previous = profile.get("team")
+        strong_conflict = bool(
+            accepted
+            and previous
+            and candidate
+            and candidate != previous
+            and confidence >= 0.64
+            and margin >= 0.18
+        )
+        if not strong_conflict:
+            profile["team_reversal_candidate"] = None
+            profile["team_reversal_streak"] = 0
+            return False
+
+        if str(profile.get("team_reversal_candidate") or "") == str(candidate):
+            streak = int(profile.get("team_reversal_streak", 0) or 0) + 1
+        else:
+            profile["team_reversal_candidate"] = candidate
+            streak = 1
+        profile["team_reversal_streak"] = streak
+        return streak >= self.team_reversal_min_observations
+
     def _clear_identity_number(self, profile: dict[str, Any], *, reason: str) -> None:
         had_identity = bool(profile.get("shirt_num") or profile.get("identity_locked"))
         profile.update(
@@ -187,6 +227,11 @@ class PerformanceDetector(LegacyPerformanceDetector):
         profile["team"] = best_team
 
     def _team_score_due(self, profile: dict[str, Any], frame_id: int) -> bool:
+        pending_reversal = bool(profile.get("team_reversal_candidate")) and int(
+            profile.get("team_reversal_streak", 0) or 0
+        ) > 0
+        if pending_reversal:
+            return True
         stable = bool(
             profile.get("team")
             and int(profile.get("team_observations", 0) or 0) >= self.team_stable_min_observations
@@ -209,10 +254,37 @@ class PerformanceDetector(LegacyPerformanceDetector):
             identity_revision=int(profile.get("identity_revision", 0)),
         )
 
+    @staticmethod
+    def _team_eligible_players(frame_state: Any) -> list[dict[str, Any]]:
+        """Use gameplay presence, but require positive on-court evidence in limited frames."""
+        court_state = getattr(frame_state, "court_state", None)
+        gameplay_present = None
+        analysis_eligible = True
+        if court_state is not None:
+            gameplay_present = getattr(court_state, "gameplay_present", None)
+            analysis_eligible = bool(getattr(court_state, "analysis_eligible", False))
+            if gameplay_present is not None:
+                if not bool(gameplay_present):
+                    return []
+            elif not analysis_eligible:
+                return []
+
+        limited_gameplay = bool(gameplay_present is True and not analysis_eligible)
+        return [
+            player
+            for player in list(getattr(frame_state, "players", []) or [])
+            if isinstance(player, dict)
+            and (
+                player.get("active_on_court") is True
+                if limited_gameplay
+                else player.get("active_on_court") is not False
+            )
+        ]
+
     def _assign_teams(self, frame_state: Any):
         self._prepare_identity_court_gate(frame_state)
         frame, frame_id = frame_state.frame, int(getattr(frame_state, "frame_id", 0))
-        eligible = self._identity_eligible_players(frame_state)
+        eligible = self._team_eligible_players(frame_state)
         predictions, rescored, reused = [], 0, 0
         for player in eligible:
             x1, y1, x2, y2 = player["box"]
@@ -237,22 +309,52 @@ class PerformanceDetector(LegacyPerformanceDetector):
             rescored += 1
             result = self.visual.score_teams(crop) if hasattr(self.visual, "score_teams") else {}
             distribution, accepted, adaptive = self._team_distribution(result)
+            current_best: str | None = None
+            recent_reversal_confirmed = False
             if accepted and distribution:
                 ordered = sorted(distribution.items(), key=lambda item: item[1], reverse=True)
                 current_best = ordered[0][0]
-                selectivity = max(0.05, ordered[0][1] - (ordered[1][1] if len(ordered) > 1 else 0.0))
+                current_confidence = ordered[0][1]
+                current_margin = max(0.0, current_confidence - (ordered[1][1] if len(ordered) > 1 else 0.0))
+                selectivity = max(0.05, current_margin)
                 profile["team_evidence"].append({
                     "frame_id": frame_id,
                     "scores": distribution,
                     "weight": 0.55 + min(0.45, 2.0 * selectivity),
                 })
+                recent_reversal_confirmed = self._observe_team_reversal_candidate(
+                    profile,
+                    candidate=current_best,
+                    confidence=current_confidence,
+                    margin=current_margin,
+                    accepted=True,
+                )
+                if recent_reversal_confirmed:
+                    # The last N accepted rescores are a consistent strong contradiction
+                    # of the current profile. Older team evidence is now stale and would
+                    # otherwise keep the profile pinned to the wrong team for the full
+                    # decay window.
+                    profile["team_evidence"] = list(profile["team_evidence"])[
+                        -self.team_reversal_min_observations:
+                    ]
                 self._update_team_prototype(current_best, self._coverage_vector(result), result)
+            else:
+                self._observe_team_reversal_candidate(
+                    profile,
+                    candidate=None,
+                    confidence=0.0,
+                    margin=0.0,
+                    accepted=False,
+                )
 
             best_team, confidence, margin, observations = self._aggregate_team_evidence(profile, frame_id)
             profile["team_observations"] = observations
             self._apply_team_resolution(
                 profile, best_team=best_team, confidence=confidence, margin=margin, observations=observations
             )
+            if recent_reversal_confirmed and current_best and profile.get("team") == current_best:
+                profile["team_reversal_candidate"] = None
+                profile["team_reversal_streak"] = 0
             profile["last_team_observation_frame"] = frame_id
             self._reuse_team_profile(player, profile)
             predictions.append({
@@ -266,9 +368,19 @@ class PerformanceDetector(LegacyPerformanceDetector):
                 "source": "identity_v2_decay_window",
                 "team_evidence_count": observations,
                 "team_corrections": int(profile.get("team_corrections", 0)),
+                "recent_reversal_confirmed": recent_reversal_confirmed,
+                "recent_reversal_candidate": profile.get("team_reversal_candidate"),
+                "recent_reversal_streak": int(profile.get("team_reversal_streak", 0) or 0),
                 **adaptive,
             })
 
+        court_state = getattr(frame_state, "court_state", None)
+        gameplay_present = (
+            None if court_state is None else getattr(court_state, "gameplay_present", None)
+        )
+        analysis_eligible = bool(
+            court_state is not None and getattr(court_state, "analysis_eligible", False)
+        )
         diag = frame_state.diagnostics.setdefault("detector", {})
         diag["team_predictions"] = predictions
         diag["team_runtime"] = {
@@ -280,7 +392,14 @@ class PerformanceDetector(LegacyPerformanceDetector):
             "evidence_half_life_frames": self.team_evidence_half_life_frames,
             "prototype_min_observations": self.team_prototype_min_observations,
             "prototype_observations": {team: int(value.get("observations", 0)) for team, value in self.team_prototypes.items()},
+            "team_reversal_policy": "consecutive_accepted_opposing_rescores_v1",
+            "team_reversal_min_observations": self.team_reversal_min_observations,
             "identity_lock_blocks_team_rescore": False,
+            "team_eligibility_policy": "gameplay_present;limited_requires_explicit_on_court;analysis_eligible_excludes_explicit_off_court",
+            "gameplay_present": gameplay_present,
+            "analysis_eligible": analysis_eligible,
+            "limited_gameplay_team_evidence": bool(gameplay_present is True and not analysis_eligible),
+            "limited_gameplay_requires_explicit_on_court": True,
         }
 
     def _aggregate_jersey_evidence(

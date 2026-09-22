@@ -1,0 +1,293 @@
+{
+  "version": "courtflux_p2_gt_v1",
+  "annotation_status": "pass_a_frozen_human_windows",
+  "evaluation_ready": true,
+  "video": {
+    "source": "https://www.youtube.com/watch?v=WMWTbS8J2ec",
+    "start_time_sec": 0.0,
+    "end_time_sec": 30.0,
+    "fps": 60.0,
+    "frame_mapping": "frame_id = round(source_time_sec * 60.0); human intervals interpreted as [start,end) for non-overlapping coarse windows"
+  },
+  "annotation_policy": {
+    "identity": "stable_track_id_when_visible; null_when_not_reliably_identifiable",
+    "team": "neutral_clip; leave team_id null; visual team colour retained only in human notes",
+    "unknown_preferred_over_guess": true,
+    "event_timing": "human_event_window; exact release frame is optional",
+    "event_window_scoring": "prediction inside window has zero temporal error; tolerance applies only beyond window edges",
+    "control_scoring": "human interval continuity is primary; frame accuracy remains diagnostic",
+    "control_states": [
+      "unknown",
+      "possessed",
+      "loose",
+      "pass_flight",
+      "shot_flight"
+    ],
+    "coarse_boundary_precision_sec": 1.0
+  },
+  "baseline": {
+    "run_id": "20260917_143501_261725",
+    "jersey_enabled": false,
+    "match_config": "evaluation/match_configs/unknown.json",
+    "frames_seen": 1801,
+    "video_fps": 60.0,
+    "analysis_fps": 25.647,
+    "note": "Metadata only. Human GT was authored blind from video and was not bootstrapped from P2 predictions."
+  },
+  "human_kit_audit": {
+    "version": "courtflux_p2_human_kit_audit_v1",
+    "review_scope": "Gate C team-colour context only; does not rewrite frozen Gate A/B labels",
+    "prediction_blind": true,
+    "clip_context": "multiple equipment contexts inside one highlight clip; Gate C must score colour-stable runtime segments separately and aggregate them back to V4",
+    "classifier_feature_policy": "jersey_body colours are candidate team-classifier context; shorts and lettering are recorded as human context and are not automatically injected as torso colours",
+    "segments": [
+      {
+        "source_time_start_sec": 0.0,
+        "source_time_end_sec": 15.0,
+        "team_a": {
+          "name": null,
+          "shorts": ["White"],
+          "jersey_body": ["White"],
+          "lettering": ["Blue"]
+        },
+        "team_b": {
+          "name": null,
+          "shorts": ["Orange", "Blue"],
+          "jersey_body": ["Orange", "Blue"],
+          "lettering": ["Blue"]
+        }
+      },
+      {
+        "source_time_start_sec": 15.0,
+        "source_time_end_sec": 27.0,
+        "team_a": {
+          "name": null,
+          "shorts": ["Blue"],
+          "jersey_body": ["Blue", "White"],
+          "lettering": ["White"]
+        },
+        "team_b": {
+          "name": null,
+          "shorts": ["Yellow"],
+          "jersey_body": ["Yellow"],
+          "lettering": ["Black"]
+        }
+      },
+      {
+        "source_time_start_sec": 27.0,
+        "source_time_end_sec": 30.0,
+        "detail_status": "coarse_team_colour_only",
+        "team_a": {
+          "name": null,
+          "shorts": null,
+          "jersey_body": ["White"],
+          "lettering": null
+        },
+        "team_b": {
+          "name": null,
+          "shorts": null,
+          "jersey_body": ["Black"],
+          "lettering": null
+        }
+      }
+    ]
+  },
+  "control_intervals": [
+    {
+      "state": "possessed",
+      "frame_start": 0,
+      "frame_end": 299,
+      "source_time_start_sec": 0.0,
+      "source_time_end_sec": 5.0,
+      "human_note": "white team possessed",
+      "boundary_precision": "coarse_1s"
+    },
+    {
+      "state": "pass_flight",
+      "frame_start": 360,
+      "frame_end": 419,
+      "source_time_start_sec": 6.0,
+      "source_time_end_sec": 7.0,
+      "human_note": "white team pass flight; successful/made pass",
+      "boundary_precision": "coarse_1s"
+    },
+    {
+      "state": "possessed",
+      "frame_start": 480,
+      "frame_end": 599,
+      "source_time_start_sec": 8.0,
+      "source_time_end_sec": 10.0,
+      "human_note": "white team possessed",
+      "boundary_precision": "coarse_1s"
+    },
+    {
+      "state": "shot_flight",
+      "frame_start": 660,
+      "frame_end": 839,
+      "source_time_start_sec": 11.0,
+      "source_time_end_sec": 14.0,
+      "human_note": "white team shot; made",
+      "boundary_precision": "coarse_1s"
+    },
+    {
+      "state": "pass_flight",
+      "frame_start": 900,
+      "frame_end": 1079,
+      "source_time_start_sec": 15.0,
+      "source_time_end_sec": 18.0,
+      "human_note": "blue team; two successful passes observed within this coarse window",
+      "boundary_precision": "coarse_multi_event_window"
+    },
+    {
+      "state": "possessed",
+      "frame_start": 1140,
+      "frame_end": 1259,
+      "source_time_start_sec": 19.0,
+      "source_time_end_sec": 21.0,
+      "human_note": "blue team possessed",
+      "boundary_precision": "coarse_1s"
+    },
+    {
+      "state": "pass_flight",
+      "frame_start": 1320,
+      "frame_end": 1379,
+      "source_time_start_sec": 22.0,
+      "source_time_end_sec": 23.0,
+      "human_note": "pass in flight; successful/made pass",
+      "boundary_precision": "human_second_window"
+    },
+    {
+      "state": "shot_flight",
+      "frame_start": 1380,
+      "frame_end": 1559,
+      "source_time_start_sec": 23.0,
+      "source_time_end_sec": 26.0,
+      "human_note": "shot in flight; made",
+      "boundary_precision": "coarse_1s"
+    },
+    {
+      "state": "possessed",
+      "frame_start": 1680,
+      "frame_end": 1799,
+      "source_time_start_sec": 28.0,
+      "source_time_end_sec": 30.0,
+      "human_note": "white team possessed",
+      "boundary_precision": "coarse_1s"
+    }
+  ],
+  "excluded_intervals": [
+    {
+      "reason": "unannotated_transition",
+      "frame_start": 300,
+      "frame_end": 359,
+      "source_time_start_sec": 5.0,
+      "source_time_end_sec": 6.0
+    },
+    {
+      "reason": "unannotated_transition",
+      "frame_start": 420,
+      "frame_end": 479,
+      "source_time_start_sec": 7.0,
+      "source_time_end_sec": 8.0
+    },
+    {
+      "reason": "unannotated_transition",
+      "frame_start": 600,
+      "frame_end": 659,
+      "source_time_start_sec": 10.0,
+      "source_time_end_sec": 11.0
+    },
+    {
+      "reason": "unannotated_transition",
+      "frame_start": 840,
+      "frame_end": 899,
+      "source_time_start_sec": 14.0,
+      "source_time_end_sec": 15.0
+    },
+    {
+      "reason": "unannotated_transition",
+      "frame_start": 1080,
+      "frame_end": 1139,
+      "source_time_start_sec": 18.0,
+      "source_time_end_sec": 19.0
+    },
+    {
+      "reason": "unannotated_transition",
+      "frame_start": 1260,
+      "frame_end": 1319,
+      "source_time_start_sec": 21.0,
+      "source_time_end_sec": 22.0
+    },
+    {
+      "reason": "rebound_context_without_control_state",
+      "frame_start": 1560,
+      "frame_end": 1679,
+      "source_time_start_sec": 26.0,
+      "source_time_end_sec": 28.0,
+      "human_note": "rebound observed at 27s; reviewer did not explicitly label loose/possessed control state around rebound"
+    }
+  ],
+  "events": [
+    {
+      "event_type": "shot_attempt",
+      "frame_start": 660,
+      "frame_end": 839,
+      "outcome": "made",
+      "team_id": null,
+      "actor_track_id": null,
+      "secondary_track_id": null,
+      "source_time_start_sec": 11.0,
+      "source_time_end_sec": 14.0,
+      "human_actor_note": "white team"
+    },
+    {
+      "event_type": "shot_attempt",
+      "frame_start": 1380,
+      "frame_end": 1559,
+      "outcome": "made",
+      "team_id": null,
+      "actor_track_id": null,
+      "secondary_track_id": null,
+      "source_time_start_sec": 23.0,
+      "source_time_end_sec": 26.0
+    }
+  ],
+  "unresolved_event_windows": [
+    {
+      "event_type": "rebound",
+      "frame_start": 1620,
+      "frame_end": 1679,
+      "source_time_start_sec": 27.0,
+      "source_time_end_sec": 28.0,
+      "human_note": "rebound observed; retained for later gate enrichment, not used as Gate A control-state truth"
+    },
+    {
+      "event_type": "pass_sequence",
+      "frame_start": 900,
+      "frame_end": 1079,
+      "source_time_start_sec": 15.0,
+      "source_time_end_sec": 18.0,
+      "human_note": "two successful blue-team passes inside coarse window; individual pass boundaries not yet annotated"
+    }
+  ],
+  "human_source_notes": [
+    "0-5 possessed white team",
+    "6-7 pass flight white made",
+    "8-10 possessed white team",
+    "11-14 shot made white team",
+    "15-18 2 passes made blue team",
+    "19-21 possessed blue team",
+    "22 pass in flight made",
+    "23-26 shot in flight made",
+    "27 rebound",
+    "28-30 white team possessed"
+  ],
+  "notes": [
+    "Pass A frozen from blind human video review.",
+    "Neutral V1-V5 policy: visual team colours are notes only; event team_id remains null.",
+    "The rebound at 27s is intentionally not converted into loose or possessed without an explicit human control-state label.",
+    "The two passes in 15-18s remain one coarse pass_flight interval for Gate A; later gates may enrich individual pass timing without rewriting the frozen control-state observation.",
+    "Do not require frame-exact release or catch timing from the human reviewer.",
+    "Detailed segmented Gate C equipment context is stored in human_kit_audit; the prior single static V4 match config is invalid for scoring."
+  ]
+}

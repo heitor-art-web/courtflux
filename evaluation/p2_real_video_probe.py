@@ -20,9 +20,38 @@ def _install_probe(analyzer_module: Any, p2_pipeline_cls: Any) -> None:
     instance and writes ``summary.p2`` plus ``p2_metrics.json``. The probe only adds the
     raw event/state JSONL artifacts from that same collector; it must not implement or
     instantiate a second metrics collector.
+
+    For validation diagnostics only, the probe wraps the analyzer's collector class so
+    each exported state row can include the shot tracker's current start-gate inputs and
+    Identity-v2 team prediction evidence. The canonical collector implementation and
+    basketball decisions remain unchanged.
     """
 
     base_attach_p2_metrics = analyzer_module._attach_p2_metrics
+    base_metrics_cls = analyzer_module.P2MetricsCollector
+
+    class ProbeP2MetricsCollector(base_metrics_cls):
+        def observe(self, frame_state: Any) -> None:
+            rows_before = len(self.state_rows)
+            super().observe(frame_state)
+            if len(self.state_rows) <= rows_before:
+                return
+
+            diagnostics = dict(getattr(frame_state, "diagnostics", {}) or {})
+            p2 = dict(diagnostics.get("p2", {}) or {})
+            shot = dict(p2.get("shot", {}) or {})
+            start_gate = dict(shot.get("start_gate_diagnostics", {}) or {})
+            detector = dict(diagnostics.get("detector", {}) or {})
+            team_predictions = [
+                dict(row)
+                for row in list(detector.get("team_predictions", []) or [])
+                if isinstance(row, dict)
+            ]
+            team_runtime = dict(detector.get("team_runtime", {}) or {})
+
+            self.state_rows[-1]["shot_start_gate"] = start_gate
+            self.state_rows[-1]["team_predictions"] = team_predictions
+            self.state_rows[-1]["team_runtime"] = team_runtime
 
     def _attach_probe_artifacts(
         summary_path: Path,
@@ -52,6 +81,7 @@ def _install_probe(analyzer_module: Any, p2_pipeline_cls: Any) -> None:
         print(f"[P2_STATES_FILE] {states_path.resolve()}", flush=True)
         return p2_summary
 
+    analyzer_module.P2MetricsCollector = ProbeP2MetricsCollector
     analyzer_module._attach_p2_metrics = _attach_probe_artifacts
     analyzer_module.Pipeline = p2_pipeline_cls
 

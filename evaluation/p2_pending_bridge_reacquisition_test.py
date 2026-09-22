@@ -48,7 +48,7 @@ def court(frame_id: int) -> CourtState:
 
 
 class PendingBridgeReacquisitionRegressionTest(unittest.TestCase):
-    def test_far_post_gap_reacquisition_cannot_seed_pending_bridge(self) -> None:
+    def test_far_post_gap_reacquisition_cannot_seed_pending_bridge_and_stays_unknown(self) -> None:
         tracker = ShotEventTrackerV1(fps=10.0)
         tracker.update(
             frame_id=0,
@@ -76,20 +76,43 @@ class PendingBridgeReacquisitionRegressionTest(unittest.TestCase):
 
         # The long segment from (100, 88) to (170, 150) intersects the rim
         # mouth mathematically, but the direct post-gap point is too far from
-        # the rim to be trusted as a bridge endpoint.
-        events = tracker.update(
-            frame_id=3,
-            timestamp_sec=0.3,
-            ball_state=ball(3, 170.0, 150.0),
-            court_state=court(3),
+        # the rim to be trusted as a bridge endpoint. The revised policy may
+        # defer the ambiguous rim exit, but must never promote it to MADE.
+        self.assertEqual(
+            tracker.update(
+                frame_id=3,
+                timestamp_sec=0.3,
+                ball_state=ball(3, 170.0, 150.0),
+                court_state=court(3),
+            ),
+            [],
         )
+        self.assertFalse(tracker.diagnostics()["pending_bridge"])
+        self.assertTrue(tracker.diagnostics()["rim_exit_deferred"])
 
+        for frame_id, x, y in ((4, 172.0, 152.0), (5, 174.0, 154.0)):
+            self.assertEqual(
+                tracker.update(
+                    frame_id=frame_id,
+                    timestamp_sec=frame_id / 10.0,
+                    ball_state=ball(frame_id, x, y),
+                    court_state=court(frame_id),
+                ),
+                [],
+            )
+
+        events = tracker.update(
+            frame_id=6,
+            timestamp_sec=0.6,
+            ball_state=ball(6, 176.0, 156.0),
+            court_state=court(6),
+        )
         self.assertEqual(len(events), 1)
         event = events[0]
         self.assertEqual(event.attributes["outcome"], ShotOutcome.UNKNOWN.value)
         self.assertEqual(
             event.attributes["resolution_reason"],
-            "rim_exit_after_observation_gap_insufficient_for_miss",
+            "deferred_rim_exit_expired_without_confirmation",
         )
         self.assertFalse(event.attributes["pending_bridge_used"])
         self.assertIsNone(event.attributes["post_gap_fall_ratio"])

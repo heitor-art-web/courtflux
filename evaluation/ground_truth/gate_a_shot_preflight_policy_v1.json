@@ -1,0 +1,36 @@
+{
+  "version": "courtflux_p2_gate_a_shot_preflight_policy_v1",
+  "status": "frozen_after_v1_development_before_v2_v5_preflight_validation",
+  "development_clip": "V1",
+  "family": "above_distance",
+  "scope": "unknown_only",
+  "require_direct_observed": false,
+  "params": {
+    "max_distance_norm": 8.0
+  },
+  "eligibility": {
+    "engine_eligible": true,
+    "flight_active": true,
+    "pass_flight_receiver_evidence": false,
+    "shot_active": false,
+    "shot_preflight_available": true,
+    "live_control_state": "unknown"
+  },
+  "decision": "project shot_flight when eligible AND shot_preflight_above=true AND shot_preflight_ball_to_rim_distance_norm<=8.0",
+  "runtime_mutation": false,
+  "event_mutation": false,
+  "frozen_gate_guardrail": {
+    "pass_flight_to_shot_flight_max": 0.20
+  },
+  "v1_development_result": {
+    "baseline_accuracy": 0.1695,
+    "challenger_accuracy": 0.2458,
+    "baseline_shot_recall": 0.1026,
+    "challenger_shot_recall": 0.3333,
+    "baseline_core_unknown_rate": 0.5319,
+    "challenger_core_unknown_rate": 0.4553,
+    "pass_to_shot_rate": 0.0,
+    "dominant_state_interval_accuracy": 0.0909,
+    "mean_interval_matching_rate": 0.1462
+  }
+}

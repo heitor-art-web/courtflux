@@ -1,0 +1,262 @@
+{
+  "version": "courtflux_p2_gt_v1",
+  "annotation_status": "gate_a_control_and_gate_b_shot_events_frozen",
+  "evaluation_ready": true,
+  "video": {
+    "source": "https://www.youtube.com/watch?v=Vr4105n-cPM",
+    "start_time_sec": 0.0,
+    "end_time_sec": 30.0,
+    "fps": 29.97,
+    "frame_mapping": "frame_id = round(source_time_sec * 29.97); human intervals are interpreted as [start,end) to avoid boundary overlap"
+  },
+  "annotation_policy": {
+    "identity": "stable_track_id_when_visible; null_when_not_reliably_identifiable",
+    "team": "neutral_clip; team colours retained only as human notes and team_id remains null",
+    "unknown_preferred_over_guess": true,
+    "event_timing": "human_event_window; exact release frame is optional",
+    "control_scoring": "human interval continuity is primary; frame accuracy remains diagnostic",
+    "control_states": [
+      "unknown",
+      "possessed",
+      "loose",
+      "pass_flight",
+      "shot_flight"
+    ],
+    "coarse_boundary_precision_sec": 1.0
+  },
+  "baseline": {
+    "run_id": "20260917_142607_777551",
+    "jersey_enabled": false,
+    "match_config": "evaluation/match_configs/unknown.json",
+    "frames_seen": 900,
+    "note": "Metadata only. Human GT was authored blind from video and was not bootstrapped from P2 predictions."
+  },
+  "human_kit_audit": {
+    "version": "courtflux_p2_human_kit_audit_v1",
+    "review_scope": "Gate C team-colour context only; does not rewrite frozen Gate A/B labels",
+    "prediction_blind": true,
+    "clip_context": "player highlight with time-varying equipment context",
+    "classifier_feature_policy": "jersey_body colours are candidate team-classifier context; shorts and lettering are recorded as human context and are not automatically injected as torso colours",
+    "unreviewed_time_ranges_sec": [[20.0, 21.0]],
+    "segments": [
+      {
+        "source_time_start_sec": 0.0,
+        "source_time_end_sec": 16.0,
+        "team_a": {
+          "name": null,
+          "shorts": ["Black", "Red"],
+          "jersey_body": ["Black", "Red"],
+          "lettering": ["White"]
+        },
+        "team_b": {
+          "name": null,
+          "shorts": ["White"],
+          "jersey_body": ["White"],
+          "lettering": ["Black"]
+        }
+      },
+      {
+        "source_time_start_sec": 16.0,
+        "source_time_end_sec": 20.0,
+        "team_a": {
+          "name": null,
+          "shorts": ["Red"],
+          "jersey_body": ["Red"],
+          "lettering": ["White"]
+        },
+        "team_b": {
+          "name": null,
+          "shorts": ["White"],
+          "jersey_body": ["White"],
+          "lettering": ["Black"]
+        }
+      },
+      {
+        "source_time_start_sec": 21.0,
+        "source_time_end_sec": 30.0,
+        "team_a": {
+          "name": null,
+          "shorts": ["Black"],
+          "jersey_body": ["Black"],
+          "lettering": ["White"]
+        },
+        "team_b": {
+          "name": null,
+          "shorts": ["White"],
+          "jersey_body": ["White"],
+          "lettering": ["Black"]
+        }
+      }
+    ]
+  },
+  "control_intervals": [
+    {
+      "state": "shot_flight",
+      "frame_start": 120,
+      "frame_end": 239,
+      "source_time_start_sec": 4.0,
+      "source_time_end_sec": 8.0,
+      "human_note": "made shot; black team",
+      "boundary_precision": "coarse_1s"
+    },
+    {
+      "state": "possessed",
+      "frame_start": 300,
+      "frame_end": 389,
+      "source_time_start_sec": 10.0,
+      "source_time_end_sec": 13.0,
+      "human_note": "black team possession",
+      "boundary_precision": "coarse_1s"
+    },
+    {
+      "state": "shot_flight",
+      "frame_start": 420,
+      "frame_end": 449,
+      "source_time_start_sec": 14.0,
+      "source_time_end_sec": 15.0,
+      "human_note": "dunk; made",
+      "boundary_precision": "coarse_1s"
+    },
+    {
+      "state": "possessed",
+      "frame_start": 509,
+      "frame_end": 658,
+      "source_time_start_sec": 17.0,
+      "source_time_end_sec": 22.0,
+      "human_note": "white team possession after ball steal",
+      "boundary_precision": "coarse_1s"
+    },
+    {
+      "state": "pass_flight",
+      "frame_start": 689,
+      "frame_end": 778,
+      "source_time_start_sec": 23.0,
+      "source_time_end_sec": 26.0,
+      "human_note": "black team alley-oop sequence; human noted made finish, but Gate A scores pass_flight only",
+      "boundary_precision": "coarse_1s"
+    },
+    {
+      "state": "pass_flight",
+      "frame_start": 779,
+      "frame_end": 808,
+      "source_time_start_sec": 26.0,
+      "source_time_end_sec": 27.0,
+      "human_note": "black team pass flight",
+      "boundary_precision": "coarse_1s"
+    },
+    {
+      "state": "possessed",
+      "frame_start": 809,
+      "frame_end": 899,
+      "source_time_start_sec": 27.0,
+      "source_time_end_sec": 30.0,
+      "human_note": "black team possession",
+      "boundary_precision": "coarse_1s"
+    }
+  ],
+  "excluded_intervals": [
+    {
+      "reason": "non_game",
+      "frame_start": 0,
+      "frame_end": 119,
+      "source_time_start_sec": 0.0,
+      "source_time_end_sec": 4.0,
+      "human_note": "non gameplay"
+    },
+    {
+      "reason": "non_game",
+      "frame_start": 240,
+      "frame_end": 299,
+      "source_time_start_sec": 8.0,
+      "source_time_end_sec": 10.0,
+      "human_note": "non gameplay"
+    },
+    {
+      "reason": "unannotated_human_gap",
+      "frame_start": 390,
+      "frame_end": 419,
+      "source_time_start_sec": 13.0,
+      "source_time_end_sec": 14.0,
+      "human_note": "no human control-state label supplied; excluded rather than guessed"
+    },
+    {
+      "reason": "non_game",
+      "frame_start": 450,
+      "frame_end": 508,
+      "source_time_start_sec": 15.0,
+      "source_time_end_sec": 17.0,
+      "human_note": "non gameplay"
+    },
+    {
+      "reason": "unannotated_human_gap",
+      "frame_start": 659,
+      "frame_end": 688,
+      "source_time_start_sec": 22.0,
+      "source_time_end_sec": 23.0,
+      "human_note": "no human control-state label supplied; excluded rather than inferred"
+    }
+  ],
+  "events": [
+    {
+      "event_type": "shot_attempt",
+      "frame_start": 120,
+      "frame_end": 239,
+      "outcome": "made",
+      "team_id": null,
+      "actor_track_id": null,
+      "secondary_track_id": null,
+      "source_time_start_sec": 4.0,
+      "source_time_end_sec": 8.0,
+      "human_note": "made shot; black team"
+    },
+    {
+      "event_type": "shot_attempt",
+      "frame_start": 420,
+      "frame_end": 449,
+      "outcome": "made",
+      "team_id": null,
+      "actor_track_id": null,
+      "secondary_track_id": null,
+      "source_time_start_sec": 14.0,
+      "source_time_end_sec": 15.0,
+      "human_note": "dunk; made"
+    },
+    {
+      "event_type": "shot_attempt",
+      "frame_start": 689,
+      "frame_end": 778,
+      "outcome": "made",
+      "team_id": null,
+      "actor_track_id": null,
+      "secondary_track_id": null,
+      "source_time_start_sec": 23.0,
+      "source_time_end_sec": 26.0,
+      "human_note": "alley-oop made finish; exact release/finish subwindow was not supplied, so Gate B uses the existing coarse human sequence window"
+    }
+  ],
+  "unresolved_event_windows": [],
+  "human_source_notes": [
+    "0-4 non game play",
+    "4-8 shot flight made black team",
+    "8-10 non game play",
+    "10-13 possessed game black team",
+    "14-15 dunk made",
+    "15-17 non game play",
+    "17-22 ball steal white team possessed",
+    "23-26 pass flight black team (Alley-oop) made",
+    "26-27 pass flight black team",
+    "27-30 possessed black team"
+  ],
+  "notes": [
+    "Gate A V3 Pass A frozen from blind human annotation.",
+    "Gate B shot-event rows were transcribed from the pre-existing human annotations: made shot at 4-8s, made dunk at 14-15s, and made alley-oop finish in the coarse 23-26s sequence window.",
+    "The Gate B event transcription does not derive labels from P2 predictions; the underlying human shot/made observations predate Gate B scoring.",
+    "Canonical source run: evaluation/runs/20260917_142607_777551.",
+    "Run completed with Jersey OFF and neutral match config; home_team and away_team were null.",
+    "video_fps=29.97 from canonical run summary; analysis_fps=26.776 is processing throughput and is not used for temporal GT conversion.",
+    "Human colour/team notes are preserved as context only; event team_id remains null for neutral V1-V5 clips.",
+    "13-14s and 22-23s were not labelled by the human reviewer and are excluded rather than inferred.",
+    "The alley-oop made finish remains pass_flight for Gate A control scoring while also being a shot_attempt event for Gate B; control-state and event semantics are evaluated independently.",
+    "Detailed time-varying Gate C equipment context is stored in human_kit_audit."
+  ]
+}
