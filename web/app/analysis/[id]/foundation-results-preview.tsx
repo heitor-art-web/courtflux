@@ -32,13 +32,14 @@ export function FoundationResultsPreview({
       <div className={styles.header}>
         <div>
           <div className={styles.eyebrow}>Prepared result layers</div>
-          <h2 id="future-results-title">P3 review and P4 tactical results already have a home on this page.</h2>
+          <h2 id="future-results-title">P3 review and P4 tactical results are visible here before they are enabled.</h2>
           <p>
-            These panels reserve the customer-facing result structure while the foundations are validated. Dashes are
-            intentional placeholders, not zeroes and not inferred statistics from this run.
+            These panels stay visible in the result experience so the private beta can show what is coming next. Dashes are
+            intentional placeholders, not zeroes and not inferred statistics from this run. The internal tools remain gated
+            until their feature flags are deliberately enabled.
           </p>
         </div>
-        <span className={styles.foundationPill}>Foundation preview</span>
+        <span className={styles.foundationPill}>Preview · to be enabled</span>
       </div>
 
       <div className={styles.grid}>
@@ -47,7 +48,7 @@ export function FoundationResultsPreview({
             <div>
               <div className={styles.phaseLine}>
                 <span className={styles.phase}>P3</span>
-                <span className={styles.state}>Foundation integrated</span>
+                <span className={styles.state}>{p3FoundationEnabled ? "Foundation enabled" : "To be enabled"}</span>
               </div>
               <h3>Review & evidence</h3>
               <p>
@@ -63,7 +64,7 @@ export function FoundationResultsPreview({
                 <span>Expected result</span>
                 <strong>Things to Review</strong>
               </div>
-              <span className={styles.previewBadge}>Not populated yet</span>
+              <span className={styles.previewBadge}>{p3FoundationEnabled ? "Internal preview enabled" : "To be enabled"}</span>
             </div>
             <div className={styles.previewRows}>
               {p3PreviewRows.map(([label, value]) => (
@@ -96,7 +97,7 @@ export function FoundationResultsPreview({
             {p3FoundationEnabled ? (
               <Link href={`/analysis/${encodeURIComponent(runId)}/review`}>Open internal P3 review foundation</Link>
             ) : (
-              <span>Internal P3 surface disabled</span>
+              <span>P3 review controls · to be enabled</span>
             )}
           </div>
         </article>
@@ -106,7 +107,7 @@ export function FoundationResultsPreview({
             <div>
               <div className={styles.phaseLine}>
                 <span className={styles.phase}>P4</span>
-                <span className={styles.state}>Spatial foundation complete</span>
+                <span className={styles.state}>{p4SpatialFoundationEnabled ? "Spatial foundation enabled" : "To be enabled"}</span>
               </div>
               <h3>Tactical review</h3>
               <p>
@@ -122,7 +123,7 @@ export function FoundationResultsPreview({
                 <span>Expected result</span>
                 <strong>How did we create advantage?</strong>
               </div>
-              <span className={styles.previewBadge}>Tactics gated</span>
+              <span className={styles.previewBadge}>{p4SpatialFoundationEnabled ? "Internal preview enabled" : "To be enabled"}</span>
             </div>
             <div className={styles.previewRows}>
               {p4PreviewRows.map(([label, value]) => (
@@ -158,7 +159,7 @@ export function FoundationResultsPreview({
             {p4SpatialFoundationEnabled ? (
               <Link href={`/analysis/${encodeURIComponent(runId)}/spatial`}>Open internal spatial diagnostics</Link>
             ) : (
-              <span>Internal P4 spatial viewer disabled</span>
+              <span>P4 tactical / spatial controls · to be enabled</span>
             )}
           </div>
         </article>
