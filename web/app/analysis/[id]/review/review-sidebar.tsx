@@ -308,6 +308,7 @@ export function ReviewSidebar(props: Props) {
             </button>
           ))}
           {!actions.tags.length ? <span className={styles.muted}>No tags yet.</span> : null}
+        </div>
         <form className={styles.createForm} onSubmit={createTag}>
           <label htmlFor="new-tag">New tag</label>
           <div className={styles.inputRow}>
