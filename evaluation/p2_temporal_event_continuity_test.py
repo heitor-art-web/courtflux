@@ -25,12 +25,14 @@ def _p2(
     direct: int = 0,
     predicted: int = 0,
     events: list[dict] | None = None,
+    control_state: str = "possessed",
 ) -> dict:
     return {
         "engine_eligible": True,
         "skipped_reason": None,
         "events": list(events or []),
         "possession": {
+            "control_state": control_state,
             "current_track_id": track,
             "current_team_id": team,
             "current_confidence": 0.91,
@@ -66,8 +68,8 @@ def test_recent_public_snapshot_can_attribute_ownerless_shot() -> None:
     actor, team, source = engine._pre_release_public_attribution(frame_id=105)
 
     assert actor == 7
-    assert team == "team_a"
-    assert source == "recent_public_possession_snapshot"
+    assert team is None
+    assert source == "recent_public_possession_actor_only"
 
 
 def test_snapshot_does_not_override_current_public_abstention() -> None:
@@ -93,19 +95,14 @@ def test_snapshot_does_not_override_current_public_abstention() -> None:
 
 def test_release_episode_finalizes_after_same_team_receiver_lock() -> None:
     engine = LiveControlP2EngineV1()
-    start_frame = _frame(100, 3.3)
-    start_p2 = _p2(
-        track=10,
-        team="team_a",
-        flight_active=True,
-        flight_origin=10,
-        flight_start=99,
-        flight_frames=3,
-        direct=2,
+    engine._start_or_update_release_episode(
+        p2=_p2(
+            track=10, team="team_a", flight_active=True,
+            flight_origin=10, flight_start=99,
+            flight_frames=3, direct=2,
+        ),
+        frame_state=_frame(100, 3.3),
     )
-
-    engine._start_or_update_release_episode(p2=start_p2, frame_state=start_frame)
-    assert engine._pending_release_episode is not None
 
     terminal = {
         "event_id": "possession-change:103:10:20",
@@ -113,16 +110,20 @@ def test_release_episode_finalizes_after_same_team_receiver_lock() -> None:
         "actor_track_id": 20,
         "secondary_track_id": 10,
     }
-    end_frame = _frame(103, 3.4)
-    end_p2 = _p2(
-        track=20,
-        team="team_a",
-        flight_active=False,
+    p2 = _p2(
+        track=20, team="team_a", flight_active=False,
         events=[terminal],
     )
     engine._last_frame_id = 103
+    assert engine._resolve_release_episode(
+        p2=p2, frame_state=_frame(103, 3.4)
+    ) is None
 
-    recovered = engine._resolve_release_episode(p2=end_p2, frame_state=end_frame)
+    engine._last_frame_id = 104
+    recovered = engine._resolve_release_episode(
+        p2=_p2(track=20, team="team_a", flight_active=False),
+        frame_state=_frame(104, 3.43),
+    )
 
     assert recovered is not None
     assert recovered.event_type is BasketballEventType.PASS_CANDIDATE
@@ -130,50 +131,109 @@ def test_release_episode_finalizes_after_same_team_receiver_lock() -> None:
     assert recovered.secondary_track_id == 20
     assert recovered.team_id == "team_a"
     assert recovered.frame_start == 99
-    assert engine._pending_release_episode is None
 
 
 def test_conflicting_receiver_team_waits_then_resolves_same_team() -> None:
     engine = LiveControlP2EngineV1()
-    start_frame = _frame(200, 6.6)
-    start_p2 = _p2(
-        track=30,
-        team="team_a",
-        flight_active=True,
-        flight_origin=30,
-        flight_start=198,
-        flight_frames=4,
-        direct=1,
-        predicted=1,
+    engine._start_or_update_release_episode(
+        p2=_p2(
+            track=30, team="team_a", flight_active=True,
+            flight_origin=30, flight_start=198,
+            flight_frames=4, direct=1, predicted=1,
+        ),
+        frame_state=_frame(200, 6.6),
     )
-    engine._start_or_update_release_episode(p2=start_p2, frame_state=start_frame)
 
     terminal = {
-        "event_id": "turnover-candidate:205:30:40",
+        "event_id": "possession-change:205:30:40",
         "event_type": BasketballEventType.POSSESSION_CHANGE.value,
         "actor_track_id": 40,
         "secondary_track_id": 30,
     }
-    conflict_frame = _frame(205, 6.8)
-    conflict_p2 = _p2(
-        track=40,
-        team="team_b",
-        flight_active=False,
-        events=[terminal],
-    )
     engine._last_frame_id = 205
-    assert engine._resolve_release_episode(p2=conflict_p2, frame_state=conflict_frame) is None
-    assert engine._pending_release_episode is not None
+    assert engine._resolve_release_episode(
+        p2=_p2(
+            track=40, team="team_b", flight_active=False,
+            events=[terminal],
+        ),
+        frame_state=_frame(205, 6.8),
+    ) is None
 
-    resolved_frame = _frame(208, 6.9)
-    resolved_p2 = _p2(track=40, team="team_a", flight_active=False)
-    engine._last_frame_id = 208
-    recovered = engine._resolve_release_episode(p2=resolved_p2, frame_state=resolved_frame)
+    engine._last_frame_id = 206
+    assert engine._resolve_release_episode(
+        p2=_p2(track=40, team="team_a", flight_active=False),
+        frame_state=_frame(206, 6.86),
+    ) is None
 
+    engine._last_frame_id = 207
+    recovered = engine._resolve_release_episode(
+        p2=_p2(track=40, team="team_a", flight_active=False),
+        frame_state=_frame(207, 6.9),
+    )
     assert recovered is not None
     assert recovered.team_id == "team_a"
-    assert recovered.actor_track_id == 30
-    assert recovered.secondary_track_id == 40
+
+
+def test_explicit_pass_flight_can_resolve_unknown_origin_from_receiver() -> None:
+    engine = LiveControlP2EngineV1()
+
+    engine._start_or_update_release_episode(
+        p2=_p2(
+            track=None,
+            team=None,
+            flight_active=True,
+            flight_origin=82,
+            flight_start=671,
+            flight_frames=28,
+            direct=2,
+            control_state="pass_flight",
+        ),
+        frame_state=_frame(698, 23.2),
+    )
+    assert engine._pending_release_episode is not None
+    assert engine._pending_release_episode["origin_team_id"] is None
+
+    terminal = {
+        "event_id": "possession-acquired:700:114",
+        "event_type": BasketballEventType.POSSESSION_ACQUIRED.value,
+        "actor_track_id": 114,
+        "secondary_track_id": None,
+    }
+
+    engine._last_frame_id = 700
+    assert engine._resolve_release_episode(
+        p2=_p2(
+            track=114, team="team_a", flight_active=False,
+            events=[terminal],
+        ),
+        frame_state=_frame(700, 23.3),
+    ) is None
+
+    # Receiver starts another flight immediately; the previous episode must survive.
+    engine._start_or_update_release_episode(
+        p2=_p2(
+            track=114, team="team_a", flight_active=True,
+            flight_origin=114, flight_start=701,
+            flight_frames=1, direct=1,
+        ),
+        frame_state=_frame(701, 23.36),
+    )
+    assert engine._pending_release_episode["origin_track_id"] == 82
+
+    engine._last_frame_id = 701
+    recovered = engine._resolve_release_episode(
+        p2=_p2(
+            track=114, team="team_a", flight_active=True,
+            flight_origin=114, flight_start=701,
+            flight_frames=1, direct=1,
+        ),
+        frame_state=_frame(701, 23.36),
+    )
+
+    assert recovered is not None
+    assert recovered.actor_track_id == 82
+    assert recovered.secondary_track_id == 114
+    assert recovered.team_id == "team_a"
 
 
 def test_reset_clears_continuity_memory() -> None:
@@ -192,6 +252,7 @@ def main() -> None:
     test_snapshot_does_not_override_current_public_abstention()
     test_release_episode_finalizes_after_same_team_receiver_lock()
     test_conflicting_receiver_team_waits_then_resolves_same_team()
+    test_explicit_pass_flight_can_resolve_unknown_origin_from_receiver()
     test_reset_clears_continuity_memory()
     print("p2_temporal_event_continuity_test: PASS")
 

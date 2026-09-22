@@ -14,7 +14,7 @@ class LiveControlP2EngineV1(_BaseLiveControlP2EngineV1):
     The inherited trackers remain the only control-state decision makers. This layer keeps
     only public, already-supported owner/team snapshots and uses them in two narrow ways:
 
-    * a recent public owner may attribute a shot that starts just after possession clears;
+    * a recent public owner may recover only the shot actor after possession clears;
     * a release episode may be finalized retrospectively as a pass after a different
       receiver is confirmed and the receiver is publicly supported as the same team.
 
@@ -24,7 +24,7 @@ class LiveControlP2EngineV1(_BaseLiveControlP2EngineV1):
 
     TEMPORAL_CONTINUITY_POLICY = (
         "public_supported_owner_snapshot_only;"
-        "shot_fallback_requires_no_current_owner_and_recent_same_actor_snapshot;"
+        "shot_snapshot_may_recover_actor_but_never_team;"
         "pass_requires_release_interval_confirmed_distinct_receiver_and_same_public_team;"
         "conflicting_or_missing_team_abstains;resets_clear_all_continuity_memory"
     )
@@ -84,7 +84,7 @@ class LiveControlP2EngineV1(_BaseLiveControlP2EngineV1):
             return track_id, team_id, source
         if track_id is not None and int(track_id) != snapshot_track:
             return track_id, team_id, source
-        return snapshot_track, str(snapshot_team), "recent_public_possession_snapshot"
+        return snapshot_track, None, "recent_public_possession_actor_only"
 
     def _reset_temporal_state(
         self,
@@ -182,32 +182,66 @@ class LiveControlP2EngineV1(_BaseLiveControlP2EngineV1):
         flight = dict(possession.get("flight", {}) or {})
         if not bool(flight.get("active", False)):
             return
+
         origin_track = self._safe_int(flight.get("origin_track_id"))
         if origin_track is None:
             return
+
         frame_id = int(getattr(frame_state, "frame_id", 0))
+        episode = self._pending_release_episode
+
+        # Once a receiver has already been confirmed, keep resolving that completed
+        # release instead of letting the receiver's next flight overwrite it.
+        if episode is not None and self._safe_int(
+            episode.get("receiver_confirmed_frame")
+        ) is not None:
+            return
+
+        same_episode = bool(
+            episode is not None
+            and self._safe_int(episode.get("origin_track_id")) == origin_track
+        )
         origin = self._origin_snapshot_for_flight(
             p2=p2,
             frame_state=frame_state,
             origin_track_id=origin_track,
         )
-        if origin is None or origin.get("team_id") is None:
-            return
+        published_pass = str(possession.get("control_state") or "") == "pass_flight"
 
-        episode = self._pending_release_episode
-        if episode is None or self._safe_int(episode.get("origin_track_id")) != origin_track:
+        if not same_episode:
+            # A public origin team is normally required. The one exception is when the
+            # causal live resolver has itself explicitly classified this physical flight
+            # as PASS_FLIGHT; in that case team publication is deferred to the receiver.
+            if origin is None and not published_pass:
+                return
+
             flight_start = self._safe_int(flight.get("frame_start"))
             if flight_start is None:
                 flight_start = frame_id
+
             timestamp = self._timestamp(frame_state)
             timestamp_start = None
             if timestamp is not None:
-                timestamp_start = max(0.0, float(timestamp) - max(0, frame_id - flight_start) / self.fps)
+                timestamp_start = max(
+                    0.0,
+                    float(timestamp) - max(0, frame_id - flight_start) / self.fps,
+                )
+
             episode = {
                 "origin_track_id": origin_track,
-                "origin_team_id": str(origin["team_id"]),
-                "origin_confidence": self._safe_float(origin.get("confidence"), 0.0),
-                "origin_snapshot_frame": self._safe_int(origin.get("frame_id")),
+                "origin_team_id": (
+                    None
+                    if origin is None or origin.get("team_id") is None
+                    else str(origin["team_id"])
+                ),
+                "origin_confidence": (
+                    0.0 if origin is None
+                    else self._safe_float(origin.get("confidence"), 0.0)
+                ),
+                "origin_snapshot_frame": (
+                    None if origin is None
+                    else self._safe_int(origin.get("frame_id"))
+                ),
                 "frame_start": flight_start,
                 "timestamp_start": timestamp_start,
                 "last_flight_frame": frame_id,
@@ -215,12 +249,32 @@ class LiveControlP2EngineV1(_BaseLiveControlP2EngineV1):
                 "flight_direct_observations_max": 0,
                 "flight_predicted_observations_max": 0,
                 "flight_supported_seen": False,
+                "pass_flight_seen": bool(published_pass),
                 "receiver_track_id": None,
                 "receiver_confirmed_frame": None,
+                "receiver_team_candidate": None,
+                "receiver_team_match_streak": 0,
                 "supersedes_transition_event_id": None,
             }
             self._pending_release_episode = episode
 
+        assert episode is not None
+
+        # If public support for the origin appears after the release began, capture it.
+        if (
+            episode.get("origin_team_id") is None
+            and origin is not None
+            and origin.get("team_id") is not None
+        ):
+            episode["origin_team_id"] = str(origin["team_id"])
+            episode["origin_confidence"] = self._safe_float(
+                origin.get("confidence"), 0.0
+            )
+            episode["origin_snapshot_frame"] = self._safe_int(origin.get("frame_id"))
+
+        episode["pass_flight_seen"] = bool(
+            episode.get("pass_flight_seen", False) or published_pass
+        )
         episode["last_flight_frame"] = frame_id
         episode["flight_frames_max"] = max(
             int(episode.get("flight_frames_max", 0) or 0),
@@ -278,33 +332,64 @@ class LiveControlP2EngineV1(_BaseLiveControlP2EngineV1):
             and observations > 0
         )
 
+    def _receiver_public_team(
+        self,
+        *,
+        p2: dict[str, Any],
+        receiver_track_id: int,
+        frame_id: int,
+    ) -> tuple[str | None, float, str]:
+        possession = dict(p2.get("possession", {}) or {})
+        current_track = self._safe_int(possession.get("current_track_id"))
+        public_team = possession.get("current_team_id")
+        abstained = bool(possession.get("team_attribution_abstained", False))
+
+        if (
+            current_track == int(receiver_track_id)
+            and public_team is not None
+            and not abstained
+        ):
+            confidence = max(
+                0.0,
+                min(
+                    self._safe_float(
+                        possession.get("current_confidence"), 0.0
+                    ),
+                    1.0,
+                ),
+            )
+            return str(public_team), confidence, "receiver_public_possession_team"
+
+        hint_team, hint_confidence, _ = self._recent_event_team_hint(
+            int(receiver_track_id),
+            frame_id=int(frame_id),
+        )
+        if hint_team is not None:
+            return (
+                str(hint_team),
+                float(hint_confidence),
+                "receiver_fresh_on_court_team_hint",
+            )
+        return None, 0.0, "receiver_team_unresolved"
+
     def _same_team_receiver_supported(
         self,
         *,
         p2: dict[str, Any],
         receiver_track_id: int,
         origin_team_id: str,
+        frame_id: int,
     ) -> tuple[bool, float, str]:
-        possession = dict(p2.get("possession", {}) or {})
-        current_track = self._safe_int(possession.get("current_track_id"))
-        public_team = possession.get("current_team_id")
-        abstained = bool(possession.get("team_attribution_abstained", False))
-        if current_track == int(receiver_track_id) and public_team is not None and not abstained:
-            if str(public_team) == str(origin_team_id):
-                confidence = max(
-                    0.0,
-                    min(self._safe_float(possession.get("current_confidence"), 0.0), 1.0),
-                )
-                return True, confidence, "receiver_public_possession_team"
-            return False, 0.0, "receiver_public_team_conflict"
-
-        hint_team, hint_confidence, _ = self._recent_event_team_hint(
-            int(receiver_track_id),
-            frame_id=int(self._last_frame_id or 0),
+        receiver_team, confidence, source = self._receiver_public_team(
+            p2=p2,
+            receiver_track_id=receiver_track_id,
+            frame_id=frame_id,
         )
-        if hint_team is not None and str(hint_team) == str(origin_team_id):
-            return True, float(hint_confidence), "receiver_fresh_on_court_team_hint"
-        return False, 0.0, "receiver_team_unresolved"
+        if receiver_team is None:
+            return False, 0.0, source
+        if str(receiver_team) != str(origin_team_id):
+            return False, 0.0, "receiver_public_team_conflict"
+        return True, confidence, source
 
     def _existing_pass_for_pair(
         self,
@@ -328,18 +413,51 @@ class LiveControlP2EngineV1(_BaseLiveControlP2EngineV1):
         *,
         episode: dict[str, Any],
         receiver_track_id: int,
+        resolved_team_id: str,
         receiver_confidence: float,
         receiver_source: str,
         frame_state: Any,
     ) -> BasketballEvent:
         frame_id = int(getattr(frame_state, "frame_id", 0))
-        origin_confidence = max(0.0, min(self._safe_float(episode.get("origin_confidence"), 0.0), 1.0))
+        origin_confidence = max(
+            0.0,
+            min(self._safe_float(episode.get("origin_confidence"), 0.0), 1.0),
+        )
         receiver_confidence = max(0.0, min(float(receiver_confidence), 1.0))
-        confidence = max(0.35, min(0.88 * min(max(origin_confidence, 0.55), max(receiver_confidence, 0.55)), 1.0))
+        confidence = max(
+            0.35,
+            min(
+                0.88
+                * min(
+                    max(origin_confidence, 0.55),
+                    max(receiver_confidence, 0.55),
+                ),
+                1.0,
+            ),
+        )
+
         origin_track = int(episode["origin_track_id"])
-        origin_team = str(episode["origin_team_id"])
-        event = BasketballEvent(
-            event_id=f"pass-candidate:delayed-continuity:{episode['frame_start']}:{frame_id}:{origin_track}:{receiver_track_id}",
+        origin_team_known = episode.get("origin_team_id") is not None
+
+        evidence = [
+            "release_interval",
+            "confirmed_distinct_receiver",
+            "receiver_public_team_after_release",
+        ]
+        if origin_team_known:
+            evidence += [
+                "public_origin_possession_snapshot",
+                "same_public_team_after_release",
+            ]
+        else:
+            evidence += ["explicit_pass_flight_without_origin_team"]
+
+        return BasketballEvent(
+            event_id=(
+                f"pass-candidate:delayed-continuity:"
+                f"{episode['frame_start']}:{frame_id}:"
+                f"{origin_track}:{receiver_track_id}"
+            ),
             event_type=BasketballEventType.PASS_CANDIDATE,
             frame_start=int(episode["frame_start"]),
             frame_end=frame_id,
@@ -350,35 +468,49 @@ class LiveControlP2EngineV1(_BaseLiveControlP2EngineV1):
             decision=EventDecision.CANDIDATE,
             actor_track_id=origin_track,
             secondary_track_id=int(receiver_track_id),
-            team_id=origin_team,
-            location_court_m=self._player_location(frame_state, int(receiver_track_id)),
-            evidence=(
-                "public_origin_possession_snapshot",
-                "release_interval",
-                "confirmed_distinct_receiver",
-                "same_public_team_after_release",
+            team_id=str(resolved_team_id),
+            location_court_m=self._player_location(
+                frame_state, int(receiver_track_id)
             ),
+            evidence=tuple(evidence),
             provenance={"version": "temporal_continuity_live_control_v1"},
             attributes={
-                "transition_kind": "delayed_same_team_release_resolution",
+                "transition_kind": "delayed_release_resolution",
                 "temporal_continuity_policy": self.TEMPORAL_CONTINUITY_POLICY,
                 "team_attribution_publication_source": receiver_source,
-                "team_attribution_publication_reason": "same_public_team_after_confirmed_release",
-                "origin_snapshot_frame": episode.get("origin_snapshot_frame"),
-                "receiver_confirmed_frame": episode.get("receiver_confirmed_frame"),
-                "resolution_delay_frames": (
-                    None
-                    if episode.get("receiver_confirmed_frame") is None
-                    else frame_id - int(episode["receiver_confirmed_frame"])
+                "team_attribution_publication_reason": (
+                    "same_stable_public_team_after_confirmed_release"
+                    if origin_team_known
+                    else "stable_receiver_team_after_explicit_pass_flight"
                 ),
-                "flight_frames": int(episode.get("flight_frames_max", 0) or 0),
-                "flight_direct_observations": int(episode.get("flight_direct_observations_max", 0) or 0),
-                "flight_predicted_observations": int(episode.get("flight_predicted_observations_max", 0) or 0),
-                "flight_supported_seen": bool(episode.get("flight_supported_seen", False)),
-                "supersedes_transition_event_id": episode.get("supersedes_transition_event_id"),
+                "origin_team_id_at_release": episode.get("origin_team_id"),
+                "origin_snapshot_frame": episode.get("origin_snapshot_frame"),
+                "receiver_confirmed_frame": episode.get(
+                    "receiver_confirmed_frame"
+                ),
+                "receiver_team_match_streak": int(
+                    episode.get("receiver_team_match_streak", 0) or 0
+                ),
+                "flight_frames": int(
+                    episode.get("flight_frames_max", 0) or 0
+                ),
+                "flight_direct_observations": int(
+                    episode.get("flight_direct_observations_max", 0) or 0
+                ),
+                "flight_predicted_observations": int(
+                    episode.get("flight_predicted_observations_max", 0) or 0
+                ),
+                "flight_supported_seen": bool(
+                    episode.get("flight_supported_seen", False)
+                ),
+                "pass_flight_seen": bool(
+                    episode.get("pass_flight_seen", False)
+                ),
+                "supersedes_transition_event_id": episode.get(
+                    "supersedes_transition_event_id"
+                ),
             },
         )
-        return event
 
     def _resolve_release_episode(
         self,
@@ -389,22 +521,29 @@ class LiveControlP2EngineV1(_BaseLiveControlP2EngineV1):
         episode = self._pending_release_episode
         if episode is None:
             return None
+
         frame_id = int(getattr(frame_state, "frame_id", 0))
         possession = dict(p2.get("possession", {}) or {})
         flight = dict(possession.get("flight", {}) or {})
-        if bool(flight.get("active", False)):
+
+        receiver_track = self._safe_int(episode.get("receiver_track_id"))
+
+        # A new physical flight may begin immediately after reception. Once the previous
+        # receiver is confirmed, that new flight must not block delayed team resolution.
+        if bool(flight.get("active", False)) and receiver_track is None:
             return None
 
         shot = dict(p2.get("shot", {}) or {})
         if bool(shot.get("active", False)) or any(
-            str(row.get("event_type") or "") == BasketballEventType.SHOT_ATTEMPT.value
+            str(row.get("event_type") or "")
+            == BasketballEventType.SHOT_ATTEMPT.value
             for row in self._event_rows(p2)
         ):
             self._pending_release_episode = None
             return None
 
         origin_track = int(episode["origin_track_id"])
-        receiver_track = self._safe_int(episode.get("receiver_track_id"))
+
         if receiver_track is None:
             receiver_track, supersedes = self._confirmed_receiver_from_events(
                 p2=p2,
@@ -418,16 +557,22 @@ class LiveControlP2EngineV1(_BaseLiveControlP2EngineV1):
 
         if receiver_track is None:
             current_track = self._safe_int(possession.get("current_track_id"))
-            last_flight = int(episode.get("last_flight_frame", frame_id) or frame_id)
+            last_flight = int(
+                episode.get("last_flight_frame", frame_id) or frame_id
+            )
             if current_track == origin_track:
                 self._pending_release_episode = None
-            elif frame_id - last_flight > int(self._release_terminal_grace_frames):
+            elif (
+                frame_id - last_flight
+                > int(self._release_terminal_grace_frames)
+            ):
                 self._pending_release_episode = None
             return None
 
         if not self._release_episode_has_minimum_evidence(episode):
             self._pending_release_episode = None
             return None
+
         if self._existing_pass_for_pair(
             p2=p2,
             origin_track_id=origin_track,
@@ -436,25 +581,70 @@ class LiveControlP2EngineV1(_BaseLiveControlP2EngineV1):
             self._pending_release_episode = None
             return None
 
-        supported, receiver_confidence, receiver_source = self._same_team_receiver_supported(
-            p2=p2,
-            receiver_track_id=receiver_track,
-            origin_team_id=str(episode["origin_team_id"]),
-        )
-        if supported:
-            event = self._make_delayed_pass(
-                episode=episode,
-                receiver_track_id=receiver_track,
-                receiver_confidence=receiver_confidence,
-                receiver_source=receiver_source,
-                frame_state=frame_state,
-            )
-            self._last_continuity_pass_event_id = event.event_id
-            self._pending_release_episode = None
-            return event
+        origin_team = episode.get("origin_team_id")
+        resolved_team: str | None = None
+        receiver_confidence = 0.0
+        receiver_source = "receiver_team_unresolved"
+        supported = False
 
-        confirmed_frame = self._safe_int(episode.get("receiver_confirmed_frame"))
-        if confirmed_frame is not None and frame_id - confirmed_frame > int(self._receiver_resolution_max_frames):
+        if origin_team is not None:
+            supported, receiver_confidence, receiver_source = (
+                self._same_team_receiver_supported(
+                    p2=p2,
+                    receiver_track_id=receiver_track,
+                    origin_team_id=str(origin_team),
+                    frame_id=frame_id,
+                )
+            )
+            if supported:
+                resolved_team = str(origin_team)
+        elif bool(episode.get("pass_flight_seen", False)):
+            resolved_team, receiver_confidence, receiver_source = (
+                self._receiver_public_team(
+                    p2=p2,
+                    receiver_track_id=receiver_track,
+                    frame_id=frame_id,
+                )
+            )
+            supported = resolved_team is not None
+
+        if supported and resolved_team is not None:
+            previous_candidate = episode.get("receiver_team_candidate")
+            if previous_candidate == str(resolved_team):
+                streak = int(
+                    episode.get("receiver_team_match_streak", 0) or 0
+                ) + 1
+            else:
+                streak = 1
+                episode["receiver_team_candidate"] = str(resolved_team)
+
+            episode["receiver_team_match_streak"] = streak
+
+            # Avoid publishing from a one-frame colour/team flip.
+            if streak >= 2:
+                event = self._make_delayed_pass(
+                    episode=episode,
+                    receiver_track_id=receiver_track,
+                    resolved_team_id=str(resolved_team),
+                    receiver_confidence=receiver_confidence,
+                    receiver_source=receiver_source,
+                    frame_state=frame_state,
+                )
+                self._last_continuity_pass_event_id = event.event_id
+                self._pending_release_episode = None
+                return event
+        else:
+            episode["receiver_team_candidate"] = None
+            episode["receiver_team_match_streak"] = 0
+
+        confirmed_frame = self._safe_int(
+            episode.get("receiver_confirmed_frame")
+        )
+        if (
+            confirmed_frame is not None
+            and frame_id - confirmed_frame
+            > int(self._receiver_resolution_max_frames)
+        ):
             self._pending_release_episode = None
         return None
 
