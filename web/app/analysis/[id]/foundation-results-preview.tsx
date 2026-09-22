@@ -34,10 +34,11 @@ export function FoundationResultsPreview({
           <div className={styles.eyebrow}>Prepared result layers</div>
           <h2 id="future-results-title">P3 review and P4 tactical results are visible here before they are enabled.</h2>
           <p>
-            These panels stay visible in the result experience so the private beta can show what is coming next. Dashes are
-            intentional placeholders, not zeroes and not inferred statistics from this run. The internal tools remain gated
-            until their feature flags are deliberately enabled.
+            These panels show the intended P3 and P4 result experience. Dashes are intentional placeholders, not zeroes
+            and not inferred statistics from this run. The internal P3/P4 tools remain gated until their feature flags are
+            deliberately enabled.
           </p>
+          <p><strong>CourtFlux is currently a local private beta.</strong></p>
         </div>
         <span className={styles.foundationPill}>Preview · to be enabled</span>
       </div>
