@@ -123,7 +123,7 @@ export function GameStory({ summary, startTimeSec, endTimeSec }: GameStoryProps)
   const madeShots = count(outcomes.made);
   const missedShots = count(outcomes.missed);
   const unknownShots = count(outcomes.unknown);
-  const totalEvents = count(events.total) || Object.values(eventCounts).reduce((total, value) => total + count(value), 0);
+  const totalEvents = count(events.total) || Object.values(eventCounts).reduce<number>((total, value) => total + count(value), 0);
   const possessionRate = percent(possession.possessed_rate);
   const actorAttribution = percent(events.actor_attribution_rate);
   const teamAttribution = percent(events.team_attribution_rate);
