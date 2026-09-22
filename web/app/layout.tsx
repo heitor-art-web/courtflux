@@ -1,16 +1,17 @@
 import type { Metadata, Viewport } from "next";
 import "./globals.css";
 import "./accessibility.css";
-import "./homepage-light.css";
-import "./footer-brand-fix.css";
+import { isPublicLaunchEnabled } from "@/lib/launch";
 import { getSiteUrl } from "@/lib/site";
-import { getRequestLocale } from "@/lib/i18n/request";
-import { LanguageSwitcher } from "./language-switcher";
+import { getRequestLocale, isPublicRequest } from "@/lib/i18n/request";
+import { AppLanguageSwitcherBridge } from "./language-switcher";
 import { LocaleTextBridge } from "./locale-text-bridge";
 import { InteractionA11yBridge } from "./interaction-a11y-bridge";
+import { PageSurfaceBridge } from "./page-surface-bridge";
 import { Analytics } from "@vercel/analytics/next";
 
 const siteUrl = getSiteUrl();
+const publicLaunchEnabled = isPublicLaunchEnabled();
 
 export const metadata: Metadata = {
   metadataBase: new URL(siteUrl),
@@ -21,7 +22,7 @@ export const metadata: Metadata = {
     template: "%s | CourtFlux",
   },
   description:
-    "CourtFlux is basketball video analysis software for coaches, teams and academies, turning ordinary game film into structured player, ball and spatial intelligence.",
+    "CourtFlux is basketball video analysis software for coaches, teams and academies, turning ordinary game film into structured player, ball and game intelligence.",
   authors: [{ name: "CourtFlux" }],
   creator: "CourtFlux",
   publisher: "CourtFlux",
@@ -32,17 +33,23 @@ export const metadata: Metadata = {
     address: false,
     telephone: false,
   },
-  robots: {
-    index: true,
-    follow: true,
-    googleBot: {
-      index: true,
-      follow: true,
-      "max-image-preview": "large",
-      "max-snippet": -1,
-      "max-video-preview": -1,
-    },
-  },
+  robots: publicLaunchEnabled
+    ? {
+        index: true,
+        follow: true,
+        googleBot: {
+          index: true,
+          follow: true,
+          "max-image-preview": "large",
+          "max-snippet": -1,
+          "max-video-preview": -1,
+        },
+      }
+    : {
+        index: false,
+        follow: false,
+        nocache: true,
+      },
   icons: {
     icon: [
       { url: "/brand/courtflux_app_icon_32px.png", sizes: "32x32", type: "image/png" },
@@ -58,7 +65,7 @@ export const viewport: Viewport = {
 };
 
 export default async function RootLayout({ children }: Readonly<{ children: React.ReactNode }>) {
-  const locale = await getRequestLocale();
+  const [locale, publicPage] = await Promise.all([getRequestLocale(), isPublicRequest()]);
   const skipLabel = locale === "pt-PT"
     ? "Saltar para o conteúdo principal"
     : locale === "es-ES"
@@ -67,13 +74,14 @@ export default async function RootLayout({ children }: Readonly<{ children: Reac
 
   return (
     <html lang={locale}>
-      <body>
+      <body data-public-page={publicPage ? "true" : "false"}>
         <a className="skip-link" href="#main-content">{skipLabel}</a>
         <div id="main-content" tabIndex={-1}>
           {children}
         </div>
+        <PageSurfaceBridge />
         <LocaleTextBridge locale={locale} />
-        <LanguageSwitcher initialLocale={locale} />
+        <AppLanguageSwitcherBridge initialLocale={locale} />
         <InteractionA11yBridge />
         <Analytics />
       </body>

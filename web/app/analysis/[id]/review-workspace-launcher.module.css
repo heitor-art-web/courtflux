@@ -1,0 +1,33 @@
+.launcher {
+  position: fixed;
+  left: 24px;
+  bottom: 24px;
+  z-index: 65;
+  min-height: 44px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid rgba(255, 116, 23, 0.48);
+  border-radius: 999px;
+  padding: 0 17px;
+  background: rgba(22, 30, 39, 0.97);
+  box-shadow: 0 14px 36px rgba(0, 0, 0, 0.28);
+  color: #ffd1b2;
+  text-decoration: none;
+  font-size: 0.8rem;
+  font-weight: 850;
+}
+
+.launcher:hover,
+.launcher:focus-visible {
+  border-color: rgba(255, 150, 84, 0.86);
+  background: rgba(34, 40, 48, 0.99);
+}
+
+@media (max-width: 640px) {
+  .launcher {
+    left: 14px;
+    right: 14px;
+    bottom: 72px;
+  }
+}

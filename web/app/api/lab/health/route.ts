@@ -18,7 +18,7 @@ async function canonicalMatchConfig() {
   let lastError: unknown;
   for (const path of candidates) {
     try {
-      return JSON.parse(await readFile(path, "utf8")) as Record<string, unknown>;
+      return JSON.parse(await readFile(/* turbopackIgnore: true */ path, "utf8")) as Record<string, unknown>;
     } catch (error) {
       lastError = error;
     }

@@ -2,14 +2,15 @@ import type { Locale } from "./config";
 import { APP_CORE_TRANSLATIONS } from "./app-core";
 import { HOMEPAGE_V2_TRANSLATIONS } from "./homepage-v2";
 import { PRICING_V2_TRANSLATIONS } from "./pricing-v2";
+import { MARKETING_NARRATIVE_TRANSLATIONS } from "./marketing-narrative";
 import ptPT from "./pt-PT";
 import ptPTPolish from "./pt-PT-polish";
 import esES from "./es-ES";
 import esESPolish from "./es-ES-polish";
 
 const DICTIONARIES: Record<Exclude<Locale, "en">, Record<string, string>> = {
-  "pt-PT": { ...ptPT, ...ptPTPolish, ...APP_CORE_TRANSLATIONS["pt-PT"], ...HOMEPAGE_V2_TRANSLATIONS["pt-PT"], ...PRICING_V2_TRANSLATIONS["pt-PT"] },
-  "es-ES": { ...esES, ...esESPolish, ...APP_CORE_TRANSLATIONS["es-ES"], ...HOMEPAGE_V2_TRANSLATIONS["es-ES"], ...PRICING_V2_TRANSLATIONS["es-ES"] },
+  "pt-PT": { ...ptPT, ...ptPTPolish, ...APP_CORE_TRANSLATIONS["pt-PT"], ...HOMEPAGE_V2_TRANSLATIONS["pt-PT"], ...PRICING_V2_TRANSLATIONS["pt-PT"], ...MARKETING_NARRATIVE_TRANSLATIONS["pt-PT"] },
+  "es-ES": { ...esES, ...esESPolish, ...APP_CORE_TRANSLATIONS["es-ES"], ...HOMEPAGE_V2_TRANSLATIONS["es-ES"], ...PRICING_V2_TRANSLATIONS["es-ES"], ...MARKETING_NARRATIVE_TRANSLATIONS["es-ES"] },
 };
 
 export function translateText(locale: Locale, value: string): string {

@@ -29,16 +29,16 @@
     { "label": "Benefits", "href": "#benefits" },
     { "label": "How CourtFlux works", "href": "/basketball-video-analysis" },
     { "label": "Pricing", "href": "/#pricing" },
-    { "label": "Start beta", "href": "/login?mode=signup", "cta": true }
+    { "label": "Analyze your first game free", "href": "/login?mode=signup", "cta": true }
   ],
   "hero": {
     "eyebrow": "Basketball video analysis for individual coaches",
     "title": "Spend less time scrubbing game film and more time",
     "highlight": "developing players.",
-    "lead": "CourtFlux helps individual basketball coaches turn the game film they already record into structured player, team and ball evidence. Find useful patterns faster without changing how you capture matches.",
-    "primary": { "label": "Start beta", "href": "/login?mode=signup" },
+    "lead": "CourtFlux turns ordinary basketball video into structured game intelligence, player insights and the moments that explain them — so you can understand what happened and what to work on next.",
+    "primary": { "label": "Analyze your first game free", "href": "/login?mode=signup" },
     "secondary": { "label": "See the analysis workflow", "href": "#workflow" },
-    "trust": ["Built for normal game film", "Coach-first workflow", "Private beta"],
+    "trust": ["Use ordinary game film", "Evidence-first analysis", "Private beta"],
     "image": {
       "src": "/brand/CourtFlux_Full_Analyst_Workspace.png",
       "alt": "CourtFlux workspace helping a basketball coach review tracked players and ball movement from game film",
@@ -47,15 +47,15 @@
     }
   },
   "problemStrip": [
-    { "title": "Save review time", "copy": "Spend less of the week manually searching through full-game video." },
-    { "title": "See player movement", "copy": "Build a clearer evidence layer around how players move through the game." },
-    { "title": "Follow the ball", "copy": "Use temporal ball tracking as the foundation for richer basketball context." }
+    { "title": "Find the insight", "copy": "Surface the possessions and moments that deserve a closer look." },
+    { "title": "Review the evidence", "copy": "Keep every insight connected to the source video and surrounding basketball context." },
+    { "title": "Choose what to improve", "copy": "Turn the evidence into a clearer next focus without handing basketball judgement to the system." }
   ],
   "how": {
     "eyebrow": "A simpler coaching workflow",
     "title": "Start with the film. Get to the",
     "highlight": "teaching point faster.",
-    "copy": "CourtFlux is designed to fit around the video workflow European coaches already use. Upload a match or submit a supported video source, add the two teams and let the tracking layer organise the evidence before you review it.",
+    "copy": "Use the footage you already have. CourtFlux handles the technical layers behind the scenes and keeps the product experience focused on basketball.",
     "image": {
       "src": "/brand/CourtFlux_Video_Tracking_Tactical_Insight.png",
       "alt": "CourtFlux basketball video moving from tracked game footage toward coaching analysis",
@@ -63,9 +63,9 @@
       "height": 1024
     },
     "steps": [
-      { "number": "01", "title": "Upload the basketball footage you already have.", "copy": "No specialist capture system is required. Start from normal club, academy or competition game film." },
-      { "number": "02", "title": "CourtFlux tracks players, teams and the ball.", "copy": "The current beta builds temporal tracking evidence instead of asking you to inspect every frame manually." },
-      { "number": "03", "title": "Return to the analysis when you need it.", "copy": "Completed analyses stay in My Analyses so the coaching evidence remains easy to reopen throughout the season." }
+      { "number": "01", "title": "Upload a game", "copy": "Start with ordinary basketball footage. No proprietary capture system is required." },
+      { "number": "02", "title": "CourtFlux follows the action", "copy": "Players, teams, the ball and temporal game state are connected across the recording." },
+      { "number": "03", "title": "Explore what matters", "copy": "Review structured moments and the video context behind them as the analysis layer continues to mature." }
     ]
   },
   "outcomes": {
@@ -74,17 +74,41 @@
     "highlight": "player development.",
     "copy": "The goal is not to replace the coach's judgement. It is to reduce repetitive video work and make useful evidence easier to reach.",
     "cards": [
-      { "label": "Review", "title": "Spend fewer hours searching footage", "items": ["Process full games or shorter segments", "Reopen completed analyses from one history", "Keep the source video secondary to the coaching result"] },
-      { "label": "Development", "title": "Build a stronger evidence trail", "items": ["Review player tracking across game footage", "Compare movement with the ball and team context", "Keep basketball judgement with the coach"] },
-      { "label": "Foundation", "title": "Grow with the analysis stack", "items": ["Player and team tracking available in beta", "Ball intelligence under active benchmark", "Possessions, events and tactical layers added only after validation"] }
+      {
+        "label": "Review",
+        "title": "Spend fewer hours searching footage",
+        "items": [
+          "Process full games or shorter segments",
+          "Reopen completed analyses from one history",
+          "Keep each observation connected to the source video evidence"
+        ]
+      },
+      {
+        "label": "Development",
+        "title": "Build a stronger evidence trail",
+        "items": [
+          "Review player tracking across game footage",
+          "Compare movement with the ball and team context",
+          "Keep basketball judgement with the coach"
+        ]
+      },
+      {
+        "label": "Foundation",
+        "title": "Grow with the analysis stack",
+        "items": [
+          "Player and team tracking",
+          "P2 game-state outputs",
+          "Structured analytics as validated"
+        ]
+      }
     ]
   },
   "evidence": {
-    "eyebrow": "Ball and player patterns",
+    "eyebrow": "Insight stays connected to film",
     "title": "Find the movement behind",
     "highlight": "the moment you want to coach.",
-    "copy": "CourtFlux connects frame-level detections across time so a coach can work from trajectories and game context rather than isolated boxes. The current beta focuses on player tracking, team classification and ball continuity because those layers are prerequisites for reliable basketball events later.",
-    "note": "CourtFlux does not yet present possession, pass, shot, rebound or tactical recommendations as validated customer outputs.",
+    "copy": "CourtFlux follows players, teams and the ball across time, then builds that movement into basketball state. The current P2 layer can structure ball control, possession changes, loose-ball sequences, shot attempts and candidate pass, turnover and rebound events.",
+    "note": "Event and attribution correctness is still being calibrated against reviewed human ground truth; the beta does not present candidate events as perfect truth.",
     "image": {
       "src": "/brand/CourtFlux_Ball_Intelligence.png",
       "alt": "CourtFlux ball tracking evidence for basketball coaching review",
@@ -92,20 +116,39 @@
       "height": 1024
     }
   },
-  "faqIntro": { "eyebrow": "Coach FAQ", "title": "Questions from", "highlight": "individual coaches." },
+  "faqIntro": {
+    "eyebrow": "Coach FAQ",
+    "title": "Questions from",
+    "highlight": "individual coaches."
+  },
   "faq": [
-    { "question": "Do I need an analyst to use CourtFlux?", "answer": "No. The Coach workflow is aimed at individual coaches who want a faster way to organise and review basketball video evidence." },
-    { "question": "Can I analyse opposition footage as well as my own team?", "answer": "Yes, provided you have the right or authority to submit and analyse the footage. The analysis workflow is based on the video and match context rather than requiring the source to be your own team." },
-    { "question": "Do I need a complete roster before analysing a game?", "answer": "No. Home and away team names are enough to start. Roster and jersey details can remain optional until player-level identity is needed." },
-    { "question": "What can I expect from the beta today?", "answer": "The current customer evidence focuses on player tracking, team classification, ball detection and temporal ball tracking diagnostics. Richer basketball events and tactical intelligence remain in development." },
-    { "question": "Is my uploaded game video kept forever?", "answer": "No. Directly uploaded source video is scheduled for deletion after 60 days. The derived analysis results and statistics remain available in your workspace." }
+    {
+      "question": "Do I need an analyst to use CourtFlux?",
+      "answer": "No. The Coach workflow is aimed at individual coaches who want a faster way to organise and review basketball video evidence."
+    },
+    {
+      "question": "Can I analyse opposition footage as well as my own team?",
+      "answer": "Yes, provided you have the right or authority to submit and analyse the footage. The analysis workflow is based on the video and match context rather than requiring the source to be your own team."
+    },
+    {
+      "question": "Do I need a complete roster before analysing a game?",
+      "answer": "No. Home and away team names are enough to start. Roster names and jersey numbers can remain optional because current analysis can use game-level player identity without claiming cross-game identity."
+    },
+    {
+      "question": "What can I expect from the beta today?",
+      "answer": "The current system tracks players, teams and the ball and includes a P2 basketball-state layer for ball control, possession changes, loose-ball sequences, shot attempts and candidate pass, turnover and rebound events. Formal event and attribution accuracy is still being validated against reviewed human ground truth."
+    },
+    {
+      "question": "Is my uploaded game video kept forever?",
+      "answer": "No. Directly uploaded source video is scheduled for deletion after 60 days. The derived analysis results and statistics remain available in your workspace."
+    }
   ],
   "finalCta": {
-    "eyebrow": "CourtFlux private beta",
+    "eyebrow": "Your next improvement is already in the film",
     "title": "Give your next video review a",
     "highlight": "better starting point.",
-    "copy": "Use the basketball footage you already record and see how structured tracking evidence can reduce manual review time.",
-    "primary": { "label": "Start beta", "href": "/login?mode=signup" },
+    "copy": "Start with the footage you already have and see how CourtFlux turns basketball video into structured game understanding.",
+    "primary": { "label": "Analyze your first game free", "href": "/login?mode=signup" },
     "secondary": { "label": "See pricing", "href": "/#pricing" }
   },
   "footer": [

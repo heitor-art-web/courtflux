@@ -1,0 +1,343 @@
+.page {
+  min-height: 100vh;
+  padding: 1rem clamp(1rem, 3vw, 2.5rem) 2rem;
+  background: var(--background, #f6f8fb);
+  color: var(--foreground, #111827);
+}
+
+.topbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  margin-bottom: 1rem;
+  font-size: 0.85rem;
+}
+
+.topbar a {
+  color: inherit;
+  font-weight: 700;
+  text-decoration: none;
+}
+
+.topbar a:hover,
+.topbar a:focus-visible {
+  text-decoration: underline;
+}
+
+.workspace {
+  display: grid;
+  gap: 1rem;
+}
+
+.header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 1rem;
+}
+
+.header h1,
+.emptyState h1 {
+  margin: 0.2rem 0 0.45rem;
+  font-size: clamp(1.7rem, 3vw, 2.45rem);
+}
+
+.eyebrow {
+  margin: 0;
+  font-size: 0.76rem;
+  font-weight: 800;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  opacity: 0.7;
+}
+
+.subtitle,
+.muted {
+  color: var(--muted-foreground, #697586);
+}
+
+.subtitle {
+  max-width: 68rem;
+  margin: 0;
+}
+
+.runMeta {
+  min-width: 12rem;
+  display: grid;
+  gap: 0.15rem;
+  padding: 0.75rem 0.9rem;
+  border: 1px solid var(--border, #d6dbe2);
+  border-radius: 0.75rem;
+  background: var(--card, #fff);
+}
+
+.runMeta span:first-child,
+.statusStrip span,
+.card dt {
+  font-size: 0.72rem;
+  text-transform: uppercase;
+  letter-spacing: 0.07em;
+  opacity: 0.65;
+}
+
+.statusStrip {
+  display: grid;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  gap: 0.6rem;
+}
+
+.statusStrip > div {
+  display: grid;
+  gap: 0.15rem;
+  min-width: 0;
+  padding: 0.7rem 0.8rem;
+  border: 1px solid var(--border, #d6dbe2);
+  border-radius: 0.65rem;
+  background: var(--card, #fff);
+}
+
+.statusStrip strong {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.mainGrid {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(17rem, 22rem);
+  gap: 1rem;
+  align-items: start;
+}
+
+.courtPanel,
+.card,
+.emptyState {
+  border: 1px solid var(--border, #d6dbe2);
+  border-radius: 0.85rem;
+  background: var(--card, #fff);
+}
+
+.courtPanel {
+  overflow: hidden;
+}
+
+.courtToolbar,
+.timeline {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.8rem;
+  padding: 0.75rem 0.9rem;
+}
+
+.courtToolbar {
+  border-bottom: 1px solid var(--border, #d6dbe2);
+}
+
+.courtToolbar label {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  font-size: 0.86rem;
+}
+
+.courtWrap {
+  padding: 1rem;
+  overflow-x: auto;
+  background: #121922;
+}
+
+.court {
+  display: block;
+  width: 100%;
+  min-width: 42rem;
+  height: auto;
+  aspect-ratio: 28 / 15;
+}
+
+.courtFloor {
+  fill: #b98552;
+}
+
+.courtLine,
+.basket {
+  fill: none;
+  stroke: rgba(255, 255, 255, 0.84);
+  stroke-width: 0.07;
+  vector-effect: non-scaling-stroke;
+}
+
+.basket {
+  stroke-width: 0.11;
+}
+
+.trail {
+  fill: none;
+  stroke: rgba(255, 255, 255, 0.3);
+  stroke-width: 0.09;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  vector-effect: non-scaling-stroke;
+}
+
+.rawPoint {
+  fill: none;
+  stroke: #ffe66d;
+  stroke-width: 0.08;
+  vector-effect: non-scaling-stroke;
+}
+
+.playerPoint {
+  stroke: rgba(10, 15, 22, 0.9);
+  stroke-width: 0.08;
+  vector-effect: non-scaling-stroke;
+  cursor: pointer;
+}
+
+.team0 { fill: #62a8ff; }
+.team1 { fill: #ff7369; }
+.team2 { fill: #72d6a6; }
+.team3 { fill: #d5a7ff; }
+
+.trackLabel {
+  fill: #07111d;
+  font-size: 0.27px;
+  font-weight: 800;
+  text-anchor: middle;
+  pointer-events: none;
+  user-select: none;
+}
+
+.velocity {
+  stroke: #f4f7fb;
+  stroke-width: 0.075;
+  stroke-linecap: round;
+  vector-effect: non-scaling-stroke;
+  opacity: 0.75;
+}
+
+.svgButton {
+  cursor: pointer;
+  outline: none;
+}
+
+.svgButton:focus .playerPoint,
+.selectedPlayer .playerPoint {
+  stroke: #fff;
+  stroke-width: 0.16;
+}
+
+.timeline {
+  border-top: 1px solid var(--border, #d6dbe2);
+}
+
+.timeline input[type="range"] {
+  flex: 1 1 18rem;
+}
+
+.timeline button,
+.timeline select {
+  min-height: 2.1rem;
+  padding: 0.35rem 0.65rem;
+  border: 1px solid var(--border, #cbd2dc);
+  border-radius: 0.5rem;
+  background: var(--background, #fff);
+  color: inherit;
+}
+
+.sidePanel {
+  display: grid;
+  gap: 0.8rem;
+}
+
+.card {
+  padding: 0.9rem;
+}
+
+.card h2 {
+  margin: 0 0 0.75rem;
+  font-size: 0.95rem;
+}
+
+.card dl {
+  display: grid;
+  gap: 0.5rem;
+  margin: 0;
+}
+
+.card dl > div {
+  display: grid;
+  grid-template-columns: minmax(7rem, 1fr) minmax(0, 1.25fr);
+  gap: 0.65rem;
+}
+
+.card dd {
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+
+.statePill {
+  display: inline-block;
+  margin: 0 0 0.65rem;
+  padding: 0.25rem 0.5rem;
+  border-radius: 999px;
+  font-weight: 800;
+  font-size: 0.75rem;
+  text-transform: uppercase;
+}
+
+.good { color: #157347; }
+.degraded { color: #9a6700; }
+.invalid { color: #b42318; }
+
+.reasonList {
+  margin: 0.35rem 0 0.6rem;
+  padding-left: 1.1rem;
+}
+
+.warning {
+  margin: 0;
+  padding: 0.75rem 0.9rem;
+  border: 1px solid #e5b94f;
+  border-radius: 0.7rem;
+  background: #fff8dc;
+  color: #6f5200;
+}
+
+.emptyState {
+  padding: 1.25rem;
+}
+
+.emptyState p:last-child {
+  margin-bottom: 0;
+}
+
+@media (max-width: 980px) {
+  .mainGrid {
+    grid-template-columns: 1fr;
+  }
+
+  .statusStrip {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .header {
+    flex-direction: column;
+  }
+
+  .runMeta {
+    width: 100%;
+  }
+}
+
+@media (max-width: 620px) {
+  .statusStrip {
+    grid-template-columns: 1fr;
+  }
+
+  .topbar {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+}

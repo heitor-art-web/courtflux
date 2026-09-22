@@ -2,9 +2,20 @@ name: Supabase migration lint
 
 on:
   push:
-    branches: [main, p2-rebuilt]
+    branches: [main]
+    paths:
+      - "supabase/**"
+      - ".github/workflows/supabase-lint.yml"
   pull_request:
     branches: [main]
+    paths:
+      - "supabase/**"
+      - ".github/workflows/supabase-lint.yml"
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
 
 permissions:
   contents: read

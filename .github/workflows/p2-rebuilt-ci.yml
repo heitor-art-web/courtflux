@@ -2,9 +2,30 @@ name: P2 Rebuilt CI
 
 on:
   push:
-    branches: [main, p2-rebuilt]
+    branches: [main]
+    paths:
+      - "core/**"
+      - "services/p2/**"
+      - "services/vision/**"
+      - "services/pipeline.py"
+      - "services/analytics/analyzer.py"
+      - "evaluation/p2_*.py"
+      - ".github/workflows/p2-rebuilt-ci.yml"
   pull_request:
     branches: [main]
+    paths:
+      - "core/**"
+      - "services/p2/**"
+      - "services/vision/**"
+      - "services/pipeline.py"
+      - "services/analytics/analyzer.py"
+      - "evaluation/p2_*.py"
+      - ".github/workflows/p2-rebuilt-ci.yml"
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
 
 permissions:
   contents: read

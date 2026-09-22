@@ -1,0 +1,184 @@
+.humanReviewBox {
+  margin-top: 14px;
+  padding: 14px;
+  border: 1px solid rgba(86, 167, 255, 0.22);
+  border-radius: 12px;
+  background: rgba(8, 25, 42, 0.72);
+}
+
+.humanReviewHeader {
+  display: flex;
+  justify-content: space-between;
+  gap: 14px;
+  align-items: flex-start;
+}
+
+.humanReviewHeader strong,
+.humanReviewHeader span {
+  display: block;
+}
+
+.humanReviewHeader strong {
+  color: #f4f8fb;
+  font-size: 0.82rem;
+}
+
+.humanReviewHeader span,
+.reviewMetadata {
+  margin-top: 4px;
+  color: #8799aa;
+  font-size: 0.7rem;
+  line-height: 1.45;
+}
+
+.reviewStateBadge {
+  flex: 0 0 auto;
+  padding: 6px 9px;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 999px;
+  color: #acbac6;
+  font-size: 0.68rem;
+  font-weight: 850;
+}
+
+.reviewStateBadge[data-state="confirmed"] {
+  border-color: rgba(53, 208, 127, 0.34);
+  background: rgba(53, 208, 127, 0.08);
+  color: #c9f5db;
+}
+
+.reviewStateBadge[data-state="corrected"] {
+  border-color: rgba(255, 173, 66, 0.34);
+  background: rgba(255, 173, 66, 0.08);
+  color: #ffe0b4;
+}
+
+.reviewStateBadge[data-state="rejected"] {
+  border-color: rgba(239, 90, 97, 0.34);
+  background: rgba(239, 90, 97, 0.08);
+  color: #ffd4d6;
+}
+
+.reviewNoteLabel {
+  display: grid;
+  gap: 6px;
+  margin-top: 12px;
+  color: #cbd5dd;
+  font-size: 0.72rem;
+  font-weight: 800;
+}
+
+.reviewNoteLabel span {
+  color: #738696;
+  font-weight: 600;
+}
+
+.reviewNote,
+.correctionGrid select {
+  width: 100%;
+  border: 1px solid rgba(143, 164, 184, 0.22);
+  border-radius: 9px;
+  background: rgba(2, 12, 22, 0.68);
+  color: #eef4f8;
+  font: inherit;
+}
+
+.reviewNote {
+  min-height: 74px;
+  padding: 9px 10px;
+  resize: vertical;
+}
+
+.reviewDecisionRow {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 7px;
+  margin-top: 10px;
+}
+
+.reviewDecisionRow button,
+.correctionActions button {
+  min-height: 38px;
+  border: 1px solid rgba(86, 167, 255, 0.28);
+  border-radius: 9px;
+  padding: 8px 11px;
+  background: rgba(86, 167, 255, 0.08);
+  color: #dcecff;
+  font: inherit;
+  font-size: 0.74rem;
+  font-weight: 850;
+  cursor: pointer;
+}
+
+.reviewDecisionRow button:disabled,
+.correctionActions button:disabled {
+  cursor: wait;
+  opacity: 0.5;
+}
+
+.reviewDecisionRow .rejectButton {
+  border-color: rgba(239, 90, 97, 0.26);
+  background: rgba(239, 90, 97, 0.06);
+  color: #ffd1d4;
+}
+
+.correctionPanel {
+  margin-top: 10px;
+  border-top: 1px solid rgba(255, 255, 255, 0.07);
+  padding-top: 9px;
+}
+
+.correctionPanel summary {
+  color: #b9c7d3;
+  font-size: 0.73rem;
+  font-weight: 800;
+  cursor: pointer;
+}
+
+.correctionGrid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 9px;
+  margin-top: 10px;
+}
+
+.correctionGrid label {
+  display: grid;
+  gap: 5px;
+  color: #8699aa;
+  font-size: 0.69rem;
+  font-weight: 750;
+}
+
+.correctionGrid select {
+  min-height: 40px;
+  padding: 7px 9px;
+}
+
+.correctionActions {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 9px;
+}
+
+.correctionActions span {
+  color: #758797;
+  font-size: 0.68rem;
+}
+
+@media (max-width: 680px) {
+  .humanReviewHeader {
+    flex-direction: column;
+  }
+
+  .correctionGrid {
+    grid-template-columns: 1fr;
+  }
+
+  .reviewDecisionRow button,
+  .correctionActions button {
+    width: 100%;
+  }
+}

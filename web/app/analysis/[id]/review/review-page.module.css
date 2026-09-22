@@ -1,0 +1,38 @@
+.page {
+  min-height: 100vh;
+}
+
+.topbar {
+  width: min(1180px, calc(100% - 40px));
+  margin: 0 auto;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 22px 0 0;
+}
+
+.topbar a {
+  min-height: 40px;
+  display: inline-flex;
+  align-items: center;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 10px;
+  padding: 8px 12px;
+  background: rgba(10, 24, 39, 0.82);
+  color: #eef3f8;
+  text-decoration: none;
+  font-size: 0.78rem;
+  font-weight: 800;
+}
+
+.topbar a:hover,
+.topbar a:focus-visible {
+  border-color: rgba(255, 116, 23, 0.52);
+}
+
+@media (max-width: 680px) {
+  .topbar {
+    width: min(100% - 24px, 1180px);
+  }
+}
