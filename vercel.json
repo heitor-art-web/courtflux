@@ -14,7 +14,7 @@
   },
   "git": {
     "deploymentEnabled": {
-      "courtflux-preview": true,
+      "main": true,
       "*": false
     }
   }
