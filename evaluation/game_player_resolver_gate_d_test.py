@@ -18,6 +18,15 @@ def _resolver(**overrides) -> GateDGamePlayerResolverV1:
     return GateDGamePlayerResolverV1(GamePlayerResolverConfig(**values))
 
 
+def _grid_descriptor(*, feature: int, column: int | None = None) -> list[float]:
+    values = [0.0] * (6 * 3 * 6)
+    columns = range(3) if column is None else (column,)
+    for row in range(6):
+        for col in columns:
+            values[((row * 3 + col) * 6) + feature] = 1.0
+    return values
+
+
 def test_active_tracks_block_order_dependent_merge() -> None:
     resolver = _resolver()
     original = resolver.observe(frame_id=1, track_id=10, appearance=[1.0, 0.0])
@@ -79,29 +88,71 @@ def test_resolution_exposes_episode_diagnostics() -> None:
     assert row["episode_open_reason"] == "initial_track_observation"
 
 
-def test_appearance_split_exposes_open_reason_and_similarity() -> None:
+def test_horizontal_pose_shift_does_not_split_full_grid_descriptor() -> None:
+    resolver = _resolver(appearance_split_similarity=0.80)
+    left = _grid_descriptor(feature=0, column=0)
+    right = _grid_descriptor(feature=0, column=2)
+
+    resolver.observe(frame_id=1, track_id=5, appearance=left)
+    resolver.observe(frame_id=2, track_id=5, appearance=right)
+    resolver.observe(frame_id=3, track_id=5, appearance=right)
+
+    assert len([key for key in resolver.episodes if key[0] == 5]) == 1
+    row = resolver.resolution(5, 3)
+    assert row is not None
+    assert row["episode_index"] == 0
+
+
+def test_coherent_body_change_splits_full_grid_descriptor() -> None:
     resolver = _resolver(
         appearance_split_similarity=0.80,
         split_conflict_observations=2,
     )
-    resolver.observe(frame_id=1, track_id=5, appearance=[1.0, 0.0])
-    resolver.observe(frame_id=2, track_id=5, appearance=[0.0, 1.0])
-    resolver.observe(frame_id=3, track_id=5, appearance=[0.0, 1.0])
+    first = _grid_descriptor(feature=0)
+    second = _grid_descriptor(feature=1)
+
+    resolver.observe(frame_id=1, track_id=5, appearance=first)
+    resolver.observe(frame_id=2, track_id=5, appearance=second)
+    resolver.observe(frame_id=3, track_id=5, appearance=second)
     row = resolver.resolution(5, 3)
 
     assert row is not None
     assert row["episode_index"] == 1
     assert row["episode_open_reason"] == "appearance_conflict"
-    similarity = row["episode_open_appearance_similarity"]
-    assert similarity is not None
-    assert float(similarity) < 0.80
+    raw_similarity = row["episode_open_appearance_similarity"]
+    split_similarity = row["episode_open_split_similarity"]
+    candidate_similarity = row["episode_open_candidate_similarity"]
+    assert raw_similarity is not None and float(raw_similarity) < 0.80
+    assert split_similarity is not None and float(split_similarity) < 0.80
+    assert candidate_similarity is not None and float(candidate_similarity) > 0.99
+
+
+def test_incoherent_conflicts_do_not_accumulate_split_streak() -> None:
+    resolver = _resolver(
+        appearance_split_similarity=0.80,
+        split_conflict_observations=2,
+    )
+    stable = _grid_descriptor(feature=0)
+    conflict_a = _grid_descriptor(feature=1)
+    conflict_b = _grid_descriptor(feature=2)
+
+    resolver.observe(frame_id=1, track_id=5, appearance=stable)
+    resolver.observe(frame_id=2, track_id=5, appearance=conflict_a)
+    resolver.observe(frame_id=3, track_id=5, appearance=conflict_b)
+
+    assert len([key for key in resolver.episodes if key[0] == 5]) == 1
+    row = resolver.resolution(5, 3)
+    assert row is not None
+    assert row["episode_index"] == 0
 
 
 def main() -> None:
     test_active_tracks_block_order_dependent_merge()
     test_stale_entities_do_not_force_new_track_unknown()
     test_resolution_exposes_episode_diagnostics()
-    test_appearance_split_exposes_open_reason_and_similarity()
+    test_horizontal_pose_shift_does_not_split_full_grid_descriptor()
+    test_coherent_body_change_splits_full_grid_descriptor()
+    test_incoherent_conflicts_do_not_accumulate_split_streak()
     print("game_player_resolver_gate_d_test: PASS")
 
 
