@@ -130,6 +130,12 @@ class PerformanceDetector(IdentityV2Detector):
                     "episode_open_appearance_similarity": self._rounded_optional(
                         resolution.get("episode_open_appearance_similarity")
                     ),
+                    "episode_open_split_similarity": self._rounded_optional(
+                        resolution.get("episode_open_split_similarity")
+                    ),
+                    "episode_open_candidate_similarity": self._rounded_optional(
+                        resolution.get("episode_open_candidate_similarity")
+                    ),
                     "box": list(player.get("box", []) or []),
                 }
             )
