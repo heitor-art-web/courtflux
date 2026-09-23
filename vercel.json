@@ -4,6 +4,7 @@
   "installCommand": "npm ci",
   "buildCommand": "npm run build",
   "outputDirectory": "web/.next",
+  "ignoreCommand": "bash scripts/vercel-ignore-build.sh",
   "env": {
     "VERCEL_PREVIEW_FEEDBACK_ENABLED": "0"
   },

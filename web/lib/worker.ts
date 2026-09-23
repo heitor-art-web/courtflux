@@ -23,7 +23,9 @@ async function workerToken() {
   }
 
   try {
-    const localToken = (await readFile(LOCAL_WORKER_TOKEN_FILE, "utf8")).trim();
+    const localToken = (
+      await readFile(/* turbopackIgnore: true */ LOCAL_WORKER_TOKEN_FILE, "utf8")
+    ).trim();
     return localToken || undefined;
   } catch (error) {
     const code = (error as NodeJS.ErrnoException).code;
