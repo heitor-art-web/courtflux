@@ -7,13 +7,13 @@ from services.vision.game_player_resolver_gate_d_v5 import GateDGamePlayerResolv
 
 
 class PerformanceDetector(GateDDetectorV4):
-    """Gate-D detector using v5 persistent ambiguity recovery."""
+    """Gate-D detector using v5 persistent ambiguity and reappearance recovery."""
 
     def __init__(self, *args: Any, **kwargs: Any) -> None:
         super().__init__(*args, **kwargs)
         self.game_player_resolver = GateDGamePlayerResolverV5()
         print(
-            "🧍 Gate D identity resolver: v5 deferred ambiguous reassociation",
+            "🧍 Gate D identity resolver: v5 deferred ambiguity + reappearance",
             flush=True,
         )
 
@@ -23,3 +23,4 @@ class PerformanceDetector(GateDDetectorV4):
         runtime = detector.setdefault("game_player_runtime", {})
         runtime["version"] = "game_player_resolver_v5_gate_d"
         runtime["deferred_ambiguous_reassociation"] = True
+        runtime["deferred_long_gap_reappearance"] = True
