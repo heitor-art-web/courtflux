@@ -7,6 +7,10 @@ from pathlib import Path
 from types import ModuleType, SimpleNamespace
 from unittest.mock import patch
 
+PROJECT_ROOT = Path(__file__).resolve().parent.parent
+if str(PROJECT_ROOT) not in sys.path:
+    sys.path.insert(0, str(PROJECT_ROOT))
+
 from evaluation.p2_gate_d_real_video_probe import _clip_defaults, _install_gate_d_probe
 
 
@@ -63,7 +67,7 @@ def test_gate_d_probe_exports_predictions_and_report() -> None:
                             "appearance_available": True,
                         }
                     ],
-                    "game_player_runtime": {"version": "game_player_resolver_v1"},
+                    "game_player_runtime": {"version": "game_player_resolver_v2"},
                 }
             },
         )
