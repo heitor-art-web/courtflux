@@ -105,9 +105,11 @@ class GateDGamePlayerResolverV1(GamePlayerResolverV1):
 
         if not scored:
             if eligible_entities == 0:
+                # Keep the base resolver's creation-reason literal so _create_episode()
+                # creates a fresh game-player entity rather than leaving this UNKNOWN.
                 return self._remember_decision(
                     episode,
-                    AssociationDecision(None, "new_entity_no_recent_compatible_history"),
+                    AssociationDecision(None, "new_entity_no_compatible_history"),
                 )
             if comparable_entities == eligible_entities:
                 return self._remember_decision(
