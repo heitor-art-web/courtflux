@@ -81,7 +81,7 @@ def test_resolution_exposes_episode_diagnostics() -> None:
 
 def test_appearance_split_exposes_open_reason_and_similarity() -> None:
     resolver = _resolver(
-        appearance_split_similarity=0.70,
+        appearance_split_similarity=0.80,
         split_conflict_observations=2,
     )
     resolver.observe(frame_id=1, track_id=5, appearance=[1.0, 0.0])
@@ -94,7 +94,7 @@ def test_appearance_split_exposes_open_reason_and_similarity() -> None:
     assert row["episode_open_reason"] == "appearance_conflict"
     similarity = row["episode_open_appearance_similarity"]
     assert similarity is not None
-    assert float(similarity) < 0.70
+    assert float(similarity) < 0.80
 
 
 def main() -> None:
