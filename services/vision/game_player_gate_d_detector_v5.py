@@ -13,7 +13,7 @@ class PerformanceDetector(GateDDetectorV4):
         super().__init__(*args, **kwargs)
         self.game_player_resolver = GateDGamePlayerResolverV5()
         print(
-            "🧍 Gate D identity resolver: v5 deferred ambiguity + reappearance",
+            "🧍 Gate D identity resolver: v5 deferred ambiguity + bounded reappearance probe",
             flush=True,
         )
 
@@ -24,3 +24,4 @@ class PerformanceDetector(GateDDetectorV4):
         runtime["version"] = "game_player_resolver_v5_gate_d"
         runtime["deferred_ambiguous_reassociation"] = True
         runtime["deferred_long_gap_reappearance"] = True
+        runtime["bounded_reappearance_probe"] = True
