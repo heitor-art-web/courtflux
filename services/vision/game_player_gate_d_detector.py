@@ -50,6 +50,15 @@ class PerformanceDetector(IdentityV2Detector):
         confidence = 0.75 if bool(player.get("identity_locked", False)) else 0.0
         return str(number), confidence
 
+    @staticmethod
+    def _rounded_optional(value: object) -> float | None:
+        if value is None:
+            return None
+        try:
+            return round(float(value), 6)
+        except (TypeError, ValueError):
+            return None
+
     def _observe_game_players(self, frame_state: Any) -> None:
         started = perf_counter()
         frame_id = int(getattr(frame_state, "frame_id", 0))
@@ -107,6 +116,20 @@ class PerformanceDetector(IdentityV2Detector):
                     "jersey_confidence": round(jersey_confidence, 6),
                     "appearance_available": appearance is not None,
                     "appearance_dimensions": 0 if appearance is None else len(appearance),
+                    "association_reason": resolution.get("association_reason"),
+                    "association_best_score": self._rounded_optional(
+                        resolution.get("association_best_score")
+                    ),
+                    "association_second_score": self._rounded_optional(
+                        resolution.get("association_second_score")
+                    ),
+                    "association_candidate_count": int(
+                        resolution.get("association_candidate_count", 0) or 0
+                    ),
+                    "episode_open_reason": resolution.get("episode_open_reason"),
+                    "episode_open_appearance_similarity": self._rounded_optional(
+                        resolution.get("episode_open_appearance_similarity")
+                    ),
                     "box": list(player.get("box", []) or []),
                 }
             )
