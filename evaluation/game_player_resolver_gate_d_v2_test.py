@@ -1,5 +1,12 @@
 from __future__ import annotations
 
+import sys
+from pathlib import Path
+
+PROJECT_ROOT = Path(__file__).resolve().parent.parent
+if str(PROJECT_ROOT) not in sys.path:
+    sys.path.insert(0, str(PROJECT_ROOT))
+
 from services.vision.game_player_resolver_gate_d_v2 import GateDGamePlayerResolverV2
 from services.vision.game_player_resolver_v1 import GamePlayerResolverConfig
 
