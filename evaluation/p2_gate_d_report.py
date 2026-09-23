@@ -88,6 +88,7 @@ def build_gate_d_report(state_rows: Iterable[dict[str, Any]], *, clip: str | Non
             segments.append(_segment(track_id, current))
 
     simultaneous_conflicts: list[dict[str, Any]] = []
+    global_visual_shifts: list[dict[str, Any]] = []
     for frame_id, rows in sorted(by_frame.items()):
         by_identity: dict[str, set[int]] = defaultdict(set)
         for row in rows:
@@ -104,6 +105,30 @@ def build_gate_d_report(state_rows: Iterable[dict[str, Any]], *, clip: str | Non
                         "track_ids": sorted(track_ids),
                     }
                 )
+
+        if any(bool(row.get("global_visual_shift", False)) for row in rows):
+            comparable = max(
+                int(row.get("global_visual_shift_comparable_tracks", 0) or 0)
+                for row in rows
+            )
+            conflicting = max(
+                int(row.get("global_visual_shift_conflicting_tracks", 0) or 0)
+                for row in rows
+            )
+            ratio = _max_optional(
+                row.get("global_visual_shift_conflict_ratio") for row in rows
+            )
+            global_visual_shifts.append(
+                {
+                    "frame_id": frame_id,
+                    "timestamp_sec": round(
+                        float(rows[0].get("timestamp_sec", 0.0) or 0.0), 6
+                    ),
+                    "comparable_tracks": comparable,
+                    "conflicting_tracks": conflicting,
+                    "conflict_ratio": None if ratio is None else round(ratio, 6),
+                }
+            )
 
     entities: dict[str, dict[str, Any]] = {}
     for segment in segments:
@@ -155,7 +180,7 @@ def build_gate_d_report(state_rows: Iterable[dict[str, Any]], *, clip: str | Non
         if row.get("episode_open_reason") is not None
     )
     return {
-        "version": "courtflux_gate_d_report_v3",
+        "version": "courtflux_gate_d_report_v4",
         "clip": clip,
         "prediction_observations": total,
         "resolved_observations": resolved,
@@ -175,6 +200,8 @@ def build_gate_d_report(state_rows: Iterable[dict[str, Any]], *, clip: str | Non
             sorted(episode_association_reason_counts.items())
         ),
         "episode_open_reason_counts": dict(sorted(episode_open_reason_counts.items())),
+        "global_visual_shift_frames": len(global_visual_shifts),
+        "global_visual_shifts": global_visual_shifts,
         "segments": segments,
         "entities": entity_rows,
         "invariants": {
@@ -185,7 +212,8 @@ def build_gate_d_report(state_rows: Iterable[dict[str, Any]], *, clip: str | Non
             "This report exposes resolver output for the existing human Gate-D observations; "
             "it does not invent or replace the frozen SAME/DIFFERENT labels. Observation "
             "reason counts are diagnostic volume; episode reason counts describe final "
-            "decisions once per (track_id, episode_index)."
+            "decisions once per (track_id, episode_index). Global visual shifts are "
+            "frame-cohort diagnostics used only to suppress appearance-driven fragmentation."
         ),
     }
 
@@ -208,6 +236,9 @@ def _segment(track_id: int, rows: list[dict[str, Any]]) -> dict[str, Any]:
         "appearance_available_rate": round(
             sum(bool(row.get("appearance_available", False)) for row in rows) / len(rows),
             6,
+        ),
+        "global_visual_shift_observations": sum(
+            bool(row.get("global_visual_shift", False)) for row in rows
         ),
         "association_reason": _mode(row.get("association_reason") for row in rows),
         "association_best_score_max": None if best_score is None else round(best_score, 6),
