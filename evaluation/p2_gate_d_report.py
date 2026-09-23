@@ -30,6 +30,18 @@ def _mode(values: Iterable[Any]) -> Any:
     return Counter(clean).most_common(1)[0][0] if clean else None
 
 
+def _max_optional(values: Iterable[Any]) -> float | None:
+    clean: list[float] = []
+    for value in values:
+        if value is None:
+            continue
+        try:
+            clean.append(float(value))
+        except (TypeError, ValueError):
+            continue
+    return max(clean) if clean else None
+
+
 def build_gate_d_report(state_rows: Iterable[dict[str, Any]], *, clip: str | None = None) -> dict[str, Any]:
     predictions = _prediction_rows(state_rows)
     by_track: dict[int, list[dict[str, Any]]] = defaultdict(list)
@@ -101,8 +113,18 @@ def build_gate_d_report(state_rows: Iterable[dict[str, Any]], *, clip: str | Non
 
     resolved = sum(1 for row in predictions if row.get("game_player_id") is not None)
     total = len(predictions)
+    association_reason_counts = Counter(
+        str(row.get("association_reason"))
+        for row in predictions
+        if row.get("association_reason") is not None
+    )
+    episode_open_reason_counts = Counter(
+        str(segment.get("episode_open_reason"))
+        for segment in segments
+        if segment.get("episode_open_reason") is not None
+    )
     return {
-        "version": "courtflux_gate_d_report_v1",
+        "version": "courtflux_gate_d_report_v2",
         "clip": clip,
         "prediction_observations": total,
         "resolved_observations": resolved,
@@ -110,6 +132,8 @@ def build_gate_d_report(state_rows: Iterable[dict[str, Any]], *, clip: str | Non
         "resolved_observation_rate": round((resolved / total) if total else 0.0, 6),
         "tracks": len(by_track),
         "game_player_entities": len(entity_rows),
+        "association_reason_counts": dict(sorted(association_reason_counts.items())),
+        "episode_open_reason_counts": dict(sorted(episode_open_reason_counts.items())),
         "segments": segments,
         "entities": entity_rows,
         "invariants": {
@@ -125,6 +149,13 @@ def build_gate_d_report(state_rows: Iterable[dict[str, Any]], *, clip: str | Non
 
 def _segment(track_id: int, rows: list[dict[str, Any]]) -> dict[str, Any]:
     first, last = rows[0], rows[-1]
+    best_score = _max_optional(row.get("association_best_score") for row in rows)
+    second_score = _max_optional(row.get("association_second_score") for row in rows)
+    open_similarity = first.get("episode_open_appearance_similarity")
+    try:
+        open_similarity = None if open_similarity is None else round(float(open_similarity), 6)
+    except (TypeError, ValueError):
+        open_similarity = None
     return {
         "track_id": track_id,
         "episode_index": first.get("episode_index"),
@@ -140,6 +171,14 @@ def _segment(track_id: int, rows: list[dict[str, Any]]) -> dict[str, Any]:
             sum(bool(row.get("appearance_available", False)) for row in rows) / len(rows),
             6,
         ),
+        "association_reason": _mode(row.get("association_reason") for row in rows),
+        "association_best_score_max": None if best_score is None else round(best_score, 6),
+        "association_second_score_max": None if second_score is None else round(second_score, 6),
+        "association_candidate_count_max": int(
+            max(int(row.get("association_candidate_count", 0) or 0) for row in rows)
+        ),
+        "episode_open_reason": first.get("episode_open_reason"),
+        "episode_open_appearance_similarity": open_similarity,
     }
 
 
