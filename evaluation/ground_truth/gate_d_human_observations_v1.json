@@ -1,0 +1,88 @@
+{
+  "version": "courtflux_gate_d_human_observations_v1",
+  "scope": {
+    "development_clips": ["v1", "v3", "v4", "v5"],
+    "challenge_non_blocking": ["v2"],
+    "exit_gate_reserved": ["v6", "v7"]
+  },
+  "metrics_contract": {
+    "same_player_continuity_recall_min": 0.85,
+    "different_player_false_merge_rate_max": 0.05,
+    "event_to_game_player_attribution_coverage_min": 0.80,
+    "per_clip_continuity_recall_min": 0.70
+  },
+  "frozen_counts": {
+    "same_pairs": 2,
+    "different_pairs": 5
+  },
+  "observations": [
+    {
+      "id": "V3-1",
+      "clip": "v3",
+      "label": "SAME",
+      "human_note": "Same player across the reviewed observations. Human jersey read was #24; OCR produced #27 in at least one observation, so jersey OCR must not define identity.",
+      "mapping_status": "mapping_required",
+      "endpoints": null
+    },
+    {
+      "id": "V4-1-SAME",
+      "clip": "v4",
+      "label": "SAME",
+      "human_note": "Around 22-23s, the reviewed observations are the same player. This is part of a same raw-track region that also contains a different-player observation around 21s, demonstrating that track_id is not final identity.",
+      "mapping_status": "mapping_required",
+      "temporal_hint_sec": [22.0, 23.0],
+      "endpoints": null
+    },
+    {
+      "id": "V4-1-DIFFERENT",
+      "clip": "v4",
+      "label": "DIFFERENT",
+      "human_note": "Around 21s, the reviewed observation is a different player from the later 22-23s same-player observation despite raw track continuity.",
+      "mapping_status": "mapping_required",
+      "temporal_hint_sec": [20.5, 21.9],
+      "endpoints": null
+    },
+    {
+      "id": "V5-1",
+      "clip": "v5",
+      "label": "DIFFERENT",
+      "human_note": "Different players despite team/jersey OCR evidence suggesting identity equality.",
+      "mapping_status": "mapping_required",
+      "endpoints": null
+    },
+    {
+      "id": "V5-2",
+      "clip": "v5",
+      "label": "DIFFERENT",
+      "human_note": "Different players despite team/jersey OCR evidence suggesting identity equality.",
+      "mapping_status": "mapping_required",
+      "endpoints": null
+    },
+    {
+      "id": "V4-N1",
+      "clip": "v4",
+      "label": "DIFFERENT",
+      "human_note": "Pass actor A to receiver/shooter B; the reviewed people are different players.",
+      "mapping_status": "mapping_required",
+      "endpoints": null
+    },
+    {
+      "id": "V1-N1",
+      "clip": "v1",
+      "label": "DIFFERENT",
+      "human_note": "Two different bald players; visual similarity must not merge them.",
+      "mapping_status": "mapping_required",
+      "endpoints": null
+    }
+  ],
+  "baseline": {
+    "same_pairs_resolved": 0,
+    "same_player_continuity_recall": 0.0,
+    "different_pairs_resolved": 0,
+    "published_false_merge_rate": 0.0,
+    "published_false_merge_rate_note": "Zero only because the baseline resolver abstained; raw OCR would resolve the SAME examples but false-merge the DIFFERENT examples.",
+    "raw_ocr_same_pairs_resolved": 2,
+    "raw_ocr_different_false_merges": 5
+  },
+  "policy": "Do not score or infer an observation until its two reviewed endpoints are explicitly mapped to frame/time plus track/episode selectors. UNKNOWN is preferable to an invented mapping or false merge."
+}
