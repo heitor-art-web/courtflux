@@ -7,6 +7,7 @@ from services.vision.game_player_resolver_gate_d_v4 import GateDGamePlayerResolv
 from services.vision.game_player_resolver_v1 import (
     AssociationDecision,
     EpisodeKey,
+    GamePlayerEntity,
     GamePlayerId,
     TrackEpisode,
 )
@@ -16,33 +17,35 @@ from services.vision.game_player_resolver_v1 import (
 class GateDDeferredAssociationConfig:
     """Conservative late-resolution policy for persistent ambiguous episodes.
 
-    This does not lower the normal resolver thresholds. It only gives an episode that
-    remains UNKNOWN because the best two candidates are too close a second chance after
-    the episode has accumulated stable appearance evidence for the same best candidate.
+    Normal association thresholds and the normal temporal window are unchanged. The
+    deferred path can recover either a persistent within-window ambiguity or a strong
+    reappearance just beyond the normal temporal window after several consistent frames.
     """
 
     min_episode_observations: int = 12
     min_consistent_observations: int = 8
     min_best_similarity: float = 0.94
     min_margin: float = 0.025
+    max_reappearance_gap_frames: int = 270
 
 
 class GateDGamePlayerResolverV5(GateDGamePlayerResolverV4):
-    """Gate-D v4 plus persistent-evidence recovery from ambiguous UNKNOWN.
+    """Gate-D v4 plus conservative persistent-evidence identity recovery.
 
-    V3 development evidence showed a long-lived episode that stayed UNKNOWN because its
-    best and second-best historical identities were separated by less than the normal
-    one-shot association margin. Re-evaluating the same one-shot rule cannot recover such
-    an episode, even after its appearance estimate becomes much more stable.
+    V3 development evidence exposed two related UNKNOWN modes:
+    * a long-lived episode can stay ambiguous even after its appearance estimate becomes
+      stable enough to prefer one historical identity;
+    * after a short scene/camera absence, the same player can reappear just beyond the
+      normal association window and be treated as having no compatible history at all.
 
-    V5 therefore adds one narrow late-association path:
-    * only ``unknown_ambiguous_match`` episodes are eligible;
-    * the normal match threshold remains unchanged;
-    * the best candidate must be very strong and retain a positive safety margin;
+    V5 keeps the normal thresholds and normal association window untouched. It adds only
+    deferred recovery paths with stronger temporal evidence:
     * the same candidate must win for several consecutive observations;
-    * candidates that share this raw track are excluded, so this path cannot undo a
-      deliberate within-track identity split;
-    * all existing simultaneity, temporal-window, and team hard rejects remain active.
+    * the best candidate must be very strong and keep a positive safety margin;
+    * long-gap reappearance is bounded by a second, modest temporal ceiling;
+    * candidates that share the raw track are excluded, so deliberate within-track
+      identity splits cannot be glued back together by this path;
+    * simultaneity and strong team conflicts remain hard rejects.
     """
 
     def __init__(
@@ -76,6 +79,42 @@ class GateDGamePlayerResolverV5(GateDGamePlayerResolverV4):
             if key in self.episodes
         )
 
+    def _association_score_without_gap(
+        self,
+        entity: GamePlayerEntity,
+        episode: TrackEpisode,
+    ) -> float | None:
+        similarity = self._cosine_similarity(entity.appearance, episode.appearance)
+        if similarity is None:
+            return None
+        score = similarity
+        if (
+            entity.jersey_number
+            and episode.jersey_number
+            and entity.jersey_confidence >= 0.50
+            and episode.jersey_confidence >= 0.50
+        ):
+            score += (
+                self.config.jersey_positive_bonus
+                if entity.jersey_number == episode.jersey_number
+                else -self.config.jersey_negative_penalty
+            )
+        return score
+
+    def _entity_within_reappearance_window(
+        self,
+        entity: GamePlayerEntity,
+        episode: TrackEpisode,
+    ) -> bool:
+        last_frame = self._entity_last_frame(entity)
+        if last_frame is None:
+            return False
+        gap = max(0, int(episode.frame_start) - int(last_frame))
+        return bool(
+            gap > int(self.config.max_association_gap_frames)
+            and gap <= int(self.deferred_association_config.max_reappearance_gap_frames)
+        )
+
     def _rank_deferred_candidates(
         self,
         episode: TrackEpisode,
@@ -97,39 +136,101 @@ class GateDGamePlayerResolverV5(GateDGamePlayerResolverV4):
         scored.sort(reverse=True)
         return scored
 
+    def _rank_reappearance_candidates(
+        self,
+        episode: TrackEpisode,
+    ) -> list[tuple[float, GamePlayerId]]:
+        scored: list[tuple[float, GamePlayerId]] = []
+        for game_player_id, entity in self.entities.items():
+            if self._entity_reuses_track(game_player_id, episode.track_id):
+                continue
+            if self._hard_reject_entity(entity, episode):
+                continue
+            if not self._entity_within_reappearance_window(entity, episode):
+                continue
+            score = self._association_score_without_gap(entity, episode)
+            if score is not None:
+                scored.append((float(score), game_player_id))
+        scored.sort(reverse=True)
+        return scored
+
+    def _safe_ranked_head(
+        self,
+        ranked: list[tuple[float, GamePlayerId]],
+    ) -> tuple[float, GamePlayerId, float | None, float] | None:
+        if not ranked:
+            return None
+        best_score, best_id = ranked[0]
+        second_score = ranked[1][0] if len(ranked) > 1 else None
+        margin = (
+            best_score - second_score
+            if second_score is not None
+            else 1.0
+        )
+        config = self.deferred_association_config
+        if (
+            best_score < float(config.min_best_similarity)
+            or margin < float(config.min_margin)
+        ):
+            return None
+        return best_score, best_id, second_score, margin
+
+    def _choose_entity(self, episode: TrackEpisode) -> AssociationDecision:
+        decision = super()._choose_entity(episode)
+        if decision.reason != "new_entity_no_compatible_history":
+            return decision
+
+        # Do not widen the normal association window globally. If a very strong stale
+        # candidate exists just outside it, hold this new episode UNKNOWN long enough to
+        # accumulate evidence instead of immediately minting a new identity.
+        ranked = self._rank_reappearance_candidates(episode)
+        head = self._safe_ranked_head(ranked)
+        if head is None:
+            return decision
+        best_score, _, second_score, _ = head
+        held = AssociationDecision(
+            None,
+            "unknown_stale_reappearance_candidate",
+            best_score=best_score,
+            second_score=second_score,
+            candidate_count=len(ranked),
+        )
+        self._gate_d_decisions[episode.key] = held
+        return held
+
     def _refresh_assignment(self, episode: TrackEpisode) -> None:
         if episode.game_player_id is not None:
             self._reset_deferred_candidate(episode.key)
             return
 
         # Preserve the canonical resolver path first. V5 is only a fallback for a
-        # persistent ambiguity that the normal policy explicitly abstains on.
+        # persistent ambiguity or a bounded strong reappearance that the normal policy
+        # deliberately abstains on.
         super()._refresh_assignment(episode)
         if episode.game_player_id is not None:
             self._reset_deferred_candidate(episode.key)
             return
 
         decision = self._gate_d_decisions.get(episode.key)
-        if decision is None or decision.reason != "unknown_ambiguous_match":
+        if decision is None or decision.reason not in {
+            "unknown_ambiguous_match",
+            "unknown_stale_reappearance_candidate",
+        }:
             self._reset_deferred_candidate(episode.key)
             return
 
-        ranked = self._rank_deferred_candidates(episode)
-        if len(ranked) < 2:
+        reappearance = decision.reason == "unknown_stale_reappearance_candidate"
+        ranked = (
+            self._rank_reappearance_candidates(episode)
+            if reappearance
+            else self._rank_deferred_candidates(episode)
+        )
+        head = self._safe_ranked_head(ranked)
+        if head is None:
             self._reset_deferred_candidate(episode.key)
             return
 
-        best_score, best_id = ranked[0]
-        second_score = ranked[1][0]
-        margin = best_score - second_score
-        config = self.deferred_association_config
-        if (
-            best_score < float(config.min_best_similarity)
-            or margin < float(config.min_margin)
-        ):
-            self._reset_deferred_candidate(episode.key)
-            return
-
+        best_score, best_id, second_score, margin = head
         previous = self._gate_d_deferred_candidate.get(episode.key)
         if previous != best_id:
             self._gate_d_deferred_candidate[episode.key] = best_id
@@ -149,6 +250,7 @@ class GateDGamePlayerResolverV5(GateDGamePlayerResolverV4):
             + margin
         )
 
+        config = self.deferred_association_config
         if (
             episode.observation_count < int(config.min_episode_observations)
             or streak < int(config.min_consistent_observations)
@@ -166,18 +268,31 @@ class GateDGamePlayerResolverV5(GateDGamePlayerResolverV4):
         # Re-check every hard condition immediately before promotion because another
         # track from the candidate entity may have become active earlier in this frame.
         entity = self.entities.get(best_id)
+        within_window = bool(
+            entity is not None
+            and (
+                self._entity_within_reappearance_window(entity, episode)
+                if reappearance
+                else self._entity_within_association_window(entity, episode)
+            )
+        )
         if (
             entity is None
             or self._entity_reuses_track(best_id, episode.track_id)
             or self._hard_reject_entity(entity, episode)
-            or not self._entity_within_association_window(entity, episode)
+            or not within_window
         ):
             self._reset_deferred_candidate(episode.key)
             return
 
+        reason = (
+            "matched_existing_entity_deferred_reappearance"
+            if reappearance
+            else "matched_existing_entity_deferred"
+        )
         self._gate_d_decisions[episode.key] = AssociationDecision(
             best_id,
-            "matched_existing_entity_deferred",
+            reason,
             best_score=best_score,
             second_score=second_score,
             candidate_count=len(ranked),
