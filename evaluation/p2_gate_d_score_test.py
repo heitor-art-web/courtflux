@@ -57,7 +57,7 @@ def test_strict_mapping_and_relation_scoring() -> None:
                 "id": "UNMAPPED",
                 "clip": "v1",
                 "label": "DIFFERENT",
-                "endpoints": null,
+                "endpoints": None,
             },
         ]
     }
