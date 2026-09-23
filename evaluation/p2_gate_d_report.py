@@ -42,10 +42,20 @@ def _max_optional(values: Iterable[Any]) -> float | None:
     return max(clean) if clean else None
 
 
+def _rounded_optional(value: Any) -> float | None:
+    if value is None:
+        return None
+    try:
+        return round(float(value), 6)
+    except (TypeError, ValueError):
+        return None
+
+
 def build_gate_d_report(state_rows: Iterable[dict[str, Any]], *, clip: str | None = None) -> dict[str, Any]:
     predictions = _prediction_rows(state_rows)
     by_track: dict[int, list[dict[str, Any]]] = defaultdict(list)
     by_frame: dict[int, list[dict[str, Any]]] = defaultdict(list)
+    by_episode: dict[tuple[int, int], list[dict[str, Any]]] = defaultdict(list)
     for row in predictions:
         try:
             track_id = int(row.get("track_id", -1))
@@ -56,6 +66,11 @@ def build_gate_d_report(state_rows: Iterable[dict[str, Any]], *, clip: str | Non
             continue
         by_track[track_id].append(row)
         by_frame[frame_id].append(row)
+        try:
+            episode_index = int(row.get("episode_index"))
+        except (TypeError, ValueError):
+            continue
+        by_episode[(track_id, episode_index)].append(row)
 
     segments: list[dict[str, Any]] = []
     for track_id, rows in sorted(by_track.items()):
@@ -111,28 +126,54 @@ def build_gate_d_report(state_rows: Iterable[dict[str, Any]], *, clip: str | Non
     ]
     entity_rows.sort(key=lambda item: item["game_player_id"])
 
+    episode_final_rows: list[dict[str, Any]] = []
+    episode_open_rows: list[dict[str, Any]] = []
+    for rows in by_episode.values():
+        rows.sort(key=lambda item: int(item.get("frame_id", 0)))
+        episode_open_rows.append(rows[0])
+        episode_final_rows.append(rows[-1])
+
     resolved = sum(1 for row in predictions if row.get("game_player_id") is not None)
     total = len(predictions)
+    resolved_episodes = sum(
+        1 for row in episode_final_rows if row.get("game_player_id") is not None
+    )
+    episode_total = len(episode_final_rows)
     association_reason_counts = Counter(
         str(row.get("association_reason"))
         for row in predictions
         if row.get("association_reason") is not None
     )
+    episode_association_reason_counts = Counter(
+        str(row.get("association_reason"))
+        for row in episode_final_rows
+        if row.get("association_reason") is not None
+    )
     episode_open_reason_counts = Counter(
-        str(segment.get("episode_open_reason"))
-        for segment in segments
-        if segment.get("episode_open_reason") is not None
+        str(row.get("episode_open_reason"))
+        for row in episode_open_rows
+        if row.get("episode_open_reason") is not None
     )
     return {
-        "version": "courtflux_gate_d_report_v2",
+        "version": "courtflux_gate_d_report_v3",
         "clip": clip,
         "prediction_observations": total,
         "resolved_observations": resolved,
         "unknown_observations": total - resolved,
         "resolved_observation_rate": round((resolved / total) if total else 0.0, 6),
         "tracks": len(by_track),
+        "episodes": episode_total,
+        "resolved_episodes": resolved_episodes,
+        "unknown_episodes": episode_total - resolved_episodes,
+        "resolved_episode_rate": round(
+            (resolved_episodes / episode_total) if episode_total else 0.0,
+            6,
+        ),
         "game_player_entities": len(entity_rows),
         "association_reason_counts": dict(sorted(association_reason_counts.items())),
+        "episode_association_reason_counts": dict(
+            sorted(episode_association_reason_counts.items())
+        ),
         "episode_open_reason_counts": dict(sorted(episode_open_reason_counts.items())),
         "segments": segments,
         "entities": entity_rows,
@@ -142,7 +183,9 @@ def build_gate_d_report(state_rows: Iterable[dict[str, Any]], *, clip: str | Non
         },
         "note": (
             "This report exposes resolver output for the existing human Gate-D observations; "
-            "it does not invent or replace the frozen SAME/DIFFERENT labels."
+            "it does not invent or replace the frozen SAME/DIFFERENT labels. Observation "
+            "reason counts are diagnostic volume; episode reason counts describe final "
+            "decisions once per (track_id, episode_index)."
         ),
     }
 
@@ -151,11 +194,6 @@ def _segment(track_id: int, rows: list[dict[str, Any]]) -> dict[str, Any]:
     first, last = rows[0], rows[-1]
     best_score = _max_optional(row.get("association_best_score") for row in rows)
     second_score = _max_optional(row.get("association_second_score") for row in rows)
-    open_similarity = first.get("episode_open_appearance_similarity")
-    try:
-        open_similarity = None if open_similarity is None else round(float(open_similarity), 6)
-    except (TypeError, ValueError):
-        open_similarity = None
     return {
         "track_id": track_id,
         "episode_index": first.get("episode_index"),
@@ -178,7 +216,15 @@ def _segment(track_id: int, rows: list[dict[str, Any]]) -> dict[str, Any]:
             max(int(row.get("association_candidate_count", 0) or 0) for row in rows)
         ),
         "episode_open_reason": first.get("episode_open_reason"),
-        "episode_open_appearance_similarity": open_similarity,
+        "episode_open_appearance_similarity": _rounded_optional(
+            first.get("episode_open_appearance_similarity")
+        ),
+        "episode_open_split_similarity": _rounded_optional(
+            first.get("episode_open_split_similarity")
+        ),
+        "episode_open_candidate_similarity": _rounded_optional(
+            first.get("episode_open_candidate_similarity")
+        ),
     }
 
 
