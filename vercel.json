@@ -4,6 +4,7 @@
   "installCommand": "npm ci",
   "buildCommand": "npm run build",
   "outputDirectory": "web/.next",
+  "ignoreCommand": "if [ -z \"$VERCEL_GIT_PREVIOUS_SHA\" ] || [ -z \"$VERCEL_GIT_COMMIT_SHA\" ]; then echo 'Git baseline unavailable; building'; exit 1; fi; if git diff --quiet \"$VERCEL_GIT_PREVIOUS_SHA\" \"$VERCEL_GIT_COMMIT_SHA\" -- web package.json package-lock.json vercel.json .vercelignore; then echo 'No web deployment inputs changed; skipping Vercel build'; exit 0; else echo 'Web deployment inputs changed; building'; exit 1; fi",
   "env": {
     "VERCEL_PREVIEW_FEEDBACK_ENABLED": "0"
   },
