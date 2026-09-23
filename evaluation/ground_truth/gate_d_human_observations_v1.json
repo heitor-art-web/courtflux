@@ -24,26 +24,21 @@
       "mapping_status": "mapped",
       "mapping_note": "Endpoint A is the reviewed ~12s screenshot and visually overlaps track 53 at frame 360. Endpoint B was supplied as ~23s; frame 665 (22.188833s) is the nearest reviewed frame whose detector box visually overlaps the same #24 ball-handler/shooter in the screenshot, mapping to track 94. Mapping follows the reviewed person/bounding-box evidence, not current_track_id.",
       "endpoints": [
-        {
-          "frame_id": 360,
-          "track_id": 53,
-          "episode_index": 0
-        },
-        {
-          "frame_id": 665,
-          "track_id": 94,
-          "episode_index": 0
-        }
+        {"frame_id": 360, "track_id": 53, "episode_index": 0},
+        {"frame_id": 665, "track_id": 94, "episode_index": 0}
       ]
     },
     {
       "id": "V4-1-SAME",
       "clip": "v4",
       "label": "SAME",
-      "human_note": "Around 22-23s, the reviewed observations are the same player. This is part of a same raw-track region that also contains a different-player observation around 21s, demonstrating that track_id is not final identity.",
-      "mapping_status": "mapping_required",
-      "temporal_hint_sec": [22.0, 23.0],
-      "endpoints": null
+      "human_note": "Human re-review: the left-side blue receiver in the pass-flight observation and the same player taking the later corner shot are the same person.",
+      "mapping_status": "mapped",
+      "mapping_note": "Reviewed pass-flight screenshot aligns with frame 1308 (21.800000s), track 63. Reviewed shot screenshot aligns with frame 1380 (23.000000s), track 63. Both boxes visibly cover the same left-side blue player.",
+      "endpoints": [
+        {"frame_id": 1308, "track_id": 63, "episode_index": 0},
+        {"frame_id": 1380, "track_id": 63, "episode_index": 0}
+      ]
     },
     {
       "id": "V4-1-DIFFERENT",
@@ -58,33 +53,49 @@
       "id": "V5-1",
       "clip": "v5",
       "label": "DIFFERENT",
-      "human_note": "Different players despite team/jersey OCR evidence suggesting identity equality.",
-      "mapping_status": "mapping_required",
-      "endpoints": null
+      "human_note": "Human re-review: green ball-handler near centre court at 18.5s and green #57 taking the shot at 21.5s are different players.",
+      "mapping_status": "mapped",
+      "mapping_note": "18.5s screenshot aligns with frame 213 (18.520000s), track 32. 21.5s screenshot aligns with frame 288 (21.520000s), track 70. Detector boxes visually overlap the reviewed players.",
+      "endpoints": [
+        {"frame_id": 213, "track_id": 32, "episode_index": 1},
+        {"frame_id": 288, "track_id": 70, "episode_index": 0}
+      ]
     },
     {
       "id": "V5-2",
       "clip": "v5",
       "label": "DIFFERENT",
-      "human_note": "Different players despite team/jersey OCR evidence suggesting identity equality.",
-      "mapping_status": "mapping_required",
-      "endpoints": null
+      "human_note": "Human re-review: blue/white #11 at 27.0s and blue/white #43 at 34.0s are different players.",
+      "mapping_status": "mapped",
+      "mapping_note": "27.0s screenshot aligns with frame 425, track 103, whose box covers blue/white #11. 34.0s screenshot aligns with frame 600, track 124, whose box covers blue/white #43.",
+      "endpoints": [
+        {"frame_id": 425, "track_id": 103, "episode_index": 0},
+        {"frame_id": 600, "track_id": 124, "episode_index": 0}
+      ]
     },
     {
       "id": "V4-N1",
       "clip": "v4",
       "label": "DIFFERENT",
       "human_note": "Pass actor A to receiver/shooter B; the reviewed people are different players.",
-      "mapping_status": "mapping_required",
-      "endpoints": null
+      "mapping_status": "mapped",
+      "mapping_note": "Reviewed passer screenshot aligns with frame 1260 (21.000000s), blue #13 on track 66. Reviewed pass-flight receiver screenshot aligns with frame 1308 (21.800000s), left-side blue receiver on track 63.",
+      "endpoints": [
+        {"frame_id": 1260, "track_id": 66, "episode_index": 2},
+        {"frame_id": 1308, "track_id": 63, "episode_index": 0}
+      ]
     },
     {
       "id": "V1-N1",
       "clip": "v1",
       "label": "DIFFERENT",
-      "human_note": "Two different bald players; visual similarity must not merge them.",
-      "mapping_status": "mapping_required",
-      "endpoints": null
+      "human_note": "Human re-review: red #9 at ~23s, bald without beard, and the red ball-handler at ~31s, bald with beard, are different players.",
+      "mapping_status": "mapped",
+      "mapping_note": "The 23s screenshot aligns most closely with frame 324 (22.960000s), track 66, whose box covers red #9 with the ball. The 31s screenshot aligns with frame 525 (31.000000s), track 114, whose box covers the reviewed bearded red ball-handler.",
+      "endpoints": [
+        {"frame_id": 324, "track_id": 66, "episode_index": 0},
+        {"frame_id": 525, "track_id": 114, "episode_index": 0}
+      ]
     }
   ],
   "baseline": {
