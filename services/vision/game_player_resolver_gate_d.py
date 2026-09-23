@@ -24,7 +24,16 @@ class GateDGamePlayerResolverV1(GamePlayerResolverV1):
     temporally ineligible rather than as compatible-but-unresolvable candidates. Without
     that distinction, old entities could force a genuinely new player to remain UNKNOWN
     forever even when appearance evidence was available.
+
+    Within-track split detection deliberately uses a coarser body descriptor than
+    cross-track association. The full 6x3 appearance grid remains available for player
+    discrimination, while split detection pools each row across columns so horizontal pose
+    changes do not masquerade as a human-identity switch.
     """
+
+    _SPLIT_GRID_ROWS = 6
+    _SPLIT_GRID_COLS = 3
+    _SPLIT_CELL_FEATURES = 6
 
     def __init__(self, *args, **kwargs) -> None:
         super().__init__(*args, **kwargs)
@@ -32,6 +41,9 @@ class GateDGamePlayerResolverV1(GamePlayerResolverV1):
         self._gate_d_decisions: dict[EpisodeKey, AssociationDecision] = {}
         self._gate_d_episode_open: dict[EpisodeKey, dict[str, object]] = {}
         self._gate_d_pending_episode_open: dict[int, dict[str, object]] = {}
+        self._gate_d_split_sum: dict[EpisodeKey, list[float]] = {}
+        self._gate_d_split_count: dict[EpisodeKey, int] = {}
+        self._gate_d_split_candidate: dict[EpisodeKey, tuple[float, ...]] = {}
 
     def _entity_has_other_active_track(
         self,
@@ -80,13 +92,7 @@ class GateDGamePlayerResolverV1(GamePlayerResolverV1):
         return decision
 
     def _choose_entity(self, episode: TrackEpisode) -> AssociationDecision:
-        """Choose an entity without letting stale history force UNKNOWN.
-
-        Hard-rejected and temporally stale entities are not candidates. Among recent
-        compatible entities the conservative V1 semantics are preserved: a unique strong
-        match may merge, clear visual separation creates a new entity, and genuinely weak
-        or ambiguous evidence remains UNKNOWN.
-        """
+        """Choose an entity without letting stale history force UNKNOWN."""
         scored: list[tuple[float, GamePlayerId]] = []
         eligible_entities = 0
         comparable_entities = 0
@@ -105,8 +111,6 @@ class GateDGamePlayerResolverV1(GamePlayerResolverV1):
 
         if not scored:
             if eligible_entities == 0:
-                # Keep the base resolver's creation-reason literal so _create_episode()
-                # creates a fresh game-player entity rather than leaving this UNKNOWN.
                 return self._remember_decision(
                     episode,
                     AssociationDecision(None, "new_entity_no_compatible_history"),
@@ -168,6 +172,85 @@ class GateDGamePlayerResolverV1(GamePlayerResolverV1):
             ),
         )
 
+    @classmethod
+    def _split_descriptor(
+        cls,
+        appearance: tuple[float, ...] | None,
+    ) -> tuple[float, ...] | None:
+        if appearance is None:
+            return None
+        expected = cls._SPLIT_GRID_ROWS * cls._SPLIT_GRID_COLS * cls._SPLIT_CELL_FEATURES
+        if len(appearance) != expected:
+            # Synthetic/unit descriptors and future descriptor variants retain the
+            # conservative base behavior rather than silently dropping evidence.
+            return appearance
+
+        pooled: list[float] = []
+        for row in range(cls._SPLIT_GRID_ROWS):
+            for feature in range(cls._SPLIT_CELL_FEATURES):
+                values = [
+                    appearance[
+                        ((row * cls._SPLIT_GRID_COLS + col) * cls._SPLIT_CELL_FEATURES)
+                        + feature
+                    ]
+                    for col in range(cls._SPLIT_GRID_COLS)
+                ]
+                pooled.append(sum(values) / cls._SPLIT_GRID_COLS)
+        return tuple(pooled)
+
+    def _split_prototype(self, episode: TrackEpisode) -> tuple[float, ...] | None:
+        total = self._gate_d_split_sum.get(episode.key)
+        count = int(self._gate_d_split_count.get(episode.key, 0) or 0)
+        if total is not None and count > 0:
+            return tuple(value / count for value in total)
+        return self._split_descriptor(episode.appearance)
+
+    def _seed_split_prototype(
+        self,
+        episode_key: EpisodeKey,
+        appearance: tuple[float, ...] | None,
+    ) -> None:
+        split = self._split_descriptor(appearance)
+        self._gate_d_split_candidate.pop(episode_key, None)
+        if split is None:
+            return
+        self._gate_d_split_sum[episode_key] = [float(value) for value in split]
+        self._gate_d_split_count[episode_key] = 1
+
+    def _update_split_prototype(
+        self,
+        episode_key: EpisodeKey,
+        split: tuple[float, ...] | None,
+    ) -> None:
+        if split is None:
+            return
+        total = self._gate_d_split_sum.get(episode_key)
+        if total is None or len(total) != len(split):
+            self._gate_d_split_sum[episode_key] = [float(value) for value in split]
+            self._gate_d_split_count[episode_key] = 1
+            return
+        for index, value in enumerate(split):
+            total[index] += float(value)
+        self._gate_d_split_count[episode_key] = (
+            int(self._gate_d_split_count.get(episode_key, 0) or 0) + 1
+        )
+
+    def _remember_episode_open(
+        self,
+        episode: TrackEpisode,
+        *,
+        reason: str,
+        raw_similarity: float | None,
+        split_similarity: float | None,
+        candidate_similarity: float | None = None,
+    ) -> None:
+        self._gate_d_pending_episode_open[episode.track_id] = {
+            "reason": reason,
+            "appearance_similarity": raw_similarity,
+            "split_similarity": split_similarity,
+            "candidate_similarity": candidate_similarity,
+        }
+
     def _should_split(
         self,
         episode: TrackEpisode,
@@ -179,40 +262,86 @@ class GateDGamePlayerResolverV1(GamePlayerResolverV1):
         active_track_ids: set[int] | None = None,
     ) -> bool:
         gap = int(frame_id) - int(episode.frame_end)
-        similarity = self._cosine_similarity(episode.appearance, appearance)
+        raw_similarity = self._cosine_similarity(episode.appearance, appearance)
+        split_appearance = self._split_descriptor(appearance)
+        split_similarity = self._cosine_similarity(
+            self._split_prototype(episode),
+            split_appearance,
+        )
+
+        if gap > self.config.max_track_gap_frames:
+            self._remember_episode_open(
+                episode,
+                reason="track_gap",
+                raw_similarity=raw_similarity,
+                split_similarity=split_similarity,
+            )
+            return True
 
         if episode.game_player_id is not None:
             entity = self.entities.get(episode.game_player_id)
             if entity is not None and self._entity_has_other_active_track(entity, episode):
-                self._gate_d_pending_episode_open[episode.track_id] = {
-                    "reason": "active_track_identity_conflict",
-                    "appearance_similarity": similarity,
-                }
+                self._remember_episode_open(
+                    episode,
+                    reason="active_track_identity_conflict",
+                    raw_similarity=raw_similarity,
+                    split_similarity=split_similarity,
+                )
                 return True
 
-        split = super()._should_split(
-            episode,
-            frame_id=frame_id,
-            team_id=team_id,
-            team_confidence=team_confidence,
-            appearance=appearance,
-        )
-        if not split:
+        if self._team_incompatible(
+            episode.team_id,
+            episode.team_confidence,
+            team_id,
+            team_confidence,
+        ):
+            episode.team_conflict_streak += 1
+        else:
+            episode.team_conflict_streak = 0
+        if episode.team_conflict_streak >= self.config.split_conflict_observations:
+            self._remember_episode_open(
+                episode,
+                reason="team_conflict",
+                raw_similarity=raw_similarity,
+                split_similarity=split_similarity,
+            )
+            return True
+
+        if (
+            split_similarity is not None
+            and split_similarity < self.config.appearance_split_similarity
+        ):
+            candidate = self._gate_d_split_candidate.get(episode.key)
+            candidate_similarity = self._cosine_similarity(candidate, split_appearance)
+            if (
+                candidate is None
+                or candidate_similarity is None
+                or candidate_similarity < self.config.appearance_plausible_similarity
+            ):
+                self._gate_d_split_candidate[episode.key] = split_appearance
+                episode.appearance_conflict_streak = 1
+            else:
+                self._gate_d_split_candidate[episode.key] = split_appearance
+                episode.appearance_conflict_streak += 1
+
+            if (
+                episode.appearance_conflict_streak
+                >= self.config.split_conflict_observations
+            ):
+                self._remember_episode_open(
+                    episode,
+                    reason="appearance_conflict",
+                    raw_similarity=raw_similarity,
+                    split_similarity=split_similarity,
+                    candidate_similarity=candidate_similarity,
+                )
+                return True
             return False
 
-        if gap > self.config.max_track_gap_frames:
-            reason = "track_gap"
-        elif episode.team_conflict_streak >= self.config.split_conflict_observations:
-            reason = "team_conflict"
-        elif episode.appearance_conflict_streak >= self.config.split_conflict_observations:
-            reason = "appearance_conflict"
-        else:
-            reason = "resolver_split"
-        self._gate_d_pending_episode_open[episode.track_id] = {
-            "reason": reason,
-            "appearance_similarity": similarity,
-        }
-        return True
+        episode.appearance_conflict_streak = 0
+        self._gate_d_split_candidate.pop(episode.key, None)
+        self._update_split_prototype(episode.key, split_appearance)
+        return False
 
     def observe(
         self,
@@ -227,6 +356,7 @@ class GateDGamePlayerResolverV1(GamePlayerResolverV1):
         simultaneous_track_ids: Iterable[int] | None = None,
     ) -> GamePlayerId | None:
         track_id = int(track_id)
+        descriptor = self._descriptor(appearance)
         previous_episode_key = self.current_episode_by_track.get(track_id)
         previous = self._gate_d_active_track_ids
         self._gate_d_active_track_ids = (
@@ -238,7 +368,7 @@ class GateDGamePlayerResolverV1(GamePlayerResolverV1):
             result = super().observe(
                 frame_id=frame_id,
                 track_id=track_id,
-                appearance=appearance,
+                appearance=descriptor,
                 team_id=team_id,
                 team_confidence=team_confidence,
                 jersey_number=jersey_number,
@@ -251,8 +381,13 @@ class GateDGamePlayerResolverV1(GamePlayerResolverV1):
                     opening = {
                         "reason": "initial_track_observation",
                         "appearance_similarity": None,
+                        "split_similarity": None,
+                        "candidate_similarity": None,
                     }
                 self._gate_d_episode_open[current_episode_key] = opening
+                self._seed_split_prototype(current_episode_key, descriptor)
+                if previous_episode_key is not None:
+                    self._gate_d_split_candidate.pop(previous_episode_key, None)
             return result
         finally:
             self._gate_d_active_track_ids = previous
@@ -288,4 +423,6 @@ class GateDGamePlayerResolverV1(GamePlayerResolverV1):
             "association_candidate_count": 0 if decision is None else decision.candidate_count,
             "episode_open_reason": opening.get("reason"),
             "episode_open_appearance_similarity": opening.get("appearance_similarity"),
+            "episode_open_split_similarity": opening.get("split_similarity"),
+            "episode_open_candidate_similarity": opening.get("candidate_similarity"),
         }
