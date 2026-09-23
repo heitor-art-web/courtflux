@@ -48,7 +48,7 @@ def test_report_builds_temporal_segments_and_entities() -> None:
                     "game_player_id": "game_player_002",
                     "appearance_available": True,
                     "association_reason": "new_entity_strong_visual_separation",
-                    "episode_open_reason": "appearance_conflict",
+                    "episode_open_reason": "appearance_conflict_raw",
                     "episode_open_appearance_similarity": 0.42,
                     "episode_open_split_similarity": 0.61,
                     "episode_open_candidate_similarity": 0.94,
@@ -59,7 +59,7 @@ def test_report_builds_temporal_segments_and_entities() -> None:
         ),
     ]
     report = build_gate_d_report(states, clip="v4")
-    assert report["version"] == "courtflux_gate_d_report_v3"
+    assert report["version"] == "courtflux_gate_d_report_v4"
     assert report["tracks"] == 1
     assert report["episodes"] == 2
     assert report["resolved_episodes"] == 2
@@ -70,13 +70,13 @@ def test_report_builds_temporal_segments_and_entities() -> None:
     assert report["segments"][0]["frame_start"] == 1
     assert report["segments"][0]["frame_end"] == 2
     assert report["segments"][1]["episode_index"] == 1
-    assert report["segments"][1]["episode_open_reason"] == "appearance_conflict"
+    assert report["segments"][1]["episode_open_reason"] == "appearance_conflict_raw"
     assert report["segments"][1]["episode_open_appearance_similarity"] == 0.42
     assert report["segments"][1]["episode_open_split_similarity"] == 0.61
     assert report["segments"][1]["episode_open_candidate_similarity"] == 0.94
     assert report["association_reason_counts"]["new_entity_no_compatible_history"] == 2
     assert report["episode_association_reason_counts"]["new_entity_no_compatible_history"] == 1
-    assert report["episode_open_reason_counts"]["appearance_conflict"] == 1
+    assert report["episode_open_reason_counts"]["appearance_conflict_raw"] == 1
 
 
 def test_episode_counts_use_final_resolution_once() -> None:
@@ -112,6 +112,46 @@ def test_episode_counts_use_final_resolution_once() -> None:
     assert report["episode_open_reason_counts"]["initial_track_observation"] == 1
     assert report["episode_association_reason_counts"]["matched_existing_entity"] == 1
     assert len(report["segments"]) == 2
+
+
+def test_report_summarizes_global_visual_shift_once_per_frame() -> None:
+    states = [
+        _state(
+            23,
+            [
+                {
+                    "track_id": 1,
+                    "episode_index": 0,
+                    "game_player_id": "game_player_001",
+                    "global_visual_shift": True,
+                    "global_visual_shift_comparable_tracks": 8,
+                    "global_visual_shift_conflicting_tracks": 4,
+                    "global_visual_shift_conflict_ratio": 0.5,
+                },
+                {
+                    "track_id": 2,
+                    "episode_index": 0,
+                    "game_player_id": "game_player_002",
+                    "global_visual_shift": True,
+                    "global_visual_shift_comparable_tracks": 8,
+                    "global_visual_shift_conflicting_tracks": 4,
+                    "global_visual_shift_conflict_ratio": 0.5,
+                },
+            ],
+        )
+    ]
+    report = build_gate_d_report(states)
+    assert report["global_visual_shift_frames"] == 1
+    assert report["global_visual_shifts"] == [
+        {
+            "frame_id": 23,
+            "timestamp_sec": 2.3,
+            "comparable_tracks": 8,
+            "conflicting_tracks": 4,
+            "conflict_ratio": 0.5,
+        }
+    ]
+    assert report["segments"][0]["global_visual_shift_observations"] == 1
 
 
 def test_report_detects_simultaneous_identity_conflict() -> None:
@@ -159,6 +199,7 @@ def test_unknown_is_reported_without_creating_entity() -> None:
 def main() -> None:
     test_report_builds_temporal_segments_and_entities()
     test_episode_counts_use_final_resolution_once()
+    test_report_summarizes_global_visual_shift_once_per_frame()
     test_report_detects_simultaneous_identity_conflict()
     test_unknown_is_reported_without_creating_entity()
     print("p2_gate_d_report_test: PASS")
