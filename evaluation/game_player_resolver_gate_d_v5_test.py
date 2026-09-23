@@ -37,6 +37,7 @@ def _resolver() -> GateDGamePlayerResolverV5:
             min_best_similarity=0.94,
             min_margin=0.025,
             max_reappearance_gap_frames=90,
+            max_reappearance_probe_observations=18,
         ),
     )
 
@@ -178,6 +179,65 @@ def test_strong_reappearance_just_beyond_normal_window_resolves_late() -> None:
     )
 
 
+def test_noisy_first_reappearance_is_probed_before_new_entity_creation() -> None:
+    resolver = _resolver()
+    first_id, _ = _seed_two_entities(resolver, second_angle=90.0)
+
+    noisy = _unit(35.0)
+    resolver.prepare_frame(frame_id=70, observations=[(3, noisy)])
+    first_result = resolver.observe(
+        frame_id=70,
+        track_id=3,
+        appearance=noisy,
+        simultaneous_track_ids=(3,),
+    )
+    assert first_result is None
+    initial = resolver.resolution(3, 70)
+    assert initial is not None
+    assert initial["association_reason"] == "unknown_stale_reappearance_probe"
+
+    stable = _unit(5.0)
+    result = first_result
+    for frame_id in range(71, 90):
+        resolver.prepare_frame(frame_id=frame_id, observations=[(3, stable)])
+        result = resolver.observe(
+            frame_id=frame_id,
+            track_id=3,
+            appearance=stable,
+            simultaneous_track_ids=(3,),
+        )
+
+    assert result == first_id
+    resolution = resolver.resolution(3, 89)
+    assert resolution is not None
+    assert (
+        resolution["association_reason"]
+        == "matched_existing_entity_deferred_reappearance"
+    )
+
+
+def test_nonmatching_reappearance_probe_eventually_creates_new_entity() -> None:
+    resolver = _resolver()
+    first_id, second_id = _seed_two_entities(resolver, second_angle=90.0)
+    target = _unit(45.0)
+
+    result = None
+    for frame_id in range(70, 95):
+        resolver.prepare_frame(frame_id=frame_id, observations=[(3, target)])
+        result = resolver.observe(
+            frame_id=frame_id,
+            track_id=3,
+            appearance=target,
+            simultaneous_track_ids=(3,),
+        )
+
+    assert result is not None
+    assert result not in {first_id, second_id}
+    resolution = resolver.resolution(3, 94)
+    assert resolution is not None
+    assert resolution["association_reason"] == "new_entity_after_reappearance_probe"
+
+
 def test_reappearance_beyond_deferred_window_keeps_base_new_entity_behavior() -> None:
     resolver = _resolver()
     first_id, second_id = _seed_two_entities(resolver, second_angle=30.0)
@@ -230,6 +290,8 @@ def main() -> None:
     test_close_persistent_ambiguity_stays_unknown()
     test_active_candidate_is_hard_rejected_from_deferred_ranking()
     test_strong_reappearance_just_beyond_normal_window_resolves_late()
+    test_noisy_first_reappearance_is_probed_before_new_entity_creation()
+    test_nonmatching_reappearance_probe_eventually_creates_new_entity()
     test_reappearance_beyond_deferred_window_keeps_base_new_entity_behavior()
     test_active_stale_candidate_is_hard_rejected()
     print("game_player_resolver_gate_d_v5_test: PASS")
