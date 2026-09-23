@@ -36,6 +36,7 @@ def _resolver() -> GateDGamePlayerResolverV5:
             min_consistent_observations=8,
             min_best_similarity=0.94,
             min_margin=0.025,
+            max_reappearance_gap_frames=90,
         ),
     )
 
@@ -141,10 +142,96 @@ def test_active_candidate_is_hard_rejected_from_deferred_ranking() -> None:
     assert second_id in ranked_ids
 
 
+def test_strong_reappearance_just_beyond_normal_window_resolves_late() -> None:
+    resolver = _resolver()
+    first_id, _ = _seed_two_entities(resolver, second_angle=30.0)
+    target = _unit(5.0)
+
+    resolver.prepare_frame(frame_id=70, observations=[(3, target)])
+    first_result = resolver.observe(
+        frame_id=70,
+        track_id=3,
+        appearance=target,
+        simultaneous_track_ids=(3,),
+    )
+    assert first_result is None
+    initial = resolver.resolution(3, 70)
+    assert initial is not None
+    assert initial["association_reason"] == "unknown_stale_reappearance_candidate"
+
+    result = first_result
+    for frame_id in range(71, 90):
+        resolver.prepare_frame(frame_id=frame_id, observations=[(3, target)])
+        result = resolver.observe(
+            frame_id=frame_id,
+            track_id=3,
+            appearance=target,
+            simultaneous_track_ids=(3,),
+        )
+
+    assert result == first_id
+    resolution = resolver.resolution(3, 89)
+    assert resolution is not None
+    assert (
+        resolution["association_reason"]
+        == "matched_existing_entity_deferred_reappearance"
+    )
+
+
+def test_reappearance_beyond_deferred_window_keeps_base_new_entity_behavior() -> None:
+    resolver = _resolver()
+    first_id, second_id = _seed_two_entities(resolver, second_angle=30.0)
+    target = _unit(5.0)
+
+    resolver.prepare_frame(frame_id=100, observations=[(3, target)])
+    result = resolver.observe(
+        frame_id=100,
+        track_id=3,
+        appearance=target,
+        simultaneous_track_ids=(3,),
+    )
+
+    assert result is not None
+    assert result not in {first_id, second_id}
+    resolution = resolver.resolution(3, 100)
+    assert resolution is not None
+    assert resolution["association_reason"] == "new_entity_no_compatible_history"
+
+
+def test_active_stale_candidate_is_hard_rejected() -> None:
+    resolver = _resolver()
+    first_id, second_id = _seed_two_entities(resolver, second_angle=30.0)
+    target = _unit(5.0)
+
+    resolver.prepare_frame(frame_id=70, observations=[(3, target)])
+    resolver.observe(
+        frame_id=70,
+        track_id=3,
+        appearance=target,
+        simultaneous_track_ids=(3,),
+    )
+    episode = resolver._episode_for_track(3)
+    assert episode is not None
+
+    previous = resolver._gate_d_active_track_ids
+    resolver._gate_d_active_track_ids = {1, 3}
+    try:
+        ranked = resolver._rank_reappearance_candidates(episode)
+    finally:
+        resolver._gate_d_active_track_ids = previous
+
+    ranked_ids = {game_player_id for _, game_player_id in ranked}
+    assert first_id not in ranked_ids
+    assert second_id in ranked_ids
+
+
 def main() -> None:
     test_persistent_strong_ambiguous_candidate_resolves_late()
     test_close_persistent_ambiguity_stays_unknown()
     test_active_candidate_is_hard_rejected_from_deferred_ranking()
+    test_strong_reappearance_just_beyond_normal_window_resolves_late()
+    test_reappearance_beyond_deferred_window_keeps_base_new_entity_behavior()
+    test_active_stale_candidate_is_hard_rejected()
     print("game_player_resolver_gate_d_v5_test: PASS")
 
 
