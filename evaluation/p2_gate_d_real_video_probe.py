@@ -119,7 +119,7 @@ def run_probe(args: argparse.Namespace) -> None:
     # merely by importing this module.
     from services.analytics import analyzer
     from services.p2.pipeline import P2Pipeline
-    from services.vision.game_player_gate_d_detector_v3 import PerformanceDetector as GateDDetector
+    from services.vision.game_player_gate_d_detector_v4 import PerformanceDetector as GateDDetector
 
     _install_gate_d_probe(analyzer, P2Pipeline, GateDDetector, clip=args.clip)
     print(
