@@ -21,8 +21,20 @@
       "clip": "v3",
       "label": "SAME",
       "human_note": "Same player across the reviewed observations. Human jersey read was #24; OCR produced #27 in at least one observation, so jersey OCR must not define identity.",
-      "mapping_status": "mapping_required",
-      "endpoints": null
+      "mapping_status": "mapped",
+      "mapping_note": "Endpoint A is the reviewed ~12s screenshot and visually overlaps track 53 at frame 360. Endpoint B was supplied as ~23s; frame 665 (22.188833s) is the nearest reviewed frame whose detector box visually overlaps the same #24 ball-handler/shooter in the screenshot, mapping to track 94. Mapping follows the reviewed person/bounding-box evidence, not current_track_id.",
+      "endpoints": [
+        {
+          "frame_id": 360,
+          "track_id": 53,
+          "episode_index": 0
+        },
+        {
+          "frame_id": 665,
+          "track_id": 94,
+          "episode_index": 0
+        }
+      ]
     },
     {
       "id": "V4-1-SAME",
