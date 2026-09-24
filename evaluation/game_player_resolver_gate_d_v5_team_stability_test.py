@@ -39,6 +39,7 @@ def _observe(
     frame_id: int,
     track_id: int = 1,
     team_id: str = "team_a",
+    team_confidence: float = 0.95,
     confirmed: bool | None = None,
     metadata_active: bool = True,
 ) -> str | None:
@@ -52,7 +53,7 @@ def _observe(
             track_id=track_id,
             appearance=APPEARANCE,
             team_id=team_id,
-            team_confidence=0.95,
+            team_confidence=team_confidence,
             simultaneous_track_ids=(track_id,),
         )
     finally:
@@ -101,6 +102,7 @@ def test_confirmed_reversal_latches_until_existing_split_rule_opens_episode() ->
     episode = resolver._episode_for_track(1)
     assert episode is not None
     assert episode.episode_index == 0
+    assert episode.team_id == "team_a"
     assert episode.team_conflict_streak == 1
 
     second = _observe(
@@ -155,12 +157,14 @@ def test_no_team_stability_metadata_preserves_legacy_v5_split_behavior() -> None
         resolver,
         frame_id=2,
         team_id="team_b",
+        team_confidence=0.90,
         metadata_active=False,
     )
     changed = _observe(
         resolver,
         frame_id=3,
         team_id="team_b",
+        team_confidence=0.90,
         metadata_active=False,
     )
     assert changed is not None
