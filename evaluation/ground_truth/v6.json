@@ -1,129 +1,219 @@
 {
-  "version": "courtflux_p2_v6_macro_review_v0",
-  "annotation_status": "macro_review_in_progress",
+  "version": "courtflux_p2_v6_validation_gt_v1",
+  "annotation_status": "a_to_c_scoring_ready_d_identity_pending",
   "evaluation_ready": false,
+  "evaluation_ready_by_gate": {
+    "gate_a_macro_gameplay_and_semantic_presence": true,
+    "gate_a_frame_exact_control_contract": false,
+    "gate_b_shot_attempts": true,
+    "gate_b_pass_turnover_rebound_constraints": true,
+    "gate_c_team_attribution": true,
+    "gate_d_identity_continuity": false
+  },
   "role": "validation_gates_a_to_d",
   "video": {
     "source": "https://www.youtube.com/watch?v=VLZugJeVOSU",
     "start_time_sec": 720.0,
     "end_time_sec": 908.0,
     "source_window": "12:00-15:08",
-    "fps": null,
-    "frame_mapping": null
+    "fps": 60.0,
+    "frame_mapping": "run_frame_id = round((source_time_sec - 720.0) * 60.0)"
+  },
+  "human_kit_audit": {
+    "team_a": {
+      "name": "Portugal",
+      "kit": "white and green",
+      "lettering": "red"
+    },
+    "team_b": {
+      "name": "Iceland",
+      "kit": "blue",
+      "lettering": "white"
+    }
   },
   "annotation_policy": {
-    "source": "human macro review supplied before V6 system scoring",
+    "source": "human macro review supplied before V6 system scoring, plus explicit corrections supplied after first V6 review",
     "unknown_preferred_over_guess": true,
     "preserve_overlaps_and_unsplit_transitions": true,
-    "note": "This file records coarse human review only. It must not be treated as frame-exact Gate A-D ground truth until ambiguous boundaries and actor identity anchors are resolved."
+    "interval_policy": "source-time intervals are half-open [start,end), except the final 908.0 endpoint",
+    "event_matching_policy": "one-to-one within the declared human block; ordered events in a shared block are matched in temporal order; extra system events remain false positives",
+    "note": "A-C scoring uses only labels explicitly supported by the human review. Missing pass counts or exact possession handoff times are not inferred. Gate A frame-exact control-state contract and Gate D identity continuity remain pending finer human labels."
   },
-  "macro_intervals": [
+  "scoring_blocks": [
     {
-      "source_time_start_sec": 720.0,
-      "source_time_end_sec": 750.0,
-      "human_note": "Quick off ball to whites possession; 2 passes; turnover; shot done",
-      "coarse_team": "white",
-      "coarse_gameplay": "gameplay"
+      "id": "P1_PORTUGAL",
+      "start_sec": 720.0,
+      "end_sec": 743.0,
+      "gameplay": "gameplay",
+      "team_id": "team_a",
+      "human_constraints": {
+        "passes": {"exact": 2},
+        "turnovers": {"exact": 1},
+        "shots": {"exact": 1}
+      }
     },
     {
-      "source_time_start_sec": 743.0,
-      "source_time_end_sec": 760.0,
-      "human_note": "Ball to blues possession and moving to attack; passes progression to the middle; shot done; defensive foul",
-      "coarse_team": "blue",
-      "coarse_gameplay": "gameplay",
-      "annotation_overlap": "Overlaps 12:23-12:30 with the preceding white-possession interval; exact possession handoff is unresolved."
+      "id": "AMB_POSSESSION_HANDOFF",
+      "start_sec": 743.0,
+      "end_sec": 750.0,
+      "gameplay": "gameplay",
+      "team_id": null,
+      "scoring_status": "gameplay_only",
+      "note": "White/blue possession handoff unresolved; excluded from team/event ownership scoring."
     },
     {
-      "source_time_start_sec": 760.0,
-      "source_time_end_sec": 780.0,
-      "human_note": "Non game play; free throw",
-      "coarse_team": null,
-      "coarse_gameplay": "non_game"
+      "id": "P2_ICELAND",
+      "start_sec": 750.0,
+      "end_sec": 760.0,
+      "gameplay": "gameplay",
+      "team_id": "team_b",
+      "human_constraints": {
+        "passes": {"min": 1},
+        "shots": {"exact": 1},
+        "fouls": {"min": 1, "kind": "defensive"}
+      }
     },
     {
-      "source_time_start_sec": 780.0,
-      "source_time_end_sec": 785.0,
-      "human_note": "Free throw scored",
-      "coarse_team": null,
-      "coarse_gameplay": "free_throw",
-      "control_state_unresolved": true
+      "id": "NG1",
+      "start_sec": 760.0,
+      "end_sec": 780.0,
+      "gameplay": "non_game",
+      "team_id": null
     },
     {
-      "source_time_start_sec": 785.0,
-      "source_time_end_sec": 800.0,
-      "human_note": "Ball to whites; possession lost",
-      "coarse_team": "white",
-      "coarse_gameplay": "gameplay"
+      "id": "FT",
+      "start_sec": 780.0,
+      "end_sec": 785.0,
+      "gameplay": "free_throw",
+      "team_id": null,
+      "scoring_status": "gate_a_control_excluded",
+      "human_constraints": {
+        "shots": {"exact": 1, "outcome": "made", "kind": "free_throw"}
+      }
     },
     {
-      "source_time_start_sec": 800.0,
-      "source_time_end_sec": 825.0,
-      "human_note": "Non game play",
-      "coarse_team": null,
-      "coarse_gameplay": "non_game"
+      "id": "P3_PORTUGAL",
+      "start_sec": 785.0,
+      "end_sec": 800.0,
+      "gameplay": "gameplay",
+      "team_id": "team_a",
+      "human_constraints": {
+        "turnovers": {"exact": 1, "note": "possession lost"}
+      }
     },
     {
-      "source_time_start_sec": 825.0,
-      "source_time_end_sec": 840.0,
-      "human_note": "Blues possession; passes; shot missed",
-      "coarse_team": "blue",
-      "coarse_gameplay": "gameplay"
+      "id": "NG2",
+      "start_sec": 800.0,
+      "end_sec": 825.0,
+      "gameplay": "non_game",
+      "team_id": null
     },
     {
-      "source_time_start_sec": 840.0,
-      "source_time_end_sec": 849.0,
-      "human_note": "Non game play",
-      "coarse_team": null,
-      "coarse_gameplay": "non_game"
+      "id": "P4_ICELAND",
+      "start_sec": 825.0,
+      "end_sec": 840.0,
+      "gameplay": "gameplay",
+      "team_id": "team_b",
+      "human_constraints": {
+        "passes": {"min": 1},
+        "shots": {"exact": 1, "outcome": "missed", "shot_time_sec": 837.0, "note": "hits rim and comes out"}
+      }
     },
     {
-      "source_time_start_sec": 849.0,
-      "source_time_end_sec": 862.0,
-      "human_note": "Ball to whites possession; passes and progression; shot done",
-      "coarse_team": "white",
-      "coarse_gameplay": "gameplay"
+      "id": "NG3",
+      "start_sec": 840.0,
+      "end_sec": 849.0,
+      "gameplay": "non_game",
+      "team_id": null
     },
     {
-      "source_time_start_sec": 862.0,
-      "source_time_end_sec": 877.0,
-      "human_note": "Ball blues possession; passes and foul",
-      "coarse_team": "blue",
-      "coarse_gameplay": "gameplay"
+      "id": "P5_PORTUGAL",
+      "start_sec": 849.0,
+      "end_sec": 862.0,
+      "gameplay": "gameplay",
+      "team_id": "team_a",
+      "human_constraints": {
+        "passes": {"min": 1},
+        "shots": {"exact": 1}
+      }
     },
     {
-      "source_time_start_sec": 877.0,
-      "source_time_end_sec": 892.0,
-      "human_note": "Non game play",
-      "coarse_team": null,
-      "coarse_gameplay": "non_game"
+      "id": "P6_ICELAND",
+      "start_sec": 862.0,
+      "end_sec": 877.0,
+      "gameplay": "gameplay",
+      "team_id": "team_b",
+      "human_constraints": {
+        "passes": {"min": 1},
+        "shots": {"exact": 0},
+        "fouls": {"exact": 1, "foul_time_sec": 876.0}
+      },
+      "explicit_negative": {
+        "shot_at_sec": 870.3,
+        "note": "No human shot at 14:30.30; system detection there is a false positive."
+      }
     },
     {
-      "source_time_start_sec": 892.0,
-      "source_time_end_sec": 908.0,
-      "human_note": "Blue possession; progression; shot missed; rebound to white counter attack; shot done",
-      "coarse_team": "blue_then_white",
-      "coarse_gameplay": "gameplay",
-      "possession_handoff_unresolved": true
+      "id": "NG4",
+      "start_sec": 877.0,
+      "end_sec": 892.0,
+      "gameplay": "non_game",
+      "team_id": null
+    },
+    {
+      "id": "P7_MIXED",
+      "start_sec": 892.0,
+      "end_sec": 908.0,
+      "gameplay": "gameplay",
+      "team_id": "team_b_then_team_a",
+      "possession_handoff_unresolved": true,
+      "human_constraints": {
+        "shots": {
+          "exact": 2,
+          "ordered": [
+            {"team_id": "team_b", "outcome": "missed"},
+            {"team_id": "team_a", "outcome": null}
+          ]
+        },
+        "rebounds": {"exact": 1, "to_team_id": "team_a"}
+      }
     }
+  ],
+  "shot_events": [
+    {"id": "S1", "block_id": "P1_PORTUGAL", "event_type": "shot_attempt", "window_start_sec": 720.0, "window_end_sec": 743.0, "team_id": "team_a", "outcome": null},
+    {"id": "S2", "block_id": "P2_ICELAND", "event_type": "shot_attempt", "window_start_sec": 750.0, "window_end_sec": 760.0, "team_id": "team_b", "outcome": null},
+    {"id": "S3_FT", "block_id": "FT", "event_type": "shot_attempt", "window_start_sec": 780.0, "window_end_sec": 785.0, "team_id": null, "outcome": "made", "kind": "free_throw"},
+    {"id": "S4", "block_id": "P4_ICELAND", "event_type": "shot_attempt", "window_start_sec": 836.0, "window_end_sec": 838.0, "team_id": "team_b", "outcome": "missed", "human_time_sec": 837.0},
+    {"id": "S5", "block_id": "P5_PORTUGAL", "event_type": "shot_attempt", "window_start_sec": 849.0, "window_end_sec": 862.0, "team_id": "team_a", "outcome": null},
+    {"id": "S6", "block_id": "P7_MIXED", "event_type": "shot_attempt", "window_start_sec": 892.0, "window_end_sec": 908.0, "team_id": "team_b", "outcome": "missed", "ordered_index": 0},
+    {"id": "S7", "block_id": "P7_MIXED", "event_type": "shot_attempt", "window_start_sec": 892.0, "window_end_sec": 908.0, "team_id": "team_a", "outcome": null, "ordered_index": 1}
+  ],
+  "gate_c_possession_blocks": [
+    "P1_PORTUGAL",
+    "P2_ICELAND",
+    "P3_PORTUGAL",
+    "P4_ICELAND",
+    "P5_PORTUGAL",
+    "P6_ICELAND"
   ],
   "unresolved_boundaries": [
     {
       "source_time_start_sec": 743.0,
       "source_time_end_sec": 750.0,
       "reason": "overlapping human possession notes",
-      "note": "White and blue possession windows overlap. Preserve as ambiguous until the exact turnover/handoff is reviewed."
+      "note": "White and blue possession windows overlap. Team ownership is excluded here, while gameplay status remains scorable."
     },
     {
       "source_time_start_sec": 780.0,
       "source_time_end_sec": 785.0,
       "reason": "free_throw_control_semantics_not_frozen",
-      "note": "Free throw is recorded as human context/event; do not silently force gameplay/non-gameplay or shot_flight semantics."
+      "note": "Free throw event is scorable for Gate B; Gate A control-state semantics remain excluded."
     },
     {
       "source_time_start_sec": 892.0,
       "source_time_end_sec": 908.0,
       "reason": "multiple_possessions_in_one_coarse_window",
-      "note": "Exact rebound and blue-to-white possession handoff time is not yet annotated."
+      "note": "Blue shot, rebound to white, then white shot are ordered, but exact possession handoff time is not annotated; block excluded from Gate C possession-frame scoring."
     }
   ],
   "human_source_notes": [
@@ -138,7 +228,9 @@
     "14:09-14:22 ball to whites possession passes and progression shot done",
     "14:22-14:37 ball blues possession passes and foul",
     "14:37-14:52 non game play",
-    "14:52-15:08 blue possession, progression shot missed, rebounding to white counter attack shot done"
+    "14:52-15:08 blue possession, progression shot missed, rebounding to white counter attack shot done",
+    "Correction: shot missed at 13:57; ball hits the rim and comes out",
+    "Correction: no shot at 14:30.30; foul at 14:36"
   ],
   "notes": [
     "V6 is a validation clip for Gates A-D, not a development/tuning clip.",
