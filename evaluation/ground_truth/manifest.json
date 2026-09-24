@@ -1,5 +1,5 @@
 {
-  "version": "courtflux_p2_gt_manifest_v2",
+  "version": "courtflux_p2_gt_manifest_v3",
   "frozen_on": "2026-09-16",
   "branch": "validation/p2-gt-calibration",
   "motor_policy": "basketball thresholds frozen until reviewed human GT is evaluated",
@@ -7,10 +7,12 @@
   "validation_policy": {
     "development_normal": ["V1", "V3", "V4", "V5"],
     "development_challenge_outlier": ["V2"],
-    "final_exit_gate_unseen": ["V6", "V7"],
+    "validation_gates_a_to_d": ["V6"],
+    "final_exit_gate_unseen": ["V7"],
     "v2_blocking": false,
     "v2_reporting": "always_report_as_challenge_regression",
-    "v6_v7_policy": "untouched_until_gates_A_D_and_all_P2_development_decisions_are_frozen; evaluate_once_as_final_exit_gate"
+    "v6_policy": "validation_only_for_gates_A_D; do_not_tune_thresholds_on_v6; fixes_must_be_developed_on_V1_V5_then_re_evaluated_on_V6",
+    "v7_policy": "untouched_until_gates_A_D_and_all_P2_development_decisions_are_frozen; evaluate_once_as_final_exit_gate"
   },
   "clips": [
     {
@@ -74,6 +76,30 @@
       "match_config": "evaluation/match_configs/unknown.json",
       "targets": ["control_state", "possession", "loose_ball", "shot", "shooter"],
       "gt_file": "evaluation/ground_truth/v5.json"
+    },
+    {
+      "id": "V6",
+      "validation_role": "validation_gates_a_to_d",
+      "video_id": "VLZugJeVOSU",
+      "source": "https://www.youtube.com/watch?v=VLZugJeVOSU",
+      "start_time_sec": 720.0,
+      "end_time_sec": 908.0,
+      "team_context": "neutral",
+      "match_config": "evaluation/match_configs/unknown.json",
+      "targets": [
+        "control_state",
+        "possession",
+        "loose_ball",
+        "shot",
+        "pass",
+        "turnover",
+        "team_attribution",
+        "game_player_identity",
+        "event_to_game_player_attribution",
+        "runtime_performance"
+      ],
+      "gt_file": "evaluation/ground_truth/v6.json",
+      "note": "Validation clip for Gates A-D over 12:00-15:08. Macro human review is present; frame-exact control/event and Gate-D identity anchors remain to be completed before formal scoring."
     },
     {
       "id": "PORTO_OVARENSE_60S",
