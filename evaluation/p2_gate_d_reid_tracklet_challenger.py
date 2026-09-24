@@ -3,12 +3,17 @@ from __future__ import annotations
 import argparse
 import json
 import math
+import sys
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
 import cv2
 import numpy as np
+
+PROJECT_ROOT = Path(__file__).resolve().parent.parent
+if str(PROJECT_ROOT) not in sys.path:
+    sys.path.insert(0, str(PROJECT_ROOT))
 
 from evaluation.p2_gate_d_reid_challenger import (
     build_osnet_extractor,
@@ -134,7 +139,6 @@ def collect_tracklet_samples(
             f"No tracklet samples for frame={endpoint_frame} track={track_id} episode={episode_index}"
         )
 
-    # Prefer large, isolated, person-shaped crops, while retaining temporal diversity.
     candidates.sort(key=lambda item: (item[0], -abs(item[2] - endpoint_ts)), reverse=True)
     selected: list[tuple[float, int, float, tuple[int, int, int, int], float]] = []
     for candidate in candidates:
