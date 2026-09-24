@@ -1,0 +1,149 @@
+{
+  "version": "courtflux_p2_v6_macro_review_v0",
+  "annotation_status": "macro_review_in_progress",
+  "evaluation_ready": false,
+  "role": "validation_gates_a_to_d",
+  "video": {
+    "source": "https://www.youtube.com/watch?v=VLZugJeVOSU",
+    "start_time_sec": 720.0,
+    "end_time_sec": 908.0,
+    "source_window": "12:00-15:08",
+    "fps": null,
+    "frame_mapping": null
+  },
+  "annotation_policy": {
+    "source": "human macro review supplied before V6 system scoring",
+    "unknown_preferred_over_guess": true,
+    "preserve_overlaps_and_unsplit_transitions": true,
+    "note": "This file records coarse human review only. It must not be treated as frame-exact Gate A-D ground truth until ambiguous boundaries and actor identity anchors are resolved."
+  },
+  "macro_intervals": [
+    {
+      "source_time_start_sec": 720.0,
+      "source_time_end_sec": 750.0,
+      "human_note": "Quick off ball to whites possession; 2 passes; turnover; shot done",
+      "coarse_team": "white",
+      "coarse_gameplay": "gameplay"
+    },
+    {
+      "source_time_start_sec": 743.0,
+      "source_time_end_sec": 760.0,
+      "human_note": "Ball to blues possession and moving to attack; passes progression to the middle; shot done; defensive foul",
+      "coarse_team": "blue",
+      "coarse_gameplay": "gameplay",
+      "annotation_overlap": "Overlaps 12:23-12:30 with the preceding white-possession interval; exact possession handoff is unresolved."
+    },
+    {
+      "source_time_start_sec": 760.0,
+      "source_time_end_sec": 780.0,
+      "human_note": "Non game play; free throw",
+      "coarse_team": null,
+      "coarse_gameplay": "non_game"
+    },
+    {
+      "source_time_start_sec": 780.0,
+      "source_time_end_sec": 785.0,
+      "human_note": "Free throw scored",
+      "coarse_team": null,
+      "coarse_gameplay": "free_throw",
+      "control_state_unresolved": true
+    },
+    {
+      "source_time_start_sec": 785.0,
+      "source_time_end_sec": 800.0,
+      "human_note": "Ball to whites; possession lost",
+      "coarse_team": "white",
+      "coarse_gameplay": "gameplay"
+    },
+    {
+      "source_time_start_sec": 800.0,
+      "source_time_end_sec": 825.0,
+      "human_note": "Non game play",
+      "coarse_team": null,
+      "coarse_gameplay": "non_game"
+    },
+    {
+      "source_time_start_sec": 825.0,
+      "source_time_end_sec": 840.0,
+      "human_note": "Blues possession; passes; shot missed",
+      "coarse_team": "blue",
+      "coarse_gameplay": "gameplay"
+    },
+    {
+      "source_time_start_sec": 840.0,
+      "source_time_end_sec": 849.0,
+      "human_note": "Non game play",
+      "coarse_team": null,
+      "coarse_gameplay": "non_game"
+    },
+    {
+      "source_time_start_sec": 849.0,
+      "source_time_end_sec": 862.0,
+      "human_note": "Ball to whites possession; passes and progression; shot done",
+      "coarse_team": "white",
+      "coarse_gameplay": "gameplay"
+    },
+    {
+      "source_time_start_sec": 862.0,
+      "source_time_end_sec": 877.0,
+      "human_note": "Ball blues possession; passes and foul",
+      "coarse_team": "blue",
+      "coarse_gameplay": "gameplay"
+    },
+    {
+      "source_time_start_sec": 877.0,
+      "source_time_end_sec": 892.0,
+      "human_note": "Non game play",
+      "coarse_team": null,
+      "coarse_gameplay": "non_game"
+    },
+    {
+      "source_time_start_sec": 892.0,
+      "source_time_end_sec": 908.0,
+      "human_note": "Blue possession; progression; shot missed; rebound to white counter attack; shot done",
+      "coarse_team": "blue_then_white",
+      "coarse_gameplay": "gameplay",
+      "possession_handoff_unresolved": true
+    }
+  ],
+  "unresolved_boundaries": [
+    {
+      "source_time_start_sec": 743.0,
+      "source_time_end_sec": 750.0,
+      "reason": "overlapping human possession notes",
+      "note": "White and blue possession windows overlap. Preserve as ambiguous until the exact turnover/handoff is reviewed."
+    },
+    {
+      "source_time_start_sec": 780.0,
+      "source_time_end_sec": 785.0,
+      "reason": "free_throw_control_semantics_not_frozen",
+      "note": "Free throw is recorded as human context/event; do not silently force gameplay/non-gameplay or shot_flight semantics."
+    },
+    {
+      "source_time_start_sec": 892.0,
+      "source_time_end_sec": 908.0,
+      "reason": "multiple_possessions_in_one_coarse_window",
+      "note": "Exact rebound and blue-to-white possession handoff time is not yet annotated."
+    }
+  ],
+  "human_source_notes": [
+    "12:00-12:30 Quick off ball to whites possession, 2 passe turnover and shot done",
+    "12:23-12:40 Ball to blues possession and moving to attack, passes progression to the middle and shot done. Defensive foul",
+    "12:40-13:00 non game play, free throw",
+    "13:00-13:05 Free throw scored",
+    "13:05-13:20 ball to whites, possession lost",
+    "13:20-13:45 non game play",
+    "13:45-14:00 blues possession passes, shot missed",
+    "14:00-14:09 non game play",
+    "14:09-14:22 ball to whites possession passes and progression shot done",
+    "14:22-14:37 ball blues possession passes and foul",
+    "14:37-14:52 non game play",
+    "14:52-15:08 blue possession, progression shot missed, rebounding to white counter attack shot done"
+  ],
+  "notes": [
+    "V6 is a validation clip for Gates A-D, not a development/tuning clip.",
+    "V7 remains reserved for the final unseen Exit Gate.",
+    "Do not tune thresholds from V6 outcomes; fixes discovered on V6 should be developed against V1-V5 and then re-evaluated on V6.",
+    "Gate D still requires explicit human SAME/DIFFERENT identity anchors on V6 before formal identity continuity recall/false-merge scoring can be claimed."
+  ]
+}
