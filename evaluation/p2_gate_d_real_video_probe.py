@@ -14,12 +14,14 @@ if str(PROJECT_ROOT) not in sys.path:
 from evaluation.p2_gate_d_report import build_gate_d_report
 
 DEV_CLIPS = ("v1", "v2", "v3", "v4", "v5")
+VALIDATION_CLIPS = ("v6",)
+SUPPORTED_CLIPS = DEV_CLIPS + VALIDATION_CLIPS
 DEFAULT_NEUTRAL_MATCH_CONFIG = "evaluation/match_configs/unknown.json"
 
 
 def _clip_defaults(clip: str) -> dict[str, Any]:
-    if clip not in DEV_CLIPS:
-        raise ValueError(f"Gate-D development clip must be one of {DEV_CLIPS}")
+    if clip not in SUPPORTED_CLIPS:
+        raise ValueError(f"Gate-D clip must be one of {SUPPORTED_CLIPS}")
     path = PROJECT_ROOT / "evaluation" / "ground_truth" / f"{clip}.json"
     payload = json.loads(path.read_text(encoding="utf-8"))
     video = dict(payload.get("video", {}) or {})
@@ -28,8 +30,20 @@ def _clip_defaults(clip: str) -> dict[str, Any]:
         "video": str(video["source"]),
         "start": float(video.get("start_time_sec", 0.0) or 0.0),
         "end": float(video["end_time_sec"]),
-        "match_config": str(match_config.relative_to(PROJECT_ROOT)) if match_config.exists() else DEFAULT_NEUTRAL_MATCH_CONFIG,
+        "match_config": (
+            str(match_config.relative_to(PROJECT_ROOT))
+            if match_config.exists()
+            else DEFAULT_NEUTRAL_MATCH_CONFIG
+        ),
     }
+
+
+def _clip_status(clip: str) -> str:
+    if clip == "v2":
+        return "challenge_non_blocking"
+    if clip in VALIDATION_CLIPS:
+        return "validation"
+    return "development"
 
 
 def _install_gate_d_probe(
@@ -81,13 +95,15 @@ def _install_gate_d_probe(
         payload["p2_gate_d_report_file"] = str(report_path)
         payload["p2_gate_d"] = {
             "clip": clip,
-            "development_corpus": True,
+            "development_corpus": clip in DEV_CLIPS,
+            "validation_clip": clip in VALIDATION_CLIPS,
             "exit_gate_unseen": False,
             "report_file": str(report_path),
             "simultaneous_identity_conflicts": report["invariants"][
                 "simultaneous_same_game_player_conflicts"
             ],
             "resolved_observation_rate": report["resolved_observation_rate"],
+            "resolved_episode_rate": report["resolved_episode_rate"],
         }
         summary_path.write_text(
             json.dumps(payload, indent=2, ensure_ascii=False) + "\n",
@@ -131,7 +147,7 @@ def run_probe(args: argparse.Namespace) -> None:
                 "start": start,
                 "end": end,
                 "match_config": match_config,
-                "status": "challenge_non_blocking" if args.clip == "v2" else "development",
+                "status": _clip_status(args.clip),
             },
             separators=(",", ":"),
         ),
@@ -158,11 +174,12 @@ def run_probe(args: argparse.Namespace) -> None:
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         description=(
-            "Run the Gate-D game-player resolver on development clips V1-V5 only. "
-            "V6/V7 are intentionally not addressable by this tool."
+            "Run the Gate-D game-player resolver on development clips V1-V5 or the V6 "
+            "A-D validation clip. V7 remains intentionally unavailable to preserve the "
+            "final unseen Exit Gate."
         )
     )
-    parser.add_argument("--clip", required=True, choices=DEV_CLIPS)
+    parser.add_argument("--clip", required=True, choices=SUPPORTED_CLIPS)
     parser.add_argument("--video", help="Optional override for the frozen clip source.")
     parser.add_argument("--start", type=float)
     parser.add_argument("--end", type=float)
