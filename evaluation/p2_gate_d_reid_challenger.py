@@ -259,7 +259,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--video", required=True, type=Path)
     parser.add_argument("--states", required=True, type=Path)
     parser.add_argument("--model-path", required=True, type=Path)
-    parser.add_argument("--device", choices=("cpu", "cuda"), default="cpu")
+    parser.add_argument("--device", choices=("cpu", "cuda", "mps"), default="cpu")
     parser.add_argument(
         "--observations",
         type=Path,
