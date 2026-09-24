@@ -210,10 +210,10 @@ def build_gate_d_report(state_rows: Iterable[dict[str, Any]], *, clip: str | Non
         },
         "note": (
             "This report exposes resolver output for the existing human Gate-D observations; "
-            "it does not invent or replace the frozen SAME/DIFFERENT labels. Observation "
-            "reason counts are diagnostic volume; episode reason counts describe final "
-            "decisions once per (track_id, episode_index). Global visual shifts are "
-            "frame-cohort diagnostics used only to suppress appearance-driven fragmentation."
+            "it does not invent or replace frozen SAME/DIFFERENT labels. Observation reason "
+            "counts are diagnostic volume; episode reason counts describe final decisions once "
+            "per (track_id, episode_index). Global visual shifts are frame-cohort diagnostics "
+            "used only to suppress appearance-driven fragmentation."
         ),
     }
 
@@ -274,7 +274,7 @@ def read_jsonl(path: Path) -> list[dict[str, Any]]:
 def main() -> None:
     parser = argparse.ArgumentParser(description="Summarize Gate-D game-player diagnostics from p2_states.jsonl.")
     parser.add_argument("states", type=Path)
-    parser.add_argument("--clip", choices=("v1", "v2", "v3", "v4", "v5"))
+    parser.add_argument("--clip", choices=("v1", "v2", "v3", "v4", "v5", "v6"))
     parser.add_argument("--output", type=Path)
     args = parser.parse_args()
 
