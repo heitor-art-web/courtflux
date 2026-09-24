@@ -18,6 +18,7 @@ class GateDTeamStableGamePlayerResolverV5(GateDGamePlayerResolverV5):
       Identity-v2 reports ``recent_reversal_confirmed``;
     * once confirmed, the opposite team is latched long enough for the existing Gate-D
       ``split_conflict_observations`` rule to do its normal work;
+    * the established episode team is not overwritten before that split decision completes;
     * appearance conflicts, track gaps and active simultaneous-identity conflicts remain
       independent split causes and keep the raw incoming team on a newly opened episode;
     * cross-track hard team incompatibility is unchanged;
@@ -29,7 +30,7 @@ class GateDTeamStableGamePlayerResolverV5(GateDGamePlayerResolverV5):
         self._gate_d_team_change_confirmation: dict[int, bool] | None = None
         self._gate_d_pending_unconfirmed_team: dict[int, str] = {}
         self._gate_d_confirmed_team_latch: dict[int, str] = {}
-        self._gate_d_suppressed_team_observation: dict[
+        self._gate_d_restore_stable_team_observation: dict[
             int, tuple[EpisodeKey, str | None, float]
         ] = {}
 
@@ -40,12 +41,12 @@ class GateDTeamStableGamePlayerResolverV5(GateDGamePlayerResolverV5):
             for track_id, confirmed in confirmations.items()
             if int(track_id) >= 0
         }
-        self._gate_d_suppressed_team_observation.clear()
+        self._gate_d_restore_stable_team_observation.clear()
 
     def clear_team_stability(self) -> None:
         """End the current detector observation pass without dropping cross-frame memory."""
         self._gate_d_team_change_confirmation = None
-        self._gate_d_suppressed_team_observation.clear()
+        self._gate_d_restore_stable_team_observation.clear()
 
     def _team_change_signal(self, track_id: int) -> bool | None:
         current = self._gate_d_team_change_confirmation
@@ -60,6 +61,7 @@ class GateDTeamStableGamePlayerResolverV5(GateDGamePlayerResolverV5):
         team_id: str | None,
         team_confidence: float,
     ) -> tuple[str | None, float, bool]:
+        """Return team evidence for split evaluation and whether stable team must restore."""
         track_id = int(episode.track_id)
         incoming_team = None if team_id is None else str(team_id)
 
@@ -83,13 +85,17 @@ class GateDTeamStableGamePlayerResolverV5(GateDGamePlayerResolverV5):
         if signal is True:
             self._gate_d_confirmed_team_latch[track_id] = incoming_team
             self._gate_d_pending_unconfirmed_team.pop(track_id, None)
-            return team_id, team_confidence, False
+            # Let the existing team-conflict streak see the confirmed opposite team, but
+            # restore the stable episode team if this observation alone is not enough to
+            # open the new episode. Otherwise the base update would overwrite the old team
+            # and erase the conflict before the next observation.
+            return team_id, team_confidence, True
 
         # Confirmation is a one-frame event in Identity-v2 diagnostics. Once observed,
         # keep accepting that same opposite team until the existing Gate-D conflict
         # streak either opens an episode or the classifier returns to the established team.
         if self._gate_d_confirmed_team_latch.get(track_id) == incoming_team:
-            return team_id, team_confidence, False
+            return team_id, team_confidence, True
 
         if signal is False:
             self._gate_d_pending_unconfirmed_team[track_id] = incoming_team
@@ -98,8 +104,8 @@ class GateDTeamStableGamePlayerResolverV5(GateDGamePlayerResolverV5):
             # preserve legacy behavior rather than silently inventing a confirmation state.
             return team_id, team_confidence, False
 
-        # Hold the episode's established team for split evaluation. observe() restores the
-        # same stable team after the base resolver's normal update if no independent split
+        # Hold the episode's established team for split evaluation. observe() also restores
+        # that stable team after the base resolver's normal update if no independent split
         # (appearance/gap/active identity) occurred.
         return episode.team_id, episode.team_confidence, True
 
@@ -113,13 +119,13 @@ class GateDTeamStableGamePlayerResolverV5(GateDGamePlayerResolverV5):
         appearance: tuple[float, ...] | None,
         active_track_ids: set[int] | None = None,
     ) -> bool:
-        stable_team, stable_confidence, suppressed = self._team_observation_for_split(
+        split_team, split_confidence, restore_stable = self._team_observation_for_split(
             episode,
             team_id=team_id,
             team_confidence=team_confidence,
         )
-        if suppressed:
-            self._gate_d_suppressed_team_observation[int(episode.track_id)] = (
+        if restore_stable:
+            self._gate_d_restore_stable_team_observation[int(episode.track_id)] = (
                 episode.key,
                 episode.team_id,
                 float(episode.team_confidence),
@@ -127,8 +133,8 @@ class GateDTeamStableGamePlayerResolverV5(GateDGamePlayerResolverV5):
         return super()._should_split(
             episode,
             frame_id=frame_id,
-            team_id=stable_team,
-            team_confidence=stable_confidence,
+            team_id=split_team,
+            team_confidence=split_confidence,
             appearance=appearance,
             active_track_ids=active_track_ids,
         )
@@ -158,17 +164,17 @@ class GateDTeamStableGamePlayerResolverV5(GateDGamePlayerResolverV5):
             simultaneous_track_ids=simultaneous_track_ids,
         )
         current_episode_key = self.current_episode_by_track.get(track_id)
-        suppressed = self._gate_d_suppressed_team_observation.pop(track_id, None)
+        restore = self._gate_d_restore_stable_team_observation.pop(track_id, None)
 
         if (
-            suppressed is not None
+            restore is not None
             and previous_episode_key is not None
-            and current_episode_key == previous_episode_key == suppressed[0]
+            and current_episode_key == previous_episode_key == restore[0]
         ):
             episode = self.episodes.get(current_episode_key)
             if episode is not None:
-                episode.team_id = suppressed[1]
-                episode.team_confidence = float(suppressed[2])
+                episode.team_id = restore[1]
+                episode.team_confidence = float(restore[2])
                 if episode.game_player_id is not None:
                     self._rebuild_entity(episode.game_player_id)
 
