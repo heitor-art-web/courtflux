@@ -44,10 +44,13 @@
       "id": "V4-1-DIFFERENT",
       "clip": "v4",
       "label": "DIFFERENT",
-      "human_note": "Around 21s, the reviewed observation is a different player from the later 22-23s same-player observation despite raw track continuity.",
-      "mapping_status": "mapping_required",
-      "temporal_hint_sec": [20.5, 21.9],
-      "endpoints": null
+      "human_note": "Human re-review confirmed the raw-track identity switch around 21.77s: the pre-split crop is the yellow player in the central overlap, while the post-split crop is blue #0. They are different people despite raw track_id continuity.",
+      "mapping_status": "mapped",
+      "mapping_note": "Endpoint A is frame 1306 (21.766667s), track 60 episode 0, immediately before the appearance-conflict split. Endpoint B is frame 1307 (21.783333s), the same raw track 60 episode 1, immediately after the split; the reviewed screenshots confirm yellow player -> blue #0.",
+      "endpoints": [
+        {"frame_id": 1306, "track_id": 60, "episode_index": 0},
+        {"frame_id": 1307, "track_id": 60, "episode_index": 1}
+      ]
     },
     {
       "id": "V5-1",
