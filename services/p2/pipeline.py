@@ -4,6 +4,7 @@ import os
 from typing import Any
 
 from services.p2.engine_v6_batch import P2EngineV6Batch
+from services.p2.shot_event_tracker_v1_3 import ShotEventTrackerV13
 from services.pipeline import Pipeline
 from services.vision.court_state_gameplay_v3 import CourtStateEstimatorV3
 
@@ -12,8 +13,8 @@ class P2Pipeline(Pipeline):
     """Compatibility wrapper that forces the canonical Pipeline's P2 stage on.
 
     The V6 validation branch keeps all batch changes behind this P2-only wrapper:
-    CourtState gameplay policy V3 plus the V6 engine coordinator. The base Pipeline and
-    non-P2 runtime remain unchanged.
+    CourtState gameplay policy V3 plus the V6 engine coordinator and V1.3 shot tracker.
+    The base Pipeline and non-P2 runtime remain unchanged.
     """
 
     def __init__(self, *args: Any, p2_enabled: bool | None = None, **kwargs: Any) -> None:
@@ -32,9 +33,10 @@ class P2Pipeline(Pipeline):
     def process(self, frame_state: Any):
         # The base Pipeline instantiates its frozen P2EngineV1 only when p2_engine is None.
         # Preinstall the V6 coordinator here so the isolated P2 validation path uses the
-        # batch without changing the global Pipeline contract.
+        # batch without changing the global Pipeline contract. V1.3 is installed explicitly
+        # because P2EngineV6Batch inherits P2EngineV1's default V1 tracker construction.
         if self.p2_enabled and self.p2_engine is None:
-            self.p2_engine = P2EngineV6Batch(
-                fps=float(getattr(frame_state, "fps", 30.0) or 30.0)
-            )
+            fps = float(getattr(frame_state, "fps", 30.0) or 30.0)
+            self.p2_engine = P2EngineV6Batch(fps=fps)
+            self.p2_engine.shot_tracker = ShotEventTrackerV13(fps=fps)
         return super().process(frame_state)
