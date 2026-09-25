@@ -20,7 +20,7 @@ class ShotEventTrackerV13(ShotEventTrackerV12):
       not published as a shot attempt (the V6 870.3 false positive);
     * a deferred rim exit with tight mouth alignment, coherent geometry and sustained
       downward/below-rim evidence may confirm MADE (the V6 free throw);
-    * a long, well-observed above+rim-band attempt that expires without made evidence is
+    * a well-observed above+rim-band attempt that expires without made evidence is
       resolved MISSED, enabling the existing possession-driven rebound path.
 
     Rearm is causal in V1.3: direct visual clearance is still required, but a new shot is
@@ -28,7 +28,7 @@ class ShotEventTrackerV13(ShotEventTrackerV12):
     """
 
     OUTCOME_POLICY_REVISION = "shot_outcome_v1_3_v6_batch"
-    MIN_STRONG_EXPIRY_OBSERVATIONS = 12
+    MIN_STRONG_EXPIRY_OBSERVATIONS = 8
     DEFERRED_TIGHT_MOUTH_MAX_X_RIM_WIDTHS = 0.25
     DEFERRED_MIN_BELOW_OBSERVATIONS = 3
     DEFERRED_MIN_DESCENDING_STEPS = 3
