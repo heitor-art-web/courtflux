@@ -31,6 +31,19 @@ def _shot_event(**attributes) -> BasketballEvent:
     )
 
 
+def _observed_ball(frame_id: int = 120) -> BallState:
+    return BallState(
+        frame_id=frame_id,
+        timestamp_sec=frame_id / 60.0,
+        status=BallStateStatus.OBSERVED,
+        x_px=20.0,
+        y_px=20.0,
+        confidence=0.9,
+        uncertainty=0.1,
+        source="test",
+    )
+
+
 def test_v6_a_hysteresis_contract() -> None:
     estimator = CourtStateEstimatorV3()
     assert estimator.non_gameplay_enter_sec == 3.0
@@ -83,13 +96,13 @@ def test_v6_b_unconfirmed_trajectory_start_is_not_published() -> None:
     assert tracker.diagnostics()["suppressed_public_shots"] == 1
 
 
-def test_v6_b_strong_rim_expiry_becomes_miss() -> None:
+def test_v6_b_eight_direct_rim_observations_are_enough_for_miss() -> None:
     tracker = ShotEventTrackerV13(fps=60.0)
     event = _shot_event(
         semantic_start=False,
         had_above_rim=True,
         had_rim_band=True,
-        direct_ball_observations=30,
+        direct_ball_observations=8,
         resolution_reason="shot_window_expired_without_outcome_evidence",
         pending_bridge_used=False,
     )
@@ -132,6 +145,38 @@ def test_v6_b_supported_flight_can_bridge_at_rim_band() -> None:
     assert diagnostics["supported_flight_bridge_starts"] == 1
 
 
+def test_v6_b_rearm_requires_post_shot_control_reacquisition() -> None:
+    tracker = ShotEventTrackerV13(fps=60.0)
+    tracker._awaiting_rearm = True
+    tracker._last_resolved_frame = 100
+    tracker._rearm_clear_frames = tracker.rearm_clear_observed_frames
+    relative = {
+        "above": False,
+        "near_x": False,
+        "rim_band": False,
+        "below": False,
+        "inside_mouth": False,
+    }
+    assert tracker._update_rearm(
+        frame_id=120,
+        ball_state=_observed_ball(120),
+        relative=relative,
+        semantic_start=False,
+        trajectory_start=False,
+    ) is False
+    assert tracker._awaiting_rearm is True
+
+    tracker.confirm_control_reacquisition(119)
+    assert tracker._update_rearm(
+        frame_id=121,
+        ball_state=_observed_ball(121),
+        relative=relative,
+        semantic_start=False,
+        trajectory_start=False,
+    ) is True
+    assert tracker._awaiting_rearm is False
+
+
 def test_v6_c_exact_actor_snapshot_can_publish_team() -> None:
     engine = P2EngineV6Batch(fps=60.0)
     engine._v6_team_evidence = {416: ("team_b", 0.97)}
@@ -141,6 +186,22 @@ def test_v6_c_exact_actor_snapshot_can_publish_team() -> None:
     assert confidence == 0.97
     assert age == 0
     assert source == "exact_actor_current_player_team"
+
+
+def test_v6_c_actor_team_snapshot_is_frozen_at_release() -> None:
+    engine = P2EngineV6Batch(fps=60.0)
+    engine._pre_release_team_snapshot_source = "exact_actor_current_player_team"
+    engine._pre_release_team_snapshot_confidence = 0.97
+    engine._pre_release_team_snapshot_age_frames = 0
+    engine._freeze_pre_release_snapshot_for_active_shot()
+
+    engine._pre_release_team_snapshot_source = "unknown"
+    engine._pre_release_team_snapshot_confidence = 0.0
+    engine._pre_release_team_snapshot_age_frames = None
+    source, confidence, age = engine._shot_snapshot_for_publication()
+    assert source == "exact_actor_current_player_team"
+    assert confidence == 0.97
+    assert age == 0
 
 
 def test_v6_d_limited_empty_scope_bootstrap_is_bounded() -> None:
@@ -188,9 +249,11 @@ def main() -> None:
     test_v6_b_ft_single_mouth_plus_descent_confirms_made()
     test_v6_b_incoherent_deferred_geometry_still_abstains()
     test_v6_b_unconfirmed_trajectory_start_is_not_published()
-    test_v6_b_strong_rim_expiry_becomes_miss()
+    test_v6_b_eight_direct_rim_observations_are_enough_for_miss()
     test_v6_b_supported_flight_can_bridge_at_rim_band()
+    test_v6_b_rearm_requires_post_shot_control_reacquisition()
     test_v6_c_exact_actor_snapshot_can_publish_team()
+    test_v6_c_actor_team_snapshot_is_frozen_at_release()
     test_v6_d_limited_empty_scope_bootstrap_is_bounded()
     print("p2_v6_abcd_batch_test: PASS")
 
