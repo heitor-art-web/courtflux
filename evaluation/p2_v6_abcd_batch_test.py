@@ -142,7 +142,7 @@ def test_v6_c_exact_actor_snapshot_can_publish_team() -> None:
     assert team == "team_b"
     assert confidence == 0.97
     assert age == 0
-    assert source == "exact_actor_player_state"
+    assert source == "exact_actor_current_player_team"
 
 
 def test_v6_d_limited_empty_scope_bootstrap_is_bounded() -> None:
