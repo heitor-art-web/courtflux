@@ -1,0 +1,35 @@
+name: V6 A-D Batch Check
+
+on:
+  push:
+    branches:
+      - validation/v6-abcd-batch-20260925
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  v6-focused:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.11"
+      - name: Install focused runtime dependencies
+        run: python -m pip install numpy opencv-python-headless
+      - name: Compile V6 batch
+        run: >-
+          python -m compileall -q
+          services/p2/shot_event_tracker_v1_3.py
+          services/p2/engine_v6_batch.py
+          services/p2/pipeline.py
+          services/vision/court_state_gameplay_v3.py
+          services/vision/gate_d_limited_scope_v6.py
+          services/vision/game_player_gate_d_detector_v6.py
+          evaluation/p2_gate_d_real_video_probe.py
+          evaluation/p2_v6_abcd_batch_test.py
+      - name: Run focused V6 A-D checks
+        run: python evaluation/p2_v6_abcd_batch_test.py
