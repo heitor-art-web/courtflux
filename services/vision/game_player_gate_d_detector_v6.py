@@ -4,6 +4,7 @@ from typing import Any
 
 from services.vision.court_state_gameplay_v3 import CourtStateEstimatorV3
 from services.vision.game_player_gate_d_detector_v5 import PerformanceDetector as GateDDetectorV5
+from services.vision.gate_d_limited_scope_v6 import select_limited_bootstrap_candidates
 
 
 class PerformanceDetector(GateDDetectorV5):
@@ -19,12 +20,6 @@ class PerformanceDetector(GateDDetectorV5):
     court evidence says they are plausible on-court observations.
     """
 
-    LIMITED_BOOTSTRAP_MAX_PLAYERS = 8
-    LIMITED_BOOTSTRAP_MIN_PLAYER_CONFIDENCE = 0.82
-    LIMITED_BOOTSTRAP_MIN_SURFACE_RATIO = 0.18
-    LIMITED_BOOTSTRAP_STRONG_SURFACE_RATIO = 0.30
-    LIMITED_BOOTSTRAP_MIN_TEAM_CONFIDENCE = 0.80
-
     def __init__(self, *args: Any, **kwargs: Any) -> None:
         super().__init__(*args, **kwargs)
         self.identity_court_estimator = CourtStateEstimatorV3()
@@ -38,63 +33,13 @@ class PerformanceDetector(GateDDetectorV5):
             flush=True,
         )
 
-    @classmethod
+    @staticmethod
     def _gate_d_limited_bootstrap_candidates(
-        cls,
         frame_state: Any,
     ) -> list[dict[str, Any]]:
-        ranked: list[tuple[float, float, float, dict[str, Any]]] = []
-        for player in list(getattr(frame_state, "players", []) or []):
-            if not isinstance(player, dict):
-                continue
-            if player.get("active_on_court") is False:
-                continue
-            if player.get("identity_eligible") is False:
-                continue
-
-            try:
-                confidence = float(player.get("confidence", 0.0) or 0.0)
-                surface_ratio = float(player.get("local_court_surface_ratio", 0.0) or 0.0)
-                team_confidence = float(player.get("team_confidence", 0.0) or 0.0)
-            except (TypeError, ValueError):
-                continue
-            if confidence < cls.LIMITED_BOOTSTRAP_MIN_PLAYER_CONFIDENCE:
-                continue
-            if surface_ratio < cls.LIMITED_BOOTSTRAP_MIN_SURFACE_RATIO:
-                continue
-
-            source = str(player.get("court_eligibility_source") or "")
-            strong_court = bool(
-                source == "image_space_court_surface"
-                or surface_ratio >= cls.LIMITED_BOOTSTRAP_STRONG_SURFACE_RATIO
-            )
-            if not strong_court:
-                continue
-
-            has_strong_team = bool(
-                player.get("team") is not None
-                and team_confidence >= cls.LIMITED_BOOTSTRAP_MIN_TEAM_CONFIDENCE
-            )
-            if not has_strong_team and surface_ratio < cls.LIMITED_BOOTSTRAP_STRONG_SURFACE_RATIO:
-                continue
-
-            copy = dict(player)
-            # This flag exists only in the temporary Gate-D observation view. The original
-            # detector row is restored by V5 after observe() and is not mutated.
-            copy["active_on_court"] = True
-            copy["gate_d_limited_bootstrap"] = True
-            copy["gate_d_limited_bootstrap_reason"] = (
-                "strong_team_and_court_evidence"
-                if has_strong_team
-                else "strong_court_surface_evidence"
-            )
-            ranked.append((surface_ratio, confidence, team_confidence, copy))
-
-        ranked.sort(key=lambda row: (-row[0], -row[1], -row[2]))
-        return [
-            row[3]
-            for row in ranked[: cls.LIMITED_BOOTSTRAP_MAX_PLAYERS]
-        ]
+        return select_limited_bootstrap_candidates(
+            list(getattr(frame_state, "players", []) or [])
+        )
 
     def _gate_d_limited_players(self, frame_state: Any) -> list[dict[str, Any]]:
         explicit = GateDDetectorV5._gate_d_limited_players(frame_state)
