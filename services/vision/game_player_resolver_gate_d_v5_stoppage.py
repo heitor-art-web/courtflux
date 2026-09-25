@@ -15,9 +15,10 @@ class GateDStoppageAwareGamePlayerResolverV5(GateDTeamStableGamePlayerResolverV5
     wrapper records global NON_GAMEPLAY frame ranges and subtracts only those frozen frames
     from within-track and cross-track temporal-gap checks.
 
-    Episode frame ranges remain observation-truth: NON_GAMEPLAY frames are never inserted
-    into an episode and ``resolve(track, frame)`` still abstains inside a stoppage. Only the
-    temporal distance used by continuity/association is adjusted.
+    Episode endpoints remain real observed frames. A resumed observation may extend an
+    episode across a frozen source-time interval, so ``resolve``/``resolve_interval`` mask
+    those explicitly frozen frames back to UNKNOWN. No identity observation is fabricated
+    inside NON_GAMEPLAY; only the continuity clock is suspended.
     """
 
     def __init__(self, *args, **kwargs) -> None:
@@ -52,6 +53,27 @@ class GateDStoppageAwareGamePlayerResolverV5(GateDTeamStableGamePlayerResolverV5
             self._gate_d_frozen_ranges.append((start, end))
             self._gate_d_active_frozen_range = None
 
+    def _all_frozen_ranges(self) -> list[tuple[int, int]]:
+        ranges = list(self._gate_d_frozen_ranges)
+        if self._gate_d_active_frozen_range is not None:
+            ranges.append(self._gate_d_active_frozen_range)
+        return ranges
+
+    def _frame_is_frozen(self, frame_id: int) -> bool:
+        frame_id = int(frame_id)
+        return any(
+            int(start) <= frame_id <= int(end)
+            for start, end in self._all_frozen_ranges()
+        )
+
+    def _interval_overlaps_frozen(self, frame_start: int, frame_end: int) -> bool:
+        start = int(frame_start)
+        end = max(start, int(frame_end))
+        return any(
+            int(frozen_start) <= end and start <= int(frozen_end)
+            for frozen_start, frozen_end in self._all_frozen_ranges()
+        )
+
     def _frozen_overlap_frames(self, left_frame: int, right_frame: int) -> int:
         """Count frozen frames strictly between two observed frame IDs."""
         left = int(left_frame)
@@ -60,11 +82,8 @@ class GateDStoppageAwareGamePlayerResolverV5(GateDTeamStableGamePlayerResolverV5
             return 0
         lo = left + 1
         hi = right - 1
-        ranges = list(self._gate_d_frozen_ranges)
-        if self._gate_d_active_frozen_range is not None:
-            ranges.append(self._gate_d_active_frozen_range)
         total = 0
-        for start, end in ranges:
+        for start, end in self._all_frozen_ranges():
             overlap_start = max(lo, int(start))
             overlap_end = min(hi, int(end))
             if overlap_end >= overlap_start:
@@ -157,6 +176,21 @@ class GateDStoppageAwareGamePlayerResolverV5(GateDTeamStableGamePlayerResolverV5
             )
         finally:
             episode.frame_end = original_end
+
+    def resolve(self, track_id: int, frame_id: int):
+        if self._frame_is_frozen(frame_id):
+            return None
+        return super().resolve(track_id, frame_id)
+
+    def resolve_interval(
+        self,
+        track_id: int,
+        frame_start: int,
+        frame_end: int,
+    ):
+        if self._interval_overlaps_frozen(frame_start, frame_end):
+            return None
+        return super().resolve_interval(track_id, frame_start, frame_end)
 
     def stoppage_diagnostics(self) -> dict[str, object]:
         active = self._gate_d_active_frozen_range
