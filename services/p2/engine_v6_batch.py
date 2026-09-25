@@ -16,6 +16,7 @@ class P2EngineV6Batch(P2EngineV1):
     * previous-frame generic flight support may seed the V1.3 shot rim-band bridge;
     * shot team publication may use fresh evidence for the *exact actor track* instead of
       abstaining solely because the public possession team is temporarily unavailable;
+    * the actor/team evidence used at release is frozen for the lifetime of that shot;
     * post-shot possession reacquisition explicitly rearms the V1.3 shot tracker;
     * a suppressed provisional shot clears its pre-release actor snapshot.
     """
@@ -23,6 +24,7 @@ class P2EngineV6Batch(P2EngineV1):
     EVENT_TEAM_ATTRIBUTION_POLICY = (
         "shot_team_accepts_current_or_fresh_exact_actor_team_snapshot;"
         "exact_actor_conflict_abstains;generic_recent_team_never_promoted;"
+        "shot_snapshot_frozen_at_release;"
         "pass_team_requires_recent_fresh_on_court_endpoint_support;"
         "turnover_team_requires_recent_fresh_on_court_actor_support;"
         "fresh_same_team_endpoints_may_reclassify_turnover_as_pass;"
@@ -40,14 +42,31 @@ class P2EngineV6Batch(P2EngineV1):
         super().__init__(*args, **kwargs)
         self._v6_team_evidence: dict[int, tuple[str | None, float]] = {}
         self._v6_team_hints: dict[int, tuple[str, float]] = {}
-        self._shot_team_snapshot_confidence = 0.0
-        self._shot_team_snapshot_age_frames: int | None = None
-        self._shot_team_snapshot_source = "unknown"
+        self._pre_release_team_snapshot_confidence = 0.0
+        self._pre_release_team_snapshot_age_frames: int | None = None
+        self._pre_release_team_snapshot_source = "unknown"
+        self._active_shot_team_snapshot_confidence = 0.0
+        self._active_shot_team_snapshot_age_frames: int | None = None
+        self._active_shot_team_snapshot_source = "unknown"
 
-    def _clear_v6_shot_snapshot(self) -> None:
-        self._shot_team_snapshot_confidence = 0.0
-        self._shot_team_snapshot_age_frames = None
-        self._shot_team_snapshot_source = "unknown"
+    def _clear_pre_release_snapshot(self) -> None:
+        self._pre_release_team_snapshot_confidence = 0.0
+        self._pre_release_team_snapshot_age_frames = None
+        self._pre_release_team_snapshot_source = "unknown"
+
+    def _clear_active_shot_snapshot(self) -> None:
+        self._active_shot_team_snapshot_confidence = 0.0
+        self._active_shot_team_snapshot_age_frames = None
+        self._active_shot_team_snapshot_source = "unknown"
+
+    def _freeze_pre_release_snapshot_for_active_shot(self) -> None:
+        self._active_shot_team_snapshot_confidence = float(
+            self._pre_release_team_snapshot_confidence
+        )
+        self._active_shot_team_snapshot_age_frames = (
+            self._pre_release_team_snapshot_age_frames
+        )
+        self._active_shot_team_snapshot_source = self._pre_release_team_snapshot_source
 
     def _exact_actor_team_snapshot(
         self,
@@ -87,7 +106,7 @@ class P2EngineV6Batch(P2EngineV1):
         actor_track_id, public_team_id, base_source = super()._pre_release_public_attribution(
             frame_id=frame_id,
         )
-        self._clear_v6_shot_snapshot()
+        self._clear_pre_release_snapshot()
         if actor_track_id is None:
             return actor_track_id, public_team_id, base_source
 
@@ -97,44 +116,60 @@ class P2EngineV6Batch(P2EngineV1):
         )
         if exact_team is not None:
             if public_team_id is not None and str(public_team_id) != str(exact_team):
-                self._shot_team_snapshot_confidence = float(confidence)
-                self._shot_team_snapshot_age_frames = age
-                self._shot_team_snapshot_source = "exact_actor_conflicts_public_team"
+                self._pre_release_team_snapshot_confidence = float(confidence)
+                self._pre_release_team_snapshot_age_frames = age
+                self._pre_release_team_snapshot_source = "exact_actor_conflicts_public_team"
                 return (
                     int(actor_track_id),
                     None,
                     "pre_release_exact_actor_team_conflict_abstained",
                 )
-            self._shot_team_snapshot_confidence = float(confidence)
-            self._shot_team_snapshot_age_frames = age
-            self._shot_team_snapshot_source = exact_source
+            self._pre_release_team_snapshot_confidence = float(confidence)
+            self._pre_release_team_snapshot_age_frames = age
+            self._pre_release_team_snapshot_source = exact_source
             return int(actor_track_id), str(exact_team), exact_source
 
         if public_team_id is not None:
-            self._shot_team_snapshot_source = base_source
+            self._pre_release_team_snapshot_source = base_source
             return int(actor_track_id), str(public_team_id), base_source
         return int(actor_track_id), None, base_source
+
+    def _shot_snapshot_for_publication(self) -> tuple[str, float, int | None]:
+        if self._active_shot_team_snapshot_source != "unknown":
+            return (
+                self._active_shot_team_snapshot_source,
+                float(self._active_shot_team_snapshot_confidence),
+                self._active_shot_team_snapshot_age_frames,
+            )
+        # Covers an extremely short shot that begins and resolves inside one process call.
+        return (
+            self._pre_release_team_snapshot_source,
+            float(self._pre_release_team_snapshot_confidence),
+            self._pre_release_team_snapshot_age_frames,
+        )
 
     def _attribute_shot(self, event: Any, frame_state: Any) -> Any:
         event = super()._attribute_shot(event, frame_state)
         if event.event_type is not BasketballEventType.SHOT_ATTEMPT:
             return event
 
-        event.attributes["actor_team_snapshot_source"] = self._shot_team_snapshot_source
+        snapshot_source, snapshot_confidence, snapshot_age = (
+            self._shot_snapshot_for_publication()
+        )
+        event.attributes["actor_team_snapshot_source"] = snapshot_source
         event.attributes["actor_team_snapshot_confidence"] = round(
-            float(self._shot_team_snapshot_confidence),
+            float(snapshot_confidence),
             6,
         )
-        event.attributes["actor_team_snapshot_age_frames"] = self._shot_team_snapshot_age_frames
+        event.attributes["actor_team_snapshot_age_frames"] = snapshot_age
+        event.attributes["actor_team_snapshot_frozen_at_release"] = True
         event.attributes["team_attribution_publication_policy"] = self.EVENT_TEAM_ATTRIBUTION_POLICY
-        if event.team_id is not None and self._shot_team_snapshot_source.startswith("exact_actor_"):
-            event.attributes["team_attribution_publication_source"] = (
-                self._shot_team_snapshot_source
-            )
+        if event.team_id is not None and snapshot_source.startswith("exact_actor_"):
+            event.attributes["team_attribution_publication_source"] = snapshot_source
             event.attributes["team_attribution_publication_reason"] = (
                 "fresh_exact_actor_team_snapshot_supported"
             )
-        elif self._shot_team_snapshot_source == "exact_actor_conflicts_public_team":
+        elif snapshot_source == "exact_actor_conflicts_public_team":
             event.team_id = None
             event.attributes["team_attribution_publication_source"] = "abstained"
             event.attributes["team_attribution_publication_reason"] = (
@@ -168,6 +203,9 @@ class P2EngineV6Batch(P2EngineV1):
         result = super().process(frame_state)
         shot_active_after = bool(self.shot_tracker.diagnostics().get("active", False))
 
+        if not shot_active_before and shot_active_after:
+            self._freeze_pre_release_snapshot_for_active_shot()
+
         current_events = self._current_frame_events(frame_state, frame_id)
         shot_published = any(
             getattr(event, "event_type", None) is BasketballEventType.SHOT_ATTEMPT
@@ -183,24 +221,33 @@ class P2EngineV6Batch(P2EngineV1):
 
         # V1.3 may intentionally suppress a provisional event after closing its internal
         # candidate. The frozen base engine would otherwise retain that stale shot actor.
-        if shot_active_before and not shot_active_after and not shot_published:
+        suppressed_terminal = bool(
+            shot_active_before and not shot_active_after and not shot_published
+        )
+        if suppressed_terminal:
             self._shot_actor_track_id = None
             self._shot_team_id = None
             self._shot_actor_source = "unknown"
             self._shot_actor_location = None
-            self._clear_v6_shot_snapshot()
 
         diagnostics = getattr(frame_state, "diagnostics", {}) or {}
         p2 = diagnostics.get("p2", {}) if isinstance(diagnostics, dict) else {}
         if isinstance(p2, dict):
+            snapshot_source, snapshot_confidence, snapshot_age = (
+                self._shot_snapshot_for_publication()
+            )
             p2["behavior_revision"] = "v6_abcd_batch_20260925"
             p2["supported_flight_hint_before_shot_update"] = supported_flight_before
             p2["post_shot_control_reacquired"] = reacquired
             p2["shot_actor_team_snapshot"] = {
-                "source": self._shot_team_snapshot_source,
-                "confidence": round(float(self._shot_team_snapshot_confidence), 6),
-                "age_frames": self._shot_team_snapshot_age_frames,
+                "source": snapshot_source,
+                "confidence": round(float(snapshot_confidence), 6),
+                "age_frames": snapshot_age,
+                "frozen_at_release": bool(shot_active_after or shot_published),
             }
+
+        if shot_published or suppressed_terminal:
+            self._clear_active_shot_snapshot()
         return result
 
 
