@@ -16,8 +16,10 @@ def _frame(
     gameplay_present: bool,
     analysis_eligible: bool,
     players: list[dict] | None = None,
+    frame_id: int = 12,
 ):
     return SimpleNamespace(
+        frame_id=frame_id,
         court_state=SimpleNamespace(
             gameplay_present=gameplay_present,
             analysis_eligible=analysis_eligible,
@@ -66,21 +68,45 @@ def test_limited_gameplay_keeps_only_explicit_positive_on_court_players() -> Non
     assert [row["track_id"] for row in eligible] == [1]
 
 
-class _ResolverMustNotRun:
+class _FreezeOnlyResolver:
+    def __init__(self) -> None:
+        self.frozen_frames: list[int] = []
+
+    def freeze_non_gameplay(self, frame_id: int) -> None:
+        self.frozen_frames.append(int(frame_id))
+
+    def stoppage_diagnostics(self) -> dict[str, object]:
+        return {
+            "stoppage_gap_suspension": True,
+            "completed_frozen_ranges": 0,
+            "active_frozen_range": (
+                None if not self.frozen_frames else [self.frozen_frames[0], self.frozen_frames[-1]]
+            ),
+            "completed_frozen_frames": 0,
+        }
+
     def prepare_team_stability(self, _confirmations):
-        raise AssertionError("NON_GAMEPLAY must not prepare or mutate resolver state")
+        raise AssertionError("NON_GAMEPLAY must not prepare identity association state")
 
     def clear_team_stability(self):
-        raise AssertionError("NON_GAMEPLAY must not touch resolver state")
+        raise AssertionError("NON_GAMEPLAY must not clear identity association state")
+
+    def observe(self, **_kwargs):
+        raise AssertionError("NON_GAMEPLAY must not create/update an identity observation")
+
+    def prepare_frame(self, **_kwargs):
+        raise AssertionError("NON_GAMEPLAY must not run appearance preflight")
 
 
-def test_non_gameplay_observation_path_does_not_touch_resolver_memory() -> None:
+def test_non_gameplay_observation_path_only_advances_stoppage_clock() -> None:
     detector = object.__new__(PerformanceDetector)
-    detector.game_player_resolver = _ResolverMustNotRun()
+    resolver = _FreezeOnlyResolver()
+    detector.game_player_resolver = resolver
     frame = _frame(
         gameplay_present=False,
         analysis_eligible=False,
         players=[{"track_id": 7, "active_on_court": True}],
+        frame_id=77,
     )
     frame.diagnostics["detector"]["team_predictions"] = [
         {"track_id": 7, "recent_reversal_confirmed": True}
@@ -88,11 +114,14 @@ def test_non_gameplay_observation_path_does_not_touch_resolver_memory() -> None:
 
     detector._observe_game_players(frame)
 
+    assert resolver.frozen_frames == [77]
     assert frame.diagnostics["detector"]["game_player_predictions"] == []
     runtime = frame.diagnostics["detector"]["game_player_runtime"]
     assert runtime["continuity_mode"] == "frozen_non_gameplay"
     assert runtime["continuity_frozen"] is True
     assert runtime["non_gameplay_freezes_resolver"] is True
+    assert runtime["stoppage_gap_suspension"] is True
+    assert runtime["active_frozen_range"] == [77, 77]
 
 
 def main() -> None:
@@ -101,7 +130,7 @@ def main() -> None:
     test_non_gameplay_frame_freezes_continuity_scope()
     test_missing_court_state_uses_legacy_scope()
     test_limited_gameplay_keeps_only_explicit_positive_on_court_players()
-    test_non_gameplay_observation_path_does_not_touch_resolver_memory()
+    test_non_gameplay_observation_path_only_advances_stoppage_clock()
     print("game_player_gate_d_detector_v5_scope_test: PASS")
 
 
