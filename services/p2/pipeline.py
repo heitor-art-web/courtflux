@@ -18,6 +18,11 @@ class P2Pipeline(Pipeline):
     image GameplayFilter remains fail-open for inference; the stateful post-detector gate
     decides GAMEPLAY_ANALYSIS / GAMEPLAY_LIMITED / NON_GAMEPLAY without dropping detector
     or tracker frames prematurely.
+
+    Identity-v2 builds CourtState inside the detector before team/Jersey evidence. Share
+    the same stateful V2 estimator with that pre-identity gate; otherwise the base Pipeline
+    would reuse a V1 CourtState and the long-form policy would never become canonical when
+    camera calibration is disabled.
     """
 
     def __init__(self, *args: Any, p2_enabled: bool | None = None, **kwargs: Any) -> None:
@@ -28,4 +33,7 @@ class P2Pipeline(Pipeline):
         else:
             os.environ["BASKETBALL_P2_ENABLED"] = "0"
         super().__init__(*args, **kwargs)
-        self.court_state_estimator = CourtStateEstimatorV2()
+        gameplay_estimator = CourtStateEstimatorV2()
+        self.court_state_estimator = gameplay_estimator
+        if hasattr(self.detector, "identity_court_estimator"):
+            self.detector.identity_court_estimator = gameplay_estimator
