@@ -20,6 +20,8 @@ class CourtStateEstimatorV2(CourtStateEstimatorV1):
     The policy is intentionally asymmetric:
     * entering NON_GAMEPLAY requires sustained negative evidence;
     * confirmed NON_GAMEPLAY resumes quickly only on strong wide live-play evidence;
+    * a recent broadcast close-up/cut may use a short, geometry-heavy wide reacquisition
+      window so live play can resume before ball/rim evidence has recovered;
     * basket + ball context may resume/hold GAMEPLAY_LIMITED for bounded dead-ball or
       free-throw context without making the frame metric eligible;
     * strong close-ups/cutaways are negative evidence even when frame motion is high;
@@ -42,6 +44,11 @@ class CourtStateEstimatorV2(CourtStateEstimatorV1):
         wide_resume_max_height_ratio: float = 0.35,
         strong_closeup_height_ratio: float = 0.55,
         weak_live_hold_sec: float = 6.0,
+        wide_reacquire_window_sec: float = 1.50,
+        wide_reacquire_min_players: int = 7,
+        wide_reacquire_max_height_ratio: float = 0.30,
+        wide_reacquire_min_on_court: int = 2,
+        wide_reacquire_motion_ratio: float = 0.006,
         **kwargs: Any,
     ) -> None:
         super().__init__(*args, **kwargs)
@@ -63,10 +70,28 @@ class CourtStateEstimatorV2(CourtStateEstimatorV1):
             min(float(strong_closeup_height_ratio), 1.0),
         )
         self.weak_live_hold_sec = max(1.0, float(weak_live_hold_sec))
+        self.wide_reacquire_window_sec = max(0.10, float(wide_reacquire_window_sec))
+        self.wide_reacquire_min_players = max(
+            self.wide_resume_min_players,
+            int(wide_reacquire_min_players),
+        )
+        self.wide_reacquire_max_height_ratio = max(
+            0.05,
+            min(
+                float(wide_reacquire_max_height_ratio),
+                self.wide_resume_max_height_ratio,
+            ),
+        )
+        self.wide_reacquire_min_on_court = max(1, int(wide_reacquire_min_on_court))
+        self.wide_reacquire_motion_ratio = max(
+            self.limited_motion_ratio,
+            min(float(wide_reacquire_motion_ratio), self.wide_resume_motion_ratio),
+        )
         self._gameplay_presence_latched: bool | None = None
         self._non_gameplay_candidate_frames = 0
         self._gameplay_candidate_frames = 0
         self._weak_live_frames = 0
+        self._wide_reacquire_frames_remaining = 0
 
     @staticmethod
     def _safe_float(value: object) -> float | None:
@@ -92,6 +117,7 @@ class CourtStateEstimatorV2(CourtStateEstimatorV1):
         self._non_gameplay_candidate_frames = 0
         self._gameplay_candidate_frames = 0
         self._weak_live_frames = 0
+        self._wide_reacquire_frames_remaining = 0
 
     @staticmethod
     def _height_ratios_from_frame(frame_state: Any) -> list[float]:
@@ -138,6 +164,11 @@ class CourtStateEstimatorV2(CourtStateEstimatorV1):
             and median_ratio is not None
             and median_ratio <= self.wide_resume_max_height_ratio
         )
+        wide_reacquire_view = bool(
+            player_count >= self.wide_reacquire_min_players
+            and median_ratio is not None
+            and median_ratio <= self.wide_reacquire_max_height_ratio
+        )
         strong_closeup = bool(
             median_ratio is not None
             and (
@@ -165,6 +196,7 @@ class CourtStateEstimatorV2(CourtStateEstimatorV1):
                 None if max_ratio is None else round(float(max_ratio), 6)
             ),
             "wide_resume_view": wide_resume_view,
+            "wide_reacquire_view": wide_reacquire_view,
             "strong_closeup": strong_closeup,
             "strong_wide_live": strong_wide_live,
         }
@@ -213,17 +245,43 @@ class CourtStateEstimatorV2(CourtStateEstimatorV1):
         strong_wide_live = bool(view["strong_wide_live"])
         strong_closeup = bool(view["strong_closeup"])
 
+        transition_window_frames = self._threshold_frames(
+            self.wide_reacquire_window_sec,
+            self._fps(frame_state),
+        )
+        if scene_cut or strong_closeup:
+            # Arm a short recovery window while the broadcast is visibly away from the
+            # normal game camera. The window is consumed only after that view has ended.
+            self._wide_reacquire_frames_remaining = transition_window_frames
+        elif self._wide_reacquire_frames_remaining > 0:
+            self._wide_reacquire_frames_remaining -= 1
+
+        transition_wide_reacquisition = bool(
+            not scene_cut
+            and not strong_closeup
+            and self._wide_reacquire_frames_remaining > 0
+            and bool(view["wide_reacquire_view"])
+            and state.on_court_player_count >= self.wide_reacquire_min_on_court
+            and motion_ratio is not None
+            and motion_ratio >= self.wide_reacquire_motion_ratio
+        )
+        strong_live_evidence = bool(strong_wide_live or transition_wide_reacquisition)
+
         diagnostics = {
             "prefilter_likely_gameplay": raw_likely,
             "prefilter_scene_cut": scene_cut,
             "prefilter_motion_ratio": motion_ratio,
             "limited_motion_ratio": self.limited_motion_ratio,
             "wide_resume_motion_ratio": self.wide_resume_motion_ratio,
+            "wide_reacquire_motion_ratio": self.wide_reacquire_motion_ratio,
+            "wide_reacquire_window_frames": transition_window_frames,
+            "wide_reacquire_frames_remaining": self._wide_reacquire_frames_remaining,
+            "transition_wide_reacquisition": transition_wide_reacquisition,
             "ball_present": bool(ball_present),
             "basket_ball_context": basket_ball_context,
             "explicit_on_court_motion": explicit_on_court_motion,
             "motion_supported_prefilter": motion_supported_prefilter,
-            "strong_live_evidence": strong_wide_live,
+            "strong_live_evidence": strong_live_evidence,
             "safe_limited_resume": bool(basket_ball_context and not strong_closeup),
             **view,
         }
@@ -241,6 +299,11 @@ class CourtStateEstimatorV2(CourtStateEstimatorV1):
         if strong_closeup:
             diagnostics["weak_live_evidence"] = False
             return False, "non_gameplay", "strong_closeup_candidate", diagnostics
+
+        if transition_wide_reacquisition:
+            diagnostics["weak_live_evidence"] = False
+            status = "gameplay_analysis" if state.analysis_eligible and raw_likely else "gameplay_limited"
+            return True, status, "broadcast_wide_reacquisition", diagnostics
 
         if strong_wide_live:
             diagnostics["weak_live_evidence"] = False
@@ -430,6 +493,12 @@ class CourtStateEstimatorV2(CourtStateEstimatorV1):
             weak_live_evidence=bool(evidence.get("weak_live_evidence", False)),
         )
 
+        # The transition-specific escape hatch is single-use. Once a coherent wide view
+        # has actually reopened gameplay, subsequent frames must satisfy the normal policy
+        # rather than inheriting stale broadcast-transition state.
+        if present and bool(evidence.get("transition_wide_reacquisition", False)):
+            self._wide_reacquire_frames_remaining = 0
+
         state.gameplay_present = bool(present)
         state.gameplay_status = str(status)
         state.gameplay_reason = str(reason)
@@ -451,6 +520,8 @@ class CourtStateEstimatorV2(CourtStateEstimatorV1):
             "gameplay_resume_sec": self.gameplay_resume_sec,
             "strong_gameplay_resume_sec": self.strong_gameplay_resume_sec,
             "weak_live_hold_sec": self.weak_live_hold_sec,
+            "wide_reacquire_window_sec": self.wide_reacquire_window_sec,
+            "wide_reacquire_frames_remaining": self._wide_reacquire_frames_remaining,
             "non_gameplay_candidate_frames": self._non_gameplay_candidate_frames,
             "gameplay_candidate_frames": self._gameplay_candidate_frames,
             "weak_live_frames": self._weak_live_frames,
@@ -480,9 +551,14 @@ class CourtStateEstimatorV2(CourtStateEstimatorV1):
                 "wide_resume_max_height_ratio": self.wide_resume_max_height_ratio,
                 "strong_closeup_height_ratio": self.strong_closeup_height_ratio,
                 "weak_live_hold_sec": self.weak_live_hold_sec,
+                "wide_reacquire_window_sec": self.wide_reacquire_window_sec,
+                "wide_reacquire_min_players": self.wide_reacquire_min_players,
+                "wide_reacquire_max_height_ratio": self.wide_reacquire_max_height_ratio,
+                "wide_reacquire_min_on_court": self.wide_reacquire_min_on_court,
+                "wide_reacquire_motion_ratio": self.wide_reacquire_motion_ratio,
                 "non_gameplay_policy": "sustained_negative_or_bounded_weak_live_evidence",
                 "limited_policy": "bounded_basket_ball_context_or_explicit_on_court_motion",
-                "resume_policy": "fast_strong_wide_live_or_debounced_basket_ball_context",
+                "resume_policy": "fast_strong_wide_live_or_recent_broadcast_wide_reacquisition_or_debounced_basket_ball_context",
             }
         )
         return payload
