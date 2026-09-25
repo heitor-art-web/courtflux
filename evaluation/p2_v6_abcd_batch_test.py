@@ -1,7 +1,5 @@
 from __future__ import annotations
 
-from types import SimpleNamespace
-
 from core.ball_state import BallState, BallStateStatus
 from core.basketball_event import (
     BasketballEvent,
@@ -13,7 +11,7 @@ from core.court_state import CourtState
 from services.p2.engine_v6_batch import P2EngineV6Batch
 from services.p2.shot_event_tracker_v1_3 import ShotEventTrackerV13
 from services.vision.court_state_gameplay_v3 import CourtStateEstimatorV3
-from services.vision.game_player_gate_d_detector_v6 import PerformanceDetector
+from services.vision.gate_d_limited_scope_v6 import select_limited_bootstrap_candidates
 
 
 def _shot_event(**attributes) -> BasketballEvent:
@@ -146,8 +144,8 @@ def test_v6_c_exact_actor_snapshot_can_publish_team() -> None:
 
 
 def test_v6_d_limited_empty_scope_bootstrap_is_bounded() -> None:
-    frame = SimpleNamespace(
-        players=[
+    selected = select_limited_bootstrap_candidates(
+        [
             {
                 "track_id": 1,
                 "active_on_court": None,
@@ -180,7 +178,6 @@ def test_v6_d_limited_empty_scope_bootstrap_is_bounded() -> None:
             },
         ]
     )
-    selected = PerformanceDetector._gate_d_limited_bootstrap_candidates(frame)
     assert [row["track_id"] for row in selected] == [1]
     assert selected[0]["active_on_court"] is True
     assert selected[0]["gate_d_limited_bootstrap"] is True
