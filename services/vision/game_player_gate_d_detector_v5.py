@@ -5,8 +5,8 @@ from typing import Any
 from services.vision.court_state_gameplay_v2 import CourtStateEstimatorV2
 from services.vision.game_player_gate_d_detector_v4 import PerformanceDetector as GateDDetectorV4
 from services.vision.game_player_resolver_gate_d_v5 import GateDDeferredAssociationConfig
-from services.vision.game_player_resolver_gate_d_v5_team_stable import (
-    GateDTeamStableGamePlayerResolverV5,
+from services.vision.game_player_resolver_gate_d_v5_stoppage import (
+    GateDStoppageAwareGamePlayerResolverV5,
 )
 
 
@@ -22,7 +22,9 @@ class PerformanceDetector(GateDDetectorV4):
     * GAMEPLAY_LIMITED observes only players with explicit positive on-court evidence;
     * NON_GAMEPLAY freezes the resolver completely: no new episode, split, appearance
       update or association decision is produced, while all existing resolver memory is
-      preserved for the next gameplay frame.
+      preserved for the next gameplay frame. Frozen source frames are also removed from
+      the resolver's temporal-gap calculations, so a real stoppage does not become an
+      artificial ``track_gap`` or stale cross-track association boundary on resume.
 
     Within-track team changes additionally reuse Identity-v2's existing confirmed-reversal
     diagnostic. An opposite-team observation that Identity-v2 has not confirmed cannot by
@@ -34,7 +36,7 @@ class PerformanceDetector(GateDDetectorV4):
         # Keep the reappearance ceiling equal to the canonical association window so the
         # long-gap path has no runtime-only window. Persistent within-window ambiguity
         # recovery remains enabled.
-        self.game_player_resolver = GateDTeamStableGamePlayerResolverV5(
+        self.game_player_resolver = GateDStoppageAwareGamePlayerResolverV5(
             deferred_association_config=GateDDeferredAssociationConfig(
                 max_reappearance_gap_frames=180,
             )
@@ -98,6 +100,11 @@ class PerformanceDetector(GateDDetectorV4):
                 confirmations[track_id] = value
         return confirmations
 
+    def _stoppage_runtime(self) -> dict[str, object]:
+        if hasattr(self.game_player_resolver, "stoppage_diagnostics"):
+            return dict(self.game_player_resolver.stoppage_diagnostics())
+        return {"stoppage_gap_suspension": False}
+
     def _freeze_non_gameplay_continuity(
         self,
         frame_state: Any,
@@ -107,7 +114,7 @@ class PerformanceDetector(GateDDetectorV4):
         detector = frame_state.diagnostics.setdefault("detector", {})
         detector["game_player_predictions"] = []
         detector["game_player_runtime"] = {
-            "version": "game_player_resolver_v5_gate_d_team_stable",
+            "version": "game_player_resolver_v5_gate_d_team_stable_stoppage",
             "identity_key": "track_id+temporal_episode",
             "unknown_preferred": True,
             "eligible_players": 0,
@@ -127,22 +134,30 @@ class PerformanceDetector(GateDDetectorV4):
             "team_conflict_requires_fresh_reversal_confirmation": True,
             "team_change_confirmation_tracks": len(confirmations),
             "team_change_confirmed_tracks": sum(confirmations.values()),
+            **self._stoppage_runtime(),
         }
 
     def _observe_game_players(self, frame_state: Any) -> None:
+        frame_id = int(getattr(frame_state, "frame_id", 0))
         court_state = getattr(frame_state, "court_state", None)
         mode = self._gate_d_continuity_mode(frame_state)
         confirmations = self._gate_d_team_change_confirmations(frame_state)
 
         # A true stoppage is a temporal boundary for observations, not for memory. Do not
         # call prepare_frame()/observe() at all: the resolver's entities/episodes remain
-        # untouched and can be reused when gameplay resumes.
+        # untouched. Only the stoppage clock is advanced so temporal-gap checks can remove
+        # the frozen interval when gameplay resumes.
         if mode == "frozen_non_gameplay":
+            if hasattr(self.game_player_resolver, "freeze_non_gameplay"):
+                self.game_player_resolver.freeze_non_gameplay(frame_id)
             self._freeze_non_gameplay_continuity(
                 frame_state,
                 confirmations=confirmations,
             )
             return
+
+        if hasattr(self.game_player_resolver, "resume_gameplay"):
+            self.game_player_resolver.resume_gameplay(frame_id)
 
         widen_scope = mode == "gameplay_limited"
         original_analysis_eligible = (
@@ -179,7 +194,7 @@ class PerformanceDetector(GateDDetectorV4):
 
         detector = frame_state.diagnostics.setdefault("detector", {})
         runtime = detector.setdefault("game_player_runtime", {})
-        runtime["version"] = "game_player_resolver_v5_gate_d_team_stable"
+        runtime["version"] = "game_player_resolver_v5_gate_d_team_stable_stoppage"
         runtime["deferred_ambiguous_reassociation"] = True
         runtime["deferred_long_gap_reappearance"] = False
         runtime["bounded_reappearance_probe"] = False
@@ -195,3 +210,4 @@ class PerformanceDetector(GateDDetectorV4):
         runtime["team_conflict_requires_fresh_reversal_confirmation"] = True
         runtime["team_change_confirmation_tracks"] = len(confirmations)
         runtime["team_change_confirmed_tracks"] = sum(confirmations.values())
+        runtime.update(self._stoppage_runtime())
