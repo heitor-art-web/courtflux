@@ -114,6 +114,12 @@ class CourtStateEstimatorV2(CourtStateEstimatorV1):
             "motion_supported_prefilter": motion_supported_prefilter,
         }
 
+        # Inter-frame motion across a broadcast cut is not player-motion evidence: the
+        # whole image changed. Treat the cut itself as a negative candidate and let the
+        # temporal debounce decide whether it becomes a real NON_GAMEPLAY boundary.
+        if scene_cut:
+            return False, "non_gameplay", "scene_cut_candidate", diagnostics
+
         if basket_ball_context and not motion_supported_prefilter:
             return True, "gameplay_limited", "basket_ball_context_hold", diagnostics
         if explicit_on_court_motion:
@@ -128,8 +134,7 @@ class CourtStateEstimatorV2(CourtStateEstimatorV1):
             status = "gameplay_analysis" if state.analysis_eligible else "gameplay_limited"
             return True, status, "motion_supported_prefilter", diagnostics
 
-        reason = "scene_cut_candidate" if scene_cut else "sustained_low_live_evidence_candidate"
-        return False, "non_gameplay", reason, diagnostics
+        return False, "non_gameplay", "sustained_low_live_evidence_candidate", diagnostics
 
     def _resolve_temporal_presence(
         self,
