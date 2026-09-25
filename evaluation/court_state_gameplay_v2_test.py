@@ -270,6 +270,130 @@ def test_strong_wide_live_view_is_fast_resume_evidence() -> None:
     assert candidate[3]["strong_live_evidence"] is True
 
 
+def test_recent_cutaway_can_reacquire_wide_live_without_ball_or_prefilter() -> None:
+    estimator = CourtStateEstimatorV2(
+        non_gameplay_enter_sec=0.10,
+        strong_gameplay_resume_sec=0.10,
+        wide_resume_motion_ratio=0.012,
+        wide_reacquire_motion_ratio=0.006,
+        wide_reacquire_window_sec=1.50,
+    )
+    closeup = _view_frame(height_ratios=[0.82, 0.88], ball=False)
+    closeup_state = _state(
+        analysis_eligible=False,
+        player_count=2,
+        on_court_player_count=0,
+        basket=False,
+    )
+    negative = estimator._candidate(
+        closeup,
+        closeup_state,
+        {
+            "likely_gameplay": False,
+            "scene_cut": False,
+            "motion_ratio": 0.02,
+        },
+    )
+    assert negative is not None
+    assert negative[:3] == (False, "non_gameplay", "strong_closeup_candidate")
+    stopped = estimator._resolve_temporal_presence(
+        candidate_present=negative[0],
+        candidate_status=negative[1],
+        candidate_reason=negative[2],
+        fps=10.0,
+        strong_live_evidence=bool(negative[3]["strong_live_evidence"]),
+        weak_live_evidence=bool(negative[3]["weak_live_evidence"]),
+    )
+    assert stopped[0] is False
+
+    wide = _view_frame(
+        height_ratios=[0.14, 0.16, 0.18, 0.19, 0.20, 0.21, 0.22, 0.24],
+        ball=False,
+    )
+    wide_state = _state(
+        analysis_eligible=False,
+        player_count=8,
+        on_court_player_count=2,
+        basket=False,
+    )
+    reacquired = estimator._candidate(
+        wide,
+        wide_state,
+        {
+            "likely_gameplay": False,
+            "scene_cut": False,
+            "motion_ratio": 0.008,
+        },
+    )
+    assert reacquired is not None
+    assert reacquired[:3] == (True, "gameplay_limited", "broadcast_wide_reacquisition")
+    assert reacquired[3]["transition_wide_reacquisition"] is True
+    assert reacquired[3]["strong_live_evidence"] is True
+
+    resumed = estimator._resolve_temporal_presence(
+        candidate_present=reacquired[0],
+        candidate_status=reacquired[1],
+        candidate_reason=reacquired[2],
+        fps=10.0,
+        strong_live_evidence=bool(reacquired[3]["strong_live_evidence"]),
+        weak_live_evidence=bool(reacquired[3]["weak_live_evidence"]),
+    )
+    assert resumed[0] is True
+    assert resumed[1] == "gameplay_limited"
+
+
+def test_wide_dead_ball_without_recent_broadcast_transition_is_not_fast_resume() -> None:
+    estimator = CourtStateEstimatorV2(
+        non_gameplay_enter_sec=0.10,
+        wide_resume_motion_ratio=0.012,
+        wide_reacquire_motion_ratio=0.006,
+    )
+    stopped = estimator._resolve_temporal_presence(
+        candidate_present=False,
+        candidate_status="non_gameplay",
+        candidate_reason="dead",
+        fps=10.0,
+        strong_live_evidence=False,
+    )
+    assert stopped[0] is False
+
+    wide = _view_frame(
+        height_ratios=[0.14, 0.16, 0.18, 0.19, 0.20, 0.21, 0.22, 0.24],
+        ball=False,
+    )
+    wide_state = _state(
+        analysis_eligible=False,
+        player_count=8,
+        on_court_player_count=2,
+        basket=False,
+    )
+    candidate = estimator._candidate(
+        wide,
+        wide_state,
+        {
+            "likely_gameplay": False,
+            "scene_cut": False,
+            "motion_ratio": 0.008,
+        },
+    )
+    assert candidate is not None
+    assert candidate[:3] == (True, "gameplay_limited", "on_court_motion_hold")
+    assert candidate[3]["transition_wide_reacquisition"] is False
+    assert candidate[3]["strong_live_evidence"] is False
+
+    held = estimator._resolve_temporal_presence(
+        candidate_present=candidate[0],
+        candidate_status=candidate[1],
+        candidate_reason=candidate[2],
+        fps=10.0,
+        strong_live_evidence=bool(candidate[3]["strong_live_evidence"]),
+        safe_limited_resume=bool(candidate[3]["safe_limited_resume"]),
+        weak_live_evidence=bool(candidate[3]["weak_live_evidence"]),
+    )
+    assert held[0] is False
+    assert held[2] == "gameplay_resume_waiting_strong_live_evidence"
+
+
 def test_weak_live_context_is_bounded_and_eventually_enters_non_gameplay() -> None:
     estimator = CourtStateEstimatorV2(
         non_gameplay_enter_sec=0.20,
@@ -411,6 +535,8 @@ def main() -> None:
     test_explicit_on_court_motion_preserves_limited_gameplay_when_prefilter_abstains()
     test_strong_closeup_overrides_motion_and_basket_context()
     test_strong_wide_live_view_is_fast_resume_evidence()
+    test_recent_cutaway_can_reacquire_wide_live_without_ball_or_prefilter()
+    test_wide_dead_ball_without_recent_broadcast_transition_is_not_fast_resume()
     test_weak_live_context_is_bounded_and_eventually_enters_non_gameplay()
     test_weak_player_motion_alone_does_not_reopen_confirmed_non_gameplay()
     test_scene_cut_is_negative_candidate_but_temporal_gate_prevents_one_frame_boundary()
