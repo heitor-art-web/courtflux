@@ -132,10 +132,18 @@ def run_probe(args: argparse.Namespace) -> None:
     os.environ["BASKETBALL_GAME_PLAYER_RESOLVER_V1"] = "1"
 
     # Delayed imports preserve lightweight CLI/report tooling and avoid loading the model
-    # merely by importing this module.
+    # merely by importing this module. The V6 detector policy is isolated to V6; historical
+    # development clip runners continue to use the frozen V5 detector.
     from services.analytics import analyzer
     from services.p2.pipeline import P2Pipeline
-    from services.vision.game_player_gate_d_detector_v5 import PerformanceDetector as GateDDetector
+    if args.clip == "v6":
+        from services.vision.game_player_gate_d_detector_v6 import (
+            PerformanceDetector as GateDDetector,
+        )
+    else:
+        from services.vision.game_player_gate_d_detector_v5 import (
+            PerformanceDetector as GateDDetector,
+        )
 
     _install_gate_d_probe(analyzer, P2Pipeline, GateDDetector, clip=args.clip)
     print(
@@ -148,6 +156,7 @@ def run_probe(args: argparse.Namespace) -> None:
                 "end": end,
                 "match_config": match_config,
                 "status": _clip_status(args.clip),
+                "v6_abcd_batch": args.clip == "v6",
             },
             separators=(",", ":"),
         ),
