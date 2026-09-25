@@ -9,6 +9,7 @@ if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
 from core.court_state import CourtState
+from services.p2.pipeline import P2Pipeline
 from services.vision.court_state_gameplay_v2 import CourtStateEstimatorV2
 
 
@@ -196,6 +197,23 @@ def test_missing_prefilter_diagnostics_preserves_v1_policy() -> None:
     assert candidate is None
 
 
+def test_p2_pipeline_shares_stateful_gameplay_estimator_with_identity_gate() -> None:
+    detector = SimpleNamespace(identity_court_estimator=object())
+    pipeline = P2Pipeline(
+        gameplay_filter=SimpleNamespace(),
+        camera_tracker=None,
+        detector=detector,
+        database=None,
+        renderer=None,
+        profiler=SimpleNamespace(),
+        backboard_roi=None,
+        persist_results=False,
+    )
+
+    assert isinstance(pipeline.court_state_estimator, CourtStateEstimatorV2)
+    assert detector.identity_court_estimator is pipeline.court_state_estimator
+
+
 def main() -> None:
     test_sustained_negative_evidence_enters_non_gameplay_without_single_frame_flicker()
     test_gameplay_resume_requires_short_positive_confirmation()
@@ -203,6 +221,7 @@ def main() -> None:
     test_explicit_on_court_motion_preserves_limited_gameplay_when_prefilter_abstains()
     test_scene_cut_is_negative_candidate_but_temporal_gate_prevents_one_frame_boundary()
     test_missing_prefilter_diagnostics_preserves_v1_policy()
+    test_p2_pipeline_shares_stateful_gameplay_estimator_with_identity_gate()
     print("court_state_gameplay_v2_test: PASS")
 
 
