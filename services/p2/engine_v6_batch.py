@@ -361,6 +361,19 @@ class P2EngineV6Batch(P2EngineV1):
             "abstain_on_conflict_until_sustained_team_switch"
         )
 
+    @staticmethod
+    def _supported_flight_from_possession_diagnostics(
+        possession: dict[str, Any] | None,
+    ) -> bool:
+        payload = dict(possession or {})
+        flight = dict(payload.get("flight", {}) or {})
+        return bool(
+            flight.get(
+                "flight_supported",
+                payload.get("flight_supported", False),
+            )
+        )
+
     def process(self, frame_state: Any) -> Any:
         frame_id = int(getattr(frame_state, "frame_id", 0))
         self._v6_team_evidence = self._team_evidence(frame_state)
@@ -368,11 +381,8 @@ class P2EngineV6Batch(P2EngineV1):
 
         possession_before = self.possession_tracker.diagnostics()
         flight_before = dict(possession_before.get("flight", {}) or {})
-        supported_flight_before = bool(
-            flight_before.get(
-                "flight_supported",
-                possession_before.get("flight_supported", False),
-            )
+        supported_flight_before = self._supported_flight_from_possession_diagnostics(
+            possession_before
         )
         if hasattr(self.shot_tracker, "set_supported_flight_hint"):
             self.shot_tracker.set_supported_flight_hint(supported_flight_before)
