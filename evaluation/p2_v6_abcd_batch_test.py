@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import sys
 from pathlib import Path
+from types import SimpleNamespace
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 if str(PROJECT_ROOT) not in sys.path:
@@ -53,9 +54,70 @@ def _observed_ball(frame_id: int = 120) -> BallState:
 
 def test_v6_a_hysteresis_contract() -> None:
     estimator = CourtStateEstimatorV3()
-    assert estimator.non_gameplay_enter_sec == 3.0
+    assert estimator.non_gameplay_enter_sec == 3.5
     assert estimator.weak_live_hold_sec == 1.0
     assert estimator.gameplay_resume_sec == 0.20
+
+
+def test_v6_a_weak_live_timeout_persists_until_strong_resume() -> None:
+    estimator = CourtStateEstimatorV3()
+
+    def weak():
+        return estimator._resolve_temporal_presence(
+            candidate_present=True,
+            candidate_status="gameplay_limited",
+            candidate_reason="motion_supported_prefilter",
+            fps=10.0,
+            strong_live_evidence=False,
+            safe_limited_resume=False,
+            weak_live_evidence=True,
+        )
+
+    result = None
+    for _ in range(9):
+        result = weak()
+    assert result is not None and result[0] is True
+    assert estimator._v3_weak_timeout_latched is False
+
+    # Tenth weak frame exhausts the 1.0 s grace and starts a persistent negative
+    # candidate. The hard boundary still requires the separate 3.5 s debounce.
+    result = weak()
+    assert result[0] is True
+    assert estimator._v3_weak_timeout_latched is True
+    for _ in range(34):
+        result = weak()
+    assert result[0] is False
+    assert result[1] == "non_gameplay"
+
+    # One strong-live frame clears the weak timeout and uses the fast resume path.
+    result = estimator._resolve_temporal_presence(
+        candidate_present=True,
+        candidate_status="gameplay_analysis",
+        candidate_reason="strong_wide_live_evidence",
+        fps=10.0,
+        strong_live_evidence=True,
+        safe_limited_resume=False,
+        weak_live_evidence=False,
+    )
+    assert result[0] is True
+    assert estimator._v3_weak_timeout_latched is False
+
+
+def test_v6_a_safe_basket_context_does_not_consume_weak_budget() -> None:
+    estimator = CourtStateEstimatorV3()
+    for _ in range(100):
+        result = estimator._resolve_temporal_presence(
+            candidate_present=True,
+            candidate_status="gameplay_limited",
+            candidate_reason="basket_ball_context_hold",
+            fps=10.0,
+            strong_live_evidence=False,
+            safe_limited_resume=True,
+            weak_live_evidence=True,
+        )
+        assert result[0] is True
+    assert estimator._v3_weak_timeout_latched is False
+    assert estimator._v3_weak_context_frames == 0
 
 
 def test_v6_b_ft_single_mouth_plus_descent_confirms_made() -> None:
@@ -152,6 +214,15 @@ def test_v6_b_supported_flight_can_bridge_at_rim_band() -> None:
     assert diagnostics["supported_flight_bridge_starts"] == 1
 
 
+def test_v6_b_nested_possession_flight_support_is_consumed() -> None:
+    assert P2EngineV6Batch._supported_flight_from_possession_diagnostics(
+        {"flight": {"flight_supported": True}}
+    ) is True
+    assert P2EngineV6Batch._supported_flight_from_possession_diagnostics(
+        {"flight": {"flight_supported": False}, "flight_supported": True}
+    ) is False
+
+
 def test_v6_b_rearm_requires_post_shot_control_reacquisition() -> None:
     tracker = ShotEventTrackerV13(fps=60.0)
     tracker._awaiting_rearm = True
@@ -211,7 +282,57 @@ def test_v6_c_actor_team_snapshot_is_frozen_at_release() -> None:
     assert age == 0
 
 
-def test_v6_d_limited_empty_scope_bootstrap_is_bounded() -> None:
+def test_v6_c_actorless_shot_uses_frozen_public_flight_origin() -> None:
+    engine = P2EngineV6Batch(fps=60.0)
+    engine.possession_tracker.diagnostics = lambda: {
+        "flight": {
+            "active": True,
+            "origin_track_id": 360,
+            "origin_team_id": "team_a",
+            "flight_supported": True,
+        }
+    }
+    actor, team, source = engine._flight_origin_public_attribution(frame_id=100)
+    assert actor == 360
+    assert team == "team_a"
+    assert source == "pre_release_flight_origin_public_team"
+    assert engine._pre_release_team_snapshot_source == "flight_origin_public_team"
+
+
+def test_v6_c_public_possession_team_abstains_before_switch() -> None:
+    engine = P2EngineV6Batch(fps=60.0)
+
+    def observe(raw_team: str | None) -> str | None:
+        frame = SimpleNamespace(
+            diagnostics={
+                "p2": {
+                    "possession": {
+                        "control_state": "possessed",
+                        "current_team_id": raw_team,
+                    }
+                }
+            }
+        )
+        engine._stabilize_public_possession_team(frame)
+        return frame.diagnostics["p2"]["possession"]["current_team_id"]
+
+    assert observe("team_a") is None
+    assert observe("team_a") is None
+    assert observe("team_a") == "team_a"
+
+    # Short contradictory bursts abstain instead of contaminating the stable team.
+    for _ in range(18):
+        assert observe("team_b") is None
+    assert observe("team_a") == "team_a"
+
+    # A sustained change eventually becomes the new stable public team.
+    result = None
+    for _ in range(engine._public_team_switch_confirm_frames()):
+        result = observe("team_b")
+    assert result == "team_b"
+
+
+def test_v6_d_limited_empty_scope_bootstrap_is_tiered() -> None:
     selected = select_limited_bootstrap_candidates(
         [
             {
@@ -244,24 +365,43 @@ def test_v6_d_limited_empty_scope_bootstrap_is_bounded() -> None:
                 "team": "team_b",
                 "team_confidence": 0.99,
             },
-        ]
+            {
+                "track_id": 4,
+                "active_on_court": None,
+                "identity_eligible": True,
+                "confidence": 0.76,
+                "local_court_surface_ratio": 0.10,
+                "court_eligibility_source": "image_space_ambiguous_surface",
+                "team": None,
+                "team_confidence": None,
+            },
+        ],
+        known_track_ids={4},
     )
-    assert [row["track_id"] for row in selected] == [1]
-    assert selected[0]["active_on_court"] is True
-    assert selected[0]["gate_d_limited_bootstrap"] is True
+    assert [row["track_id"] for row in selected] == [4, 1]
+    assert selected[0]["gate_d_limited_bootstrap_tier"] == "known_resolved_track"
+    assert selected[1]["gate_d_limited_bootstrap_tier"] == (
+        "persistent_new_track_candidate"
+    )
+    assert all(row["active_on_court"] is True for row in selected)
 
 
 def main() -> None:
     test_v6_a_hysteresis_contract()
+    test_v6_a_weak_live_timeout_persists_until_strong_resume()
+    test_v6_a_safe_basket_context_does_not_consume_weak_budget()
     test_v6_b_ft_single_mouth_plus_descent_confirms_made()
     test_v6_b_incoherent_deferred_geometry_still_abstains()
     test_v6_b_unconfirmed_trajectory_start_is_not_published()
     test_v6_b_eight_direct_rim_observations_are_enough_for_miss()
     test_v6_b_supported_flight_can_bridge_at_rim_band()
+    test_v6_b_nested_possession_flight_support_is_consumed()
     test_v6_b_rearm_requires_post_shot_control_reacquisition()
     test_v6_c_exact_actor_snapshot_can_publish_team()
     test_v6_c_actor_team_snapshot_is_frozen_at_release()
-    test_v6_d_limited_empty_scope_bootstrap_is_bounded()
+    test_v6_c_actorless_shot_uses_frozen_public_flight_origin()
+    test_v6_c_public_possession_team_abstains_before_switch()
+    test_v6_d_limited_empty_scope_bootstrap_is_tiered()
     print("p2_v6_abcd_batch_test: PASS")
 
 
