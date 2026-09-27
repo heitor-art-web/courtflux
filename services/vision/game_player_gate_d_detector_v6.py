@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from services.vision.court_state_gameplay_v3 import CourtStateEstimatorV3
+from services.vision.court_state_gameplay_v4 import CourtStateEstimatorV4
 from services.vision.game_player_gate_d_detector_v5 import PerformanceDetector as GateDDetectorV5
 from services.vision.gate_d_limited_scope_v6 import select_limited_bootstrap_candidates
 
@@ -22,7 +22,7 @@ class PerformanceDetector(GateDDetectorV5):
 
     def __init__(self, *args: Any, **kwargs: Any) -> None:
         super().__init__(*args, **kwargs)
-        self.identity_court_estimator = CourtStateEstimatorV3()
+        self.identity_court_estimator = CourtStateEstimatorV4()
         self._v6_last_limited_bootstrap_count = 0
         self._v6_last_limited_bootstrap_known_count = 0
         self._v6_last_limited_bootstrap_new_count = 0
