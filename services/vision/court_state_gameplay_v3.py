@@ -1,5 +1,8 @@
 from __future__ import annotations
 
+import math
+import statistics
+from collections import deque
 from typing import Any
 
 from services.vision.court_state_gameplay_v2 import CourtStateEstimatorV2
@@ -8,31 +11,44 @@ from services.vision.court_state_gameplay_v2 import CourtStateEstimatorV2
 class CourtStateEstimatorV3(CourtStateEstimatorV2):
     """V6 temporal-boundary policy layered over the long-form V2 estimator.
 
-    The first V6 batch showed two distinct temporal failure modes:
+    V6 exposed three distinct temporal failure modes:
 
-    * short hard negatives (broadcast cuts/close-ups) still became false NON_GAMEPLAY
+    * short hard negatives (broadcast cuts/close-ups) can become false NON_GAMEPLAY
       boundaries inside live possessions;
-    * prolonged weak-live evidence never became NON_GAMEPLAY because V2's weak timeout
-      emitted only a one-frame negative pulse, resetting before the hard-boundary debounce
-      could accumulate.
+    * prolonged weak-live evidence can stay GAMEPLAY_LIMITED indefinitely unless its
+      timeout is persistent;
+    * wide dead-ball periods can still look superficially live because camera motion,
+      many players and intermittent ball detections satisfy the cheap visual heuristics.
 
-    V3 therefore separates those cases instead of solving both with one threshold:
+    V3 keeps those cases separate:
 
     * hard negative evidence must persist for 3.5 s before creating a boundary;
     * non-basket weak-live evidence receives a 1.0 s grace period, then stays negative
-      until strong live or safe basket+ball context returns, allowing the normal debounce
-      to accumulate;
-    * safe basket+ball LIMITED context does not consume the weak-live budget.
+      until strong live or safe basket+ball context returns;
+    * a conservative low-action watchdog removes global camera translation from tracked
+      player motion and combines the residual with direct ball availability. Four seconds
+      of sustained low action are themselves sufficient evidence for NON_GAMEPLAY.
 
-    Positive strong-wide and basket/ball resume semantics remain inherited from V2.
+    The low-action path is intentionally slow. It is not a replacement for normal
+    gameplay detection; it exists only to reject long dead-ball stretches that otherwise
+    remain latched as gameplay forever.
     """
 
-    POLICY_VERSION = "court_state_gameplay_v3_v6_batch_2"
+    POLICY_VERSION = "court_state_gameplay_v3_v6_batch_3"
     BOUNDED_WEAK_REASONS = {
         "on_court_motion_hold",
         "prefilter_and_on_court_motion",
         "motion_supported_prefilter",
     }
+
+    ACTION_WINDOW_SEC = 1.50
+    LOW_ACTION_CONFIRM_SEC = 4.00
+    LOW_ACTION_MIN_MATCHED_PLAYERS = 3
+    LOW_ACTION_MIN_VALID_MOTION_RATIO = 0.50
+    LOW_ACTION_MOTION_MAX = 0.0065
+    LOW_ACTION_BALL_RATE_MAX = 0.55
+    LOW_BALL_MOTION_MAX = 0.0090
+    LOW_BALL_RATE_MAX = 0.25
 
     def __init__(
         self,
@@ -49,11 +65,176 @@ class CourtStateEstimatorV3(CourtStateEstimatorV2):
         )
         self._v3_weak_context_frames = 0
         self._v3_weak_timeout_latched = False
+        self._v3_previous_players: dict[int, tuple[float, float, float]] = {}
+        self._v3_action_history: deque[tuple[float | None, bool]] = deque()
+        self._v3_low_action_frames = 0
+        self._v3_last_action_watchdog: dict[str, Any] = {}
 
     def _reset_temporal_presence(self) -> None:
         super()._reset_temporal_presence()
         self._v3_weak_context_frames = 0
         self._v3_weak_timeout_latched = False
+        self._v3_previous_players.clear()
+        self._v3_action_history.clear()
+        self._v3_low_action_frames = 0
+        self._v3_last_action_watchdog = {}
+
+    @staticmethod
+    def _player_motion_snapshot(
+        frame_state: Any,
+    ) -> dict[int, tuple[float, float, float]]:
+        snapshot: dict[int, tuple[float, float, float]] = {}
+        for player in list(getattr(frame_state, "players", []) or []):
+            if not isinstance(player, dict):
+                continue
+            try:
+                track_id = int(player.get("track_id", -1))
+            except (TypeError, ValueError):
+                continue
+            raw_box = player.get("box", player.get("bbox"))
+            if track_id < 0 or not isinstance(raw_box, (list, tuple)) or len(raw_box) < 4:
+                continue
+            try:
+                x1, y1, x2, y2 = (float(raw_box[index]) for index in range(4))
+            except (TypeError, ValueError):
+                continue
+            height = max(1.0, y2 - y1)
+            snapshot[track_id] = ((x1 + x2) / 2.0, (y1 + y2) / 2.0, height)
+        return snapshot
+
+    def _relative_player_motion(self, frame_state: Any) -> tuple[float | None, int]:
+        """Return camera-translation-compensated player motion in player heights/frame."""
+        current = self._player_motion_snapshot(frame_state)
+        deltas: list[tuple[float, float, float]] = []
+        for track_id, (cx, cy, height) in current.items():
+            previous = self._v3_previous_players.get(track_id)
+            if previous is None:
+                continue
+            px, py, previous_height = previous
+            deltas.append((
+                cx - px,
+                cy - py,
+                max(1.0, (height + previous_height) / 2.0),
+            ))
+        self._v3_previous_players = current
+
+        if len(deltas) < self.LOW_ACTION_MIN_MATCHED_PLAYERS:
+            return None, len(deltas)
+
+        # A broadcast pan moves most tracked players in roughly the same image-space
+        # direction. Subtract the cohort median translation before measuring residual
+        # player motion so camera movement cannot by itself keep dead-ball footage live.
+        global_dx = statistics.median(delta[0] for delta in deltas)
+        global_dy = statistics.median(delta[1] for delta in deltas)
+        residuals = [
+            math.hypot(dx - global_dx, dy - global_dy) / height
+            for dx, dy, height in deltas
+        ]
+        return float(statistics.median(residuals)), len(deltas)
+
+    def _update_low_action_watchdog(
+        self,
+        frame_state: Any,
+        *,
+        fps: float,
+    ) -> dict[str, Any]:
+        motion, matched_players = self._relative_player_motion(frame_state)
+        direct_ball_observed = getattr(frame_state, "ball", None) is not None
+        self._v3_action_history.append((motion, direct_ball_observed))
+
+        window_frames = self._threshold_frames(self.ACTION_WINDOW_SEC, fps)
+        while len(self._v3_action_history) > window_frames:
+            self._v3_action_history.popleft()
+
+        valid_motion = [
+            value
+            for value, _ in self._v3_action_history
+            if value is not None
+        ]
+        history_frames = len(self._v3_action_history)
+        valid_ratio = (
+            len(valid_motion) / history_frames if history_frames > 0 else 0.0
+        )
+        rolling_motion = (
+            sum(valid_motion) / len(valid_motion) if valid_motion else None
+        )
+        ball_rate = (
+            sum(1 for _, observed in self._v3_action_history if observed)
+            / history_frames
+            if history_frames > 0
+            else 0.0
+        )
+
+        history_ready = bool(
+            history_frames >= window_frames
+            and valid_ratio >= self.LOW_ACTION_MIN_VALID_MOTION_RATIO
+            and rolling_motion is not None
+        )
+        low_action_signal = bool(
+            history_ready
+            and (
+                (
+                    float(rolling_motion) <= self.LOW_ACTION_MOTION_MAX
+                    and ball_rate <= self.LOW_ACTION_BALL_RATE_MAX
+                )
+                or (
+                    float(rolling_motion) <= self.LOW_BALL_MOTION_MAX
+                    and ball_rate <= self.LOW_BALL_RATE_MAX
+                )
+            )
+        )
+
+        if low_action_signal:
+            self._v3_low_action_frames += 1
+        else:
+            self._v3_low_action_frames = 0
+
+        confirm_frames = self._threshold_frames(self.LOW_ACTION_CONFIRM_SEC, fps)
+        confirmed = self._v3_low_action_frames >= confirm_frames
+        diagnostics = {
+            "v3_low_action_watchdog_enabled": True,
+            "v3_player_relative_motion": (
+                None if motion is None else round(float(motion), 6)
+            ),
+            "v3_player_motion_matched_tracks": int(matched_players),
+            "v3_action_window_frames": int(window_frames),
+            "v3_action_window_valid_motion_ratio": round(float(valid_ratio), 6),
+            "v3_action_window_motion_mean": (
+                None if rolling_motion is None else round(float(rolling_motion), 6)
+            ),
+            "v3_action_window_direct_ball_rate": round(float(ball_rate), 6),
+            "v3_low_action_signal": low_action_signal,
+            "v3_low_action_frames": int(self._v3_low_action_frames),
+            "v3_low_action_confirm_frames": int(confirm_frames),
+            "v3_low_action_confirmed": bool(confirmed),
+        }
+        self._v3_last_action_watchdog = diagnostics
+        return diagnostics
+
+    def _candidate(
+        self,
+        frame_state: Any,
+        state: Any,
+        gameplay: dict[str, Any],
+    ) -> tuple[bool, str, str, dict[str, Any]] | None:
+        candidate = super()._candidate(frame_state, state, gameplay)
+        watchdog = self._update_low_action_watchdog(
+            frame_state,
+            fps=self._fps(frame_state),
+        )
+        if candidate is None:
+            return None
+
+        candidate_present, candidate_status, candidate_reason, evidence = candidate
+        evidence = {**evidence, **watchdog}
+        if bool(watchdog.get("v3_low_action_confirmed", False)):
+            return (
+                False,
+                "non_gameplay",
+                "v3_sustained_low_action_candidate",
+                evidence,
+            )
+        return candidate_present, candidate_status, candidate_reason, evidence
 
     def _resolve_temporal_presence(
         self,
@@ -66,17 +247,40 @@ class CourtStateEstimatorV3(CourtStateEstimatorV2):
         safe_limited_resume: bool = False,
         weak_live_evidence: bool = False,
     ) -> tuple[bool, str, str, dict[str, Any]]:
-        """Make weak-live expiry persistent instead of a one-frame pulse.
+        """Make weak-live expiry persistent and accept confirmed low-action stoppages."""
 
-        V2 increments ``_weak_live_frames`` while weak evidence is positive. On the exact
-        timeout frame it flips the candidate negative, but the following frame starts the
-        weak counter again from zero. With a multi-second NON_GAMEPLAY debounce, a true
-        stoppage can therefore remain GAMEPLAY_LIMITED forever.
-
-        V3 owns that weak budget explicitly. Once bounded weak context expires, the
-        candidate remains negative until strong wide live evidence or safe basket+ball
-        context returns. Hard negatives keep using the normal long debounce.
-        """
+        # The watchdog has already required a 1.5 s causal evidence window followed by
+        # 4.0 s of uninterrupted low-action evidence. Do not add the generic 3.5 s hard
+        # negative debounce again; that would make this path too slow to reject a useful
+        # fraction of a real stoppage.
+        if (
+            not candidate_present
+            and candidate_reason == "v3_sustained_low_action_candidate"
+        ):
+            self._gameplay_presence_latched = False
+            self._non_gameplay_candidate_frames = 0
+            self._gameplay_candidate_frames = 0
+            return (
+                False,
+                "non_gameplay",
+                "v3_sustained_low_action_confirmed",
+                {
+                    "non_gameplay_enter_frames": self._threshold_frames(
+                        self.non_gameplay_enter_sec, fps
+                    ),
+                    "gameplay_resume_frames": self._threshold_frames(
+                        self.gameplay_resume_sec, fps
+                    ),
+                    "strong_gameplay_resume_frames": self._threshold_frames(
+                        self.strong_gameplay_resume_sec, fps
+                    ),
+                    "weak_live_hold_frames": self._threshold_frames(
+                        self.weak_live_hold_sec, fps
+                    ),
+                    "weak_live_frames": self._weak_live_frames,
+                    "v3_low_action_direct_confirmation": True,
+                },
+            )
 
         bounded_weak = bool(
             candidate_present
@@ -121,6 +325,7 @@ class CourtStateEstimatorV3(CourtStateEstimatorV2):
         diagnostics["v3_weak_context_frames"] = int(self._v3_weak_context_frames)
         diagnostics["v3_weak_timeout_latched"] = bool(self._v3_weak_timeout_latched)
         diagnostics["v3_bounded_weak_reason"] = bool(bounded_weak)
+        diagnostics.update(self._v3_last_action_watchdog)
         return present, status, reason, diagnostics
 
     def update(
@@ -137,10 +342,11 @@ class CourtStateEstimatorV3(CourtStateEstimatorV2):
         if isinstance(policy, dict):
             policy["version"] = self.POLICY_VERSION
             policy["v6_boundary_objective"] = (
-                "3.5s_hard_negative_debounce_plus_persistent_bounded_weak_timeout"
+                "3.5s_hard_negative_debounce_plus_persistent_weak_timeout_plus_4s_low_action_watchdog"
             )
             policy["v3_weak_context_frames"] = int(self._v3_weak_context_frames)
             policy["v3_weak_timeout_latched"] = bool(self._v3_weak_timeout_latched)
+            policy.update(self._v3_last_action_watchdog)
         self.last_state = state
         self.last_diagnostics = state.as_dict()
         return state
@@ -149,9 +355,18 @@ class CourtStateEstimatorV3(CourtStateEstimatorV2):
         payload = dict(super().metadata())
         payload["gameplay_presence_version"] = self.POLICY_VERSION
         payload["v6_boundary_objective"] = (
-            "3.5s_hard_negative_debounce_plus_persistent_bounded_weak_timeout"
+            "3.5s_hard_negative_debounce_plus_persistent_weak_timeout_plus_4s_low_action_watchdog"
         )
         payload["bounded_weak_reasons"] = sorted(self.BOUNDED_WEAK_REASONS)
+        payload["low_action_watchdog"] = {
+            "window_sec": self.ACTION_WINDOW_SEC,
+            "confirm_sec": self.LOW_ACTION_CONFIRM_SEC,
+            "motion_max": self.LOW_ACTION_MOTION_MAX,
+            "ball_rate_max": self.LOW_ACTION_BALL_RATE_MAX,
+            "low_ball_motion_max": self.LOW_BALL_MOTION_MAX,
+            "low_ball_rate_max": self.LOW_BALL_RATE_MAX,
+            "camera_translation_compensated": True,
+        }
         return payload
 
 
