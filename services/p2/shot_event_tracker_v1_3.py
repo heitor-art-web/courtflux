@@ -11,15 +11,17 @@ from services.p2.shot_event_tracker_v1_2 import ShotEventTrackerV12
 class ShotEventTrackerV13(ShotEventTrackerV12):
     """V6-focused shot lifecycle policy layered over V1.2.
 
-    The V6 validation trace exposed four concrete failure modes which are handled here
-    without changing the frozen V1/V1.1/V1.2 implementations:
+    The V6 validation trace exposed concrete failure modes handled here without changing
+    the frozen V1/V1.1/V1.2 implementations:
 
     * a supported airborne flight can reach the rim band without satisfying the strict
       ``above + near_x`` start gate (the V6 P4 false negative);
+    * a supported-flight bridge is a deliberately weaker start path, so it is published
+      only if the attempt later resolves MADE/MISSED rather than remaining UNKNOWN;
     * a trajectory-only start that never obtains any direct above/rim-band evidence is
-      not published as a shot attempt (the V6 870.3 false positive);
+      not published as a shot attempt;
     * a deferred rim exit with tight mouth alignment, coherent geometry and sustained
-      downward/below-rim evidence may confirm MADE (the V6 free throw);
+      downward/below-rim evidence may confirm MADE;
     * a well-observed above+rim-band attempt that expires without made evidence is
       resolved MISSED, enabling the existing possession-driven rebound path.
 
@@ -27,7 +29,7 @@ class ShotEventTrackerV13(ShotEventTrackerV12):
     not armed until control has also been reacquired after the previous resolved attempt.
     """
 
-    OUTCOME_POLICY_REVISION = "shot_outcome_v1_3_v6_batch"
+    OUTCOME_POLICY_REVISION = "shot_outcome_v1_3_v6_batch_2"
     MIN_STRONG_EXPIRY_OBSERVATIONS = 8
     DEFERRED_TIGHT_MOUTH_MAX_X_RIM_WIDTHS = 0.25
     DEFERRED_MIN_BELOW_OBSERVATIONS = 3
@@ -38,6 +40,7 @@ class ShotEventTrackerV13(ShotEventTrackerV12):
         self._supported_flight_hint = False
         self._control_reacquired_frame: int | None = None
         self._suppressed_public_shots = 0
+        self._suppressed_unresolved_supported_bridges = 0
         self._last_suppressed_reason: str | None = None
         self._supported_flight_bridge_starts = 0
 
@@ -143,6 +146,14 @@ class ShotEventTrackerV13(ShotEventTrackerV12):
             and not bool(attributes.get("had_rim_band", False))
         )
 
+    @staticmethod
+    def _is_unresolved_supported_flight_bridge(event: BasketballEvent) -> bool:
+        outcome = str((event.attributes or {}).get("outcome") or ShotOutcome.UNKNOWN.value)
+        return bool(
+            outcome == ShotOutcome.UNKNOWN.value
+            and "supported_airborne_rim_band_bridge" in set(event.evidence or ())
+        )
+
     @classmethod
     def _strong_expiry_is_miss(cls, event: BasketballEvent) -> bool:
         attributes = dict(event.attributes or {})
@@ -166,7 +177,7 @@ class ShotEventTrackerV13(ShotEventTrackerV12):
     ) -> BasketballEvent | None:
         event.provenance["outcome_policy_revision"] = self.OUTCOME_POLICY_REVISION
         event.provenance["start_confirmation_policy"] = (
-            "supported_flight_rim_band_bridge_plus_direct_post_start_confirmation"
+            "supported_flight_bridge_requires_resolved_outcome_for_publication"
         )
         event.provenance["rearm_policy"] = (
             "direct_observed_clearance_plus_confirmed_control_reacquisition"
@@ -179,6 +190,9 @@ class ShotEventTrackerV13(ShotEventTrackerV12):
             )
             return None
 
+        # Strong terminal evidence is allowed to promote a bridge attempt to MISSED
+        # before the unresolved-bridge publication filter runs. This is what preserves
+        # the recovered V6 P4 shot while rejecting the four bridge-only UNKNOWN FPs.
         if self._strong_expiry_is_miss(event):
             reason = "strong_rim_evidence_expiry_missed"
             event.attributes["outcome"] = ShotOutcome.MISSED.value
@@ -188,6 +202,14 @@ class ShotEventTrackerV13(ShotEventTrackerV12):
             event.decision = EventDecision.CONFIRMED
             event.confidence = max(float(event.confidence), 0.72)
             event.uncertainty = 1.0 - event.confidence
+
+        if self._is_unresolved_supported_flight_bridge(event):
+            self._suppressed_public_shots += 1
+            self._suppressed_unresolved_supported_bridges += 1
+            self._last_suppressed_reason = (
+                "supported_flight_bridge_terminal_outcome_unresolved"
+            )
+            return None
         return event
 
     def _maybe_start_supported_flight_bridge(
@@ -283,6 +305,10 @@ class ShotEventTrackerV13(ShotEventTrackerV12):
                 "outcome_policy_revision": self.OUTCOME_POLICY_REVISION,
                 "supported_flight_rim_band_bridge": True,
                 "supported_flight_bridge_starts": self._supported_flight_bridge_starts,
+                "supported_flight_bridge_requires_resolved_outcome": True,
+                "suppressed_unresolved_supported_bridges": (
+                    self._suppressed_unresolved_supported_bridges
+                ),
                 "causal_rearm_requires_control_reacquisition": True,
                 "control_reacquired_frame": self._control_reacquired_frame,
                 "suppressed_public_shots": self._suppressed_public_shots,
