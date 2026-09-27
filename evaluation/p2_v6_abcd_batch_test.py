@@ -52,11 +52,23 @@ def _observed_ball(frame_id: int = 120) -> BallState:
     )
 
 
+def _motion_players(frame_id: int, *, global_pan_px: float = 0.0) -> list[dict]:
+    shift = float(frame_id) * float(global_pan_px)
+    return [
+        {"track_id": 1, "box": [100.0 + shift, 100.0, 150.0 + shift, 200.0]},
+        {"track_id": 2, "box": [250.0 + shift, 100.0, 300.0 + shift, 200.0]},
+        {"track_id": 3, "box": [400.0 + shift, 100.0, 450.0 + shift, 200.0]},
+        {"track_id": 4, "box": [550.0 + shift, 100.0, 600.0 + shift, 200.0]},
+    ]
+
+
 def test_v6_a_hysteresis_contract() -> None:
     estimator = CourtStateEstimatorV3()
     assert estimator.non_gameplay_enter_sec == 3.5
     assert estimator.weak_live_hold_sec == 1.0
     assert estimator.gameplay_resume_sec == 0.20
+    assert estimator.LOW_ACTION_CONFIRM_SEC == 4.0
+    assert estimator.ACTION_WINDOW_SEC == 1.5
 
 
 def test_v6_a_weak_live_timeout_persists_until_strong_resume() -> None:
@@ -79,8 +91,6 @@ def test_v6_a_weak_live_timeout_persists_until_strong_resume() -> None:
     assert result is not None and result[0] is True
     assert estimator._v3_weak_timeout_latched is False
 
-    # Tenth weak frame exhausts the 1.0 s grace and starts a persistent negative
-    # candidate. The hard boundary still requires the separate 3.5 s debounce.
     result = weak()
     assert result[0] is True
     assert estimator._v3_weak_timeout_latched is True
@@ -89,7 +99,6 @@ def test_v6_a_weak_live_timeout_persists_until_strong_resume() -> None:
     assert result[0] is False
     assert result[1] == "non_gameplay"
 
-    # One strong-live frame clears the weak timeout and uses the fast resume path.
     result = estimator._resolve_temporal_presence(
         candidate_present=True,
         candidate_status="gameplay_analysis",
@@ -120,6 +129,37 @@ def test_v6_a_safe_basket_context_does_not_consume_weak_budget() -> None:
     assert estimator._v3_weak_context_frames == 0
 
 
+def test_v6_a_low_action_watchdog_ignores_global_camera_pan() -> None:
+    estimator = CourtStateEstimatorV3()
+    diagnostics = None
+    # All player boxes translate together. Residual player motion is therefore near zero:
+    # camera movement alone must not keep a dead-ball sequence classified as live action.
+    for frame_id in range(70):
+        frame = SimpleNamespace(
+            players=_motion_players(frame_id, global_pan_px=3.0),
+            ball=None,
+            fps=10.0,
+        )
+        diagnostics = estimator._update_low_action_watchdog(frame, fps=10.0)
+    assert diagnostics is not None
+    assert diagnostics["v3_action_window_motion_mean"] == 0.0
+    assert diagnostics["v3_action_window_direct_ball_rate"] == 0.0
+    assert diagnostics["v3_low_action_confirmed"] is True
+
+    result = estimator._resolve_temporal_presence(
+        candidate_present=False,
+        candidate_status="non_gameplay",
+        candidate_reason="v3_sustained_low_action_candidate",
+        fps=10.0,
+        strong_live_evidence=False,
+        safe_limited_resume=False,
+        weak_live_evidence=False,
+    )
+    assert result[0] is False
+    assert result[1] == "non_gameplay"
+    assert result[2] == "v3_sustained_low_action_confirmed"
+
+
 def test_v6_b_ft_single_mouth_plus_descent_confirms_made() -> None:
     reason = ShotEventTrackerV13._deferred_confirmation_reason(
         {
@@ -128,7 +168,6 @@ def test_v6_b_ft_single_mouth_plus_descent_confirms_made() -> None:
             "inside_mouth_observations": 1,
             "below_rim_observations": 6,
             "descending_steps": 4,
-            "ascending_steps": 2,
             "incoherent_rim_steps": 0,
             "min_abs_x_offset_rim_widths": 0.0103,
         }
@@ -163,6 +202,47 @@ def test_v6_b_unconfirmed_trajectory_start_is_not_published() -> None:
     )
     assert tracker._postprocess_public_event(event) is None
     assert tracker.diagnostics()["suppressed_public_shots"] == 1
+
+
+def test_v6_b_unresolved_supported_flight_bridge_is_not_published() -> None:
+    tracker = ShotEventTrackerV13(fps=60.0)
+    event = _shot_event(
+        semantic_start=False,
+        had_above_rim=False,
+        had_rim_band=True,
+        direct_ball_observations=16,
+        resolution_reason="shot_window_expired_without_outcome_evidence",
+        pending_bridge_used=False,
+    )
+    event.evidence = ("ball_near_rim", "supported_airborne_rim_band_bridge")
+    assert tracker._postprocess_public_event(event) is None
+    diagnostics = tracker.diagnostics()
+    assert diagnostics["suppressed_unresolved_supported_bridges"] == 1
+    assert diagnostics["last_suppressed_reason"] == (
+        "supported_flight_bridge_terminal_outcome_unresolved"
+    )
+
+
+def test_v6_b_supported_bridge_with_strong_rim_evidence_survives_as_miss() -> None:
+    tracker = ShotEventTrackerV13(fps=60.0)
+    event = _shot_event(
+        semantic_start=False,
+        had_above_rim=True,
+        had_rim_band=True,
+        direct_ball_observations=10,
+        resolution_reason="shot_window_expired_without_outcome_evidence",
+        pending_bridge_used=False,
+    )
+    event.evidence = (
+        "ball_above_rim",
+        "ball_near_rim",
+        "supported_airborne_rim_band_bridge",
+    )
+    result = tracker._postprocess_public_event(event)
+    assert result is not None
+    assert result.attributes["outcome"] == ShotOutcome.MISSED.value
+    assert result.decision is EventDecision.CONFIRMED
+    assert tracker.diagnostics()["suppressed_unresolved_supported_bridges"] == 0
 
 
 def test_v6_b_eight_direct_rim_observations_are_enough_for_miss() -> None:
@@ -320,12 +400,10 @@ def test_v6_c_public_possession_team_abstains_before_switch() -> None:
     assert observe("team_a") is None
     assert observe("team_a") == "team_a"
 
-    # Short contradictory bursts abstain instead of contaminating the stable team.
     for _ in range(18):
         assert observe("team_b") is None
     assert observe("team_a") == "team_a"
 
-    # A sustained change eventually becomes the new stable public team.
     result = None
     for _ in range(engine._public_team_switch_confirm_frames()):
         result = observe("team_b")
@@ -390,9 +468,12 @@ def main() -> None:
     test_v6_a_hysteresis_contract()
     test_v6_a_weak_live_timeout_persists_until_strong_resume()
     test_v6_a_safe_basket_context_does_not_consume_weak_budget()
+    test_v6_a_low_action_watchdog_ignores_global_camera_pan()
     test_v6_b_ft_single_mouth_plus_descent_confirms_made()
     test_v6_b_incoherent_deferred_geometry_still_abstains()
     test_v6_b_unconfirmed_trajectory_start_is_not_published()
+    test_v6_b_unresolved_supported_flight_bridge_is_not_published()
+    test_v6_b_supported_bridge_with_strong_rim_evidence_survives_as_miss()
     test_v6_b_eight_direct_rim_observations_are_enough_for_miss()
     test_v6_b_supported_flight_can_bridge_at_rim_band()
     test_v6_b_nested_possession_flight_support_is_consumed()
