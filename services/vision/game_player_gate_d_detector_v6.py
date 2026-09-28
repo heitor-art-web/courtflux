@@ -2,13 +2,13 @@ from __future__ import annotations
 
 from typing import Any
 
-from services.vision.court_state_gameplay_v5 import CourtStateEstimatorV5
+from services.vision.court_state_gameplay_v6 import CourtStateEstimatorV6
 from services.vision.game_player_gate_d_detector_v5 import PerformanceDetector as GateDDetectorV5
 from services.vision.gate_d_limited_scope_v6 import select_limited_bootstrap_candidates
 
 
 class PerformanceDetector(GateDDetectorV5):
-    """V6 Gate-D scope recovery on top of the stoppage-aware V5 resolver.
+    """V6 Gate-D scope recovery on top of the stoppage-aware resolver.
 
     LIMITED fallback is split into two risk tiers:
 
@@ -22,7 +22,7 @@ class PerformanceDetector(GateDDetectorV5):
 
     def __init__(self, *args: Any, **kwargs: Any) -> None:
         super().__init__(*args, **kwargs)
-        self.identity_court_estimator = CourtStateEstimatorV5()
+        self.identity_court_estimator = CourtStateEstimatorV6()
         self._v6_last_limited_bootstrap_count = 0
         self._v6_last_limited_bootstrap_known_count = 0
         self._v6_last_limited_bootstrap_new_count = 0
