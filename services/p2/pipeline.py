@@ -6,14 +6,14 @@ from typing import Any
 from services.p2.engine_v6_batch import P2EngineV6Batch
 from services.p2.shot_event_tracker_v1_3 import ShotEventTrackerV13
 from services.pipeline import Pipeline
-from services.vision.court_state_gameplay_v4 import CourtStateEstimatorV4
+from services.vision.court_state_gameplay_v5 import CourtStateEstimatorV5
 
 
 class P2Pipeline(Pipeline):
     """Compatibility wrapper that forces the canonical Pipeline's P2 stage on.
 
     The V6 validation branch keeps all batch changes behind this P2-only wrapper:
-    CourtState gameplay policy V4 plus the V6 engine coordinator and V1.3 shot tracker.
+    CourtState gameplay policy V5 plus the V6 engine coordinator and V1.3 shot tracker.
     The base Pipeline and non-P2 runtime remain unchanged.
     """
 
@@ -25,7 +25,7 @@ class P2Pipeline(Pipeline):
         else:
             os.environ["BASKETBALL_P2_ENABLED"] = "0"
         super().__init__(*args, **kwargs)
-        gameplay_estimator = CourtStateEstimatorV4()
+        gameplay_estimator = CourtStateEstimatorV5()
         self.court_state_estimator = gameplay_estimator
         if hasattr(self.detector, "identity_court_estimator"):
             self.detector.identity_court_estimator = gameplay_estimator
