@@ -37,6 +37,7 @@ def _download_sportsreid_source() -> Path:
 def _download_sportsreid_weights() -> Path:
     SPORTSREID_CACHE_DIR.mkdir(parents=True, exist_ok=True)
     if SPORTSREID_WEIGHTS_PATH.exists() and SPORTSREID_WEIGHTS_PATH.stat().st_size > 0:
+        print("[ReID preflight] SportsReID checkpoint found in cache", flush=True)
         return SPORTSREID_WEIGHTS_PATH
     try:
         import gdown
@@ -113,6 +114,7 @@ def _sports_build_model(
     if backend != "sportsreid_osnet_x1_0_soccernet":
         return _ORIGINAL_BUILD_MODEL(device, backend)
 
+    print("[ReID preflight] stage 3/5: preparing SportsReID model", flush=True)
     module = _load_sportsreid_source()
     weights_path = _download_sportsreid_weights()
     print("[ReID preflight] loading SportsReID OSNet x1.0 SoccerNet weights...", flush=True)
@@ -135,8 +137,30 @@ def _sports_build_model(
     }
 
 
+def _progress_collect(*args: Any, **kwargs: Any) -> dict[str, list[dict[str, Any]]]:
+    print("[ReID preflight] stage 1/5: scanning states for frozen raw-track observations", flush=True)
+    result = _ORIGINAL_COLLECT(*args, **kwargs)
+    found = sum(bool(rows) for rows in result.values())
+    print(f"[ReID preflight] stage 1/5 complete: crop evidence for {found}/{len(result)} observations", flush=True)
+    print("[ReID preflight] stage 2/5: decoding video crops", flush=True)
+    return result
+
+
+def _progress_embed(*args: Any, **kwargs: Any):
+    tensors = args[1] if len(args) > 1 else kwargs.get("tensors", [])
+    print(f"[ReID preflight] stage 4/5: embedding {len(tensors)} crops", flush=True)
+    result = _ORIGINAL_EMBED(*args, **kwargs)
+    print("[ReID preflight] stage 4/5 complete", flush=True)
+    print("[ReID preflight] stage 5/5: scoring frozen SAME/DIFFERENT pairs", flush=True)
+    return result
+
+
 _ORIGINAL_BUILD_MODEL = base._build_model
+_ORIGINAL_COLLECT = base._collect_crop_candidates
+_ORIGINAL_EMBED = base._embed_batches
 base._build_model = _sports_build_model
+base._collect_crop_candidates = _progress_collect
+base._embed_batches = _progress_embed
 
 
 def _parser() -> argparse.ArgumentParser:
@@ -175,13 +199,17 @@ def main() -> None:
     if args.batch_size < 1:
         raise SystemExit("--batch-size must be >= 1")
 
+    states_path = (
+        Path(args.states).expanduser().resolve()
+        if args.states
+        else base._latest_states_file()
+    )
     if args.output is None:
-        states_path = (
-            Path(args.states).expanduser().resolve()
-            if args.states
-            else base._latest_states_file()
-        )
         args.output = str(states_path.parent / "p2_v6_gate_d_sportsreid_preflight.json")
+
+    print("[ReID preflight] SportsReID diagnostic starting", flush=True)
+    print(f"[ReID preflight] states: {states_path}", flush=True)
+    print(f"[ReID preflight] video: {Path(args.video).expanduser().resolve()}", flush=True)
     base.run(args)
 
 
