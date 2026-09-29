@@ -4,16 +4,24 @@ from typing import Any
 
 from services.vision.court_state_gameplay_v6_resume import CourtStateEstimatorV6Resume
 from services.vision.game_player_gate_d_detector_v5 import PerformanceDetector as GateDDetectorV5
+from services.vision.game_player_resolver_gate_d_v6 import GateDGamePlayerResolverV6
 from services.vision.gate_d_limited_scope_v6 import select_limited_bootstrap_candidates
+from services.vision.gate_d_rosterless_jersey_v6 import (
+    GateDRosterlessJerseyEvidenceV6,
+)
 
 
 class PerformanceDetector(GateDDetectorV5):
-    """V6 Gate-D scope recovery on top of the stoppage-aware resolver.
+    """V6 Gate-D scope + identity recovery on top of the frozen V5 detector.
 
-    LIMITED fallback is split into two risk tiers:
+    V6 keeps the CourtState/limited-scope behavior already validated for A-C, while the
+    identity path adds only Gate-D-specific evidence:
 
-    * already-resolved raw tracks may continue with plausible image-space court evidence;
-    * unseen tracks require stronger evidence plus three consecutive candidate frames.
+    * resolved raw tracks may continue through LIMITED gameplay;
+    * unseen tracks require persistent LIMITED bootstrap evidence;
+    * rosterless jersey OCR rejected solely because the validation config has no roster is
+      accumulated as soft visual evidence after repeated agreement;
+    * the V6 resolver consumes that soft evidence without changing canonical P1 identity.
 
     NON_GAMEPLAY still freezes the resolver completely.
     """
@@ -23,6 +31,10 @@ class PerformanceDetector(GateDDetectorV5):
     def __init__(self, *args: Any, **kwargs: Any) -> None:
         super().__init__(*args, **kwargs)
         self.identity_court_estimator = CourtStateEstimatorV6Resume()
+
+        self.game_player_resolver = GateDGamePlayerResolverV6()
+        self._v6_rosterless_jersey = GateDRosterlessJerseyEvidenceV6()
+
         self._v6_last_limited_bootstrap_count = 0
         self._v6_last_limited_bootstrap_known_count = 0
         self._v6_last_limited_bootstrap_new_count = 0
@@ -32,8 +44,9 @@ class PerformanceDetector(GateDDetectorV5):
         self._v6_waiting_for_identity_scope_after_resume = False
         self._v6_resume_scope_wait_frames = 0
         self._v6_last_frames_to_identity_scope_after_resume: int | None = None
+        self._v6_last_soft_jersey_tracks = 0
         print(
-            "🧍 Gate D V6 scope: resolved-track continuation + persistent new-track bootstrap",
+            "🧍 Gate D V6: scope bootstrap + rosterless soft-jersey identity recovery",
             flush=True,
         )
 
@@ -123,6 +136,61 @@ class PerformanceDetector(GateDDetectorV5):
         self._v6_last_limited_bootstrap_count = len(bootstrap)
         return bootstrap
 
+    def _v6_prepare_soft_jersey_evidence(self, frame_state: Any) -> None:
+        frame_id = int(getattr(frame_state, "frame_id", 0))
+        diagnostics = getattr(frame_state, "diagnostics", {}) or {}
+        detector = diagnostics.get("detector", {}) if isinstance(diagnostics, dict) else {}
+        predictions = (
+            list(detector.get("jersey_predictions", []) or [])
+            if isinstance(detector, dict)
+            else []
+        )
+        self._v6_rosterless_jersey.observe_predictions(
+            frame_id=frame_id,
+            predictions=[row for row in predictions if isinstance(row, dict)],
+        )
+
+        stable_tracks = 0
+        for player in list(getattr(frame_state, "players", []) or []):
+            if not isinstance(player, dict):
+                continue
+            try:
+                track_id = int(player.get("track_id", -1))
+            except (TypeError, ValueError):
+                continue
+            if track_id < 0:
+                continue
+            number, confidence, evidence = self._v6_rosterless_jersey.evidence(
+                track_id=track_id,
+                frame_id=frame_id,
+            )
+            if number is None:
+                player.pop("gate_d_v6_soft_jersey_number", None)
+                player.pop("gate_d_v6_soft_jersey_confidence", None)
+                player.pop("gate_d_v6_soft_jersey_evidence", None)
+                continue
+            stable_tracks += 1
+            player["gate_d_v6_soft_jersey_number"] = number
+            player["gate_d_v6_soft_jersey_confidence"] = confidence
+            player["gate_d_v6_soft_jersey_evidence"] = evidence
+        self._v6_last_soft_jersey_tracks = stable_tracks
+
+    def _jersey_evidence(self, player: dict[str, Any]) -> tuple[str | None, float]:
+        canonical_number, canonical_confidence = super()._jersey_evidence(player)
+        if canonical_number is not None:
+            return canonical_number, canonical_confidence
+
+        number = player.get("gate_d_v6_soft_jersey_number")
+        if number is None:
+            return None, 0.0
+        try:
+            confidence = float(
+                player.get("gate_d_v6_soft_jersey_confidence", 0.0) or 0.0
+            )
+        except (TypeError, ValueError):
+            return None, 0.0
+        return str(number), max(0.0, min(0.95, confidence))
+
     def _observe_game_players(self, frame_state: Any) -> None:
         mode = self._gate_d_continuity_mode(frame_state)
         explicit_count = sum(
@@ -130,6 +198,11 @@ class PerformanceDetector(GateDDetectorV5):
             for player in list(getattr(frame_state, "players", []) or [])
             if isinstance(player, dict) and player.get("active_on_court") is True
         )
+
+        if mode != "frozen_non_gameplay":
+            self._v6_prepare_soft_jersey_evidence(frame_state)
+        else:
+            self._v6_last_soft_jersey_tracks = 0
 
         if mode != "gameplay_limited":
             self._v6_new_track_candidate_streaks.clear()
@@ -164,7 +237,8 @@ class PerformanceDetector(GateDDetectorV5):
                 )
                 self._v6_waiting_for_identity_scope_after_resume = False
 
-        runtime["version"] = "game_player_resolver_v6_v6_batch_2"
+        config = self._v6_rosterless_jersey.config
+        runtime["version"] = "game_player_resolver_v6_soft_jersey_reappearance"
         runtime["limited_empty_scope_bootstrap_enabled"] = True
         runtime["limited_scope_empty_before_bootstrap"] = bool(
             mode == "gameplay_limited" and explicit_count == 0
@@ -199,6 +273,23 @@ class PerformanceDetector(GateDDetectorV5):
             self._v6_last_frames_to_identity_scope_after_resume
         )
         runtime["limited_bootstrap_never_runs_in_non_gameplay"] = True
+
+        runtime["rosterless_soft_jersey_enabled"] = True
+        runtime["rosterless_soft_jersey_tracks"] = int(
+            self._v6_last_soft_jersey_tracks
+        )
+        runtime["rosterless_soft_jersey_raw_observations"] = int(
+            self._v6_rosterless_jersey.accepted_raw_observations
+        )
+        runtime["rosterless_soft_jersey_min_observations"] = int(
+            config.min_observations
+        )
+        runtime["rosterless_soft_jersey_min_posterior"] = float(
+            config.min_candidate_posterior
+        )
+        runtime["rosterless_soft_jersey_window_frames"] = int(config.window_frames)
+        runtime["team_only_split_suppressed_v6"] = True
+        runtime["long_reappearance_requires_soft_jersey"] = True
 
 
 __all__ = ["PerformanceDetector"]
