@@ -1,9 +1,13 @@
 from __future__ import annotations
 
 import argparse
+import hashlib
+import importlib.util
 import json
 import math
+import urllib.request
 from pathlib import Path
+from types import ModuleType
 from typing import Any
 
 import cv2
@@ -20,6 +24,19 @@ DEFAULT_WINDOW_FRAMES = 12
 DEFAULT_SAMPLES_PER_OBSERVATION = 5
 SAME_RECALL_TARGET = 0.85
 DIFFERENT_FALSE_MERGE_MAX = 0.05
+
+OSNET_SOURCE_REF = "c2d9b0e8251a7eb1f8417e703a1a1d90f7fca319"
+OSNET_SOURCE_URL = (
+    "https://raw.githubusercontent.com/KaiyangZhou/deep-person-reid/"
+    f"{OSNET_SOURCE_REF}/torchreid/models/osnet.py"
+)
+OSNET_WEIGHTS_NAME = (
+    "osnet_x0_25_msmt17_combineall_256x128_amsgrad_ep150_stp60_lr0.0015_"
+    "b64_fb10_softmax_labelsmooth_flip_jitter.pth"
+)
+OSNET_WEIGHTS_URL = f"https://huggingface.co/kaiyangzhou/osnet/resolve/main/{OSNET_WEIGHTS_NAME}"
+OSNET_WEIGHTS_SHA256 = "cf55163d78fc44c62c82f85ab62d39f10438679b5abe8c698ae08cfa84aa6e18"
+OSNET_CACHE_DIR = REPO_ROOT / "weights" / "reid"
 
 
 def _latest_states_file() -> Path:
@@ -238,11 +255,119 @@ def _preprocess(crop: np.ndarray) -> torch.Tensor:
     return (tensor - mean) / std
 
 
-def _build_model(device: torch.device) -> torch.nn.Module:
+def _sha256(path: Path) -> str:
+    digest = hashlib.sha256()
+    with path.open("rb") as handle:
+        for chunk in iter(lambda: handle.read(1024 * 1024), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
+def _download(url: str, destination: Path, *, sha256: str | None = None) -> Path:
+    destination.parent.mkdir(parents=True, exist_ok=True)
+    if destination.exists() and destination.stat().st_size > 0:
+        if sha256 is None or _sha256(destination) == sha256:
+            return destination
+        destination.unlink()
+
+    partial = destination.with_suffix(destination.suffix + ".part")
+    if partial.exists():
+        partial.unlink()
+    print(f"[ReID preflight] downloading {destination.name}...", flush=True)
+    try:
+        urllib.request.urlretrieve(url, partial)
+    except Exception:
+        if partial.exists():
+            partial.unlink()
+        raise
+    if sha256 is not None:
+        actual = _sha256(partial)
+        if actual != sha256:
+            partial.unlink()
+            raise RuntimeError(
+                f"Checksum mismatch for {destination.name}: expected {sha256}, got {actual}"
+            )
+    partial.replace(destination)
+    return destination
+
+
+def _load_osnet_source() -> ModuleType:
+    source_path = OSNET_CACHE_DIR / f"osnet_{OSNET_SOURCE_REF}.py"
+    _download(OSNET_SOURCE_URL, source_path)
+    spec = importlib.util.spec_from_file_location("courtflux_external_osnet", source_path)
+    if spec is None or spec.loader is None:
+        raise RuntimeError(f"Could not import pinned OSNet source: {source_path}")
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+def _load_osnet_weights(model: torch.nn.Module, weights_path: Path) -> tuple[int, int]:
+    checkpoint = torch.load(str(weights_path), map_location="cpu", weights_only=False)
+    state = checkpoint.get("state_dict") if isinstance(checkpoint, dict) else None
+    if not isinstance(state, dict):
+        state = checkpoint if isinstance(checkpoint, dict) else None
+    if not isinstance(state, dict):
+        raise RuntimeError(f"Unsupported OSNet checkpoint structure: {weights_path}")
+
+    model_state = model.state_dict()
+    matched: dict[str, torch.Tensor] = {}
+    discarded = 0
+    for raw_key, value in state.items():
+        key = str(raw_key)
+        for prefix in ("module.", "model."):
+            if key.startswith(prefix):
+                key = key[len(prefix) :]
+        if key in model_state and hasattr(value, "shape") and model_state[key].shape == value.shape:
+            matched[key] = value
+        else:
+            discarded += 1
+    if len(matched) < 100:
+        raise RuntimeError(
+            f"OSNet checkpoint matched only {len(matched)} tensors; refusing weak/incorrect load"
+        )
+    model.load_state_dict(matched, strict=False)
+    return len(matched), discarded
+
+
+def _build_model(
+    device: torch.device,
+    backend: str,
+) -> tuple[torch.nn.Module, dict[str, Any]]:
+    if backend == "osnet_x0_25_msmt17":
+        module = _load_osnet_source()
+        weights_path = _download(
+            OSNET_WEIGHTS_URL,
+            OSNET_CACHE_DIR / OSNET_WEIGHTS_NAME,
+            sha256=OSNET_WEIGHTS_SHA256,
+        )
+        print("[ReID preflight] loading OSNet x0.25 MSMT17 weights...", flush=True)
+        model = module.osnet_x0_25(num_classes=1, pretrained=False)
+        matched, discarded = _load_osnet_weights(model, weights_path)
+        model = model.to(device).eval()
+        return model, {
+            "backend": "osnet_x0_25_msmt17",
+            "person_reid_specific": True,
+            "training_domain": "MSMT17 combineall",
+            "source_ref": OSNET_SOURCE_REF,
+            "weights": str(weights_path),
+            "weights_sha256": OSNET_WEIGHTS_SHA256,
+            "matched_checkpoint_tensors": matched,
+            "discarded_checkpoint_tensors": discarded,
+            "input_size": [256, 128],
+            "device": str(device),
+        }
+
     print("[ReID preflight] loading torchvision ResNet50 ImageNet weights...", flush=True)
     model = resnet50(weights=ResNet50_Weights.IMAGENET1K_V2)
     model.fc = torch.nn.Identity()
-    return model.to(device).eval()
+    model = model.to(device).eval()
+    return model, {
+        "backend": "torchvision_resnet50_imagenet_v2",
+        "person_reid_specific": False,
+        "input_size": [256, 128],
+        "device": str(device),
+    }
 
 
 def _embed_batches(
@@ -257,6 +382,11 @@ def _embed_batches(
         for start in range(0, len(tensors), int(batch_size)):
             batch = torch.stack(tensors[start : start + int(batch_size)]).to(device)
             features = model(batch)
+            if isinstance(features, (tuple, list)):
+                features = features[-1]
+            if not torch.is_tensor(features):
+                raise RuntimeError(f"Embedding model returned unsupported type: {type(features)}")
+            features = features.reshape(features.shape[0], -1)
             features = F.normalize(features.float(), p=2, dim=1)
             outputs.append(features.detach().cpu().numpy())
     return np.concatenate(outputs, axis=0)
@@ -463,7 +593,7 @@ def run(args: argparse.Namespace) -> dict[str, Any]:
         capture.release()
 
     device = _device(str(args.device))
-    model = _build_model(device)
+    model, model_metadata = _build_model(device, str(args.backend))
     sample_embeddings = _embed_batches(
         model,
         tensors,
@@ -495,25 +625,19 @@ def run(args: argparse.Namespace) -> dict[str, Any]:
 
     same_scores = [float(row["similarity"]) for row in same_rows]
     different_scores = [float(row["similarity"]) for row in different_rows]
+    model_metadata = dict(model_metadata)
+    model_metadata["feature_dimensions"] = int(
+        next(iter(observation_embeddings.values())).shape[0]
+    )
     output = {
-        "version": "courtflux_gate_d_v6_reid_preflight_v1",
+        "version": "courtflux_gate_d_v6_reid_preflight_v2",
         "diagnostic_only": True,
         "formal_gate_d_score": False,
         "purpose": (
-            "Measure whether visual appearance embeddings contain enough same-person "
-            "signal on the frozen V6 human identity pairs before runtime integration."
+            "Measure whether visual ReID embeddings contain enough same-person signal on "
+            "the frozen V6 human identity pairs before runtime integration."
         ),
-        "model": {
-            "backend": "torchvision_resnet50_imagenet_v2",
-            "person_reid_specific": False,
-            "input_size": [256, 128],
-            "feature_dimensions": int(next(iter(observation_embeddings.values())).shape[0]),
-            "device": str(device),
-            "note": (
-                "This is a zero-new-dependency baseline. If it does not meet the signal "
-                "test, use a person-ReID-specific OSNet/MSMT17 backend next."
-            ),
-        },
+        "model": model_metadata,
         "sources": {
             "ground_truth": str(gt_path),
             "states": str(states_path),
@@ -571,7 +695,7 @@ def run(args: argparse.Namespace) -> dict[str, Any]:
 
     selected = output["selected_operating_point"]
     print("\nV6 Gate D visual ReID preflight", flush=True)
-    print(f"model: torchvision ResNet50 ImageNet V2 ({device})", flush=True)
+    print(f"model: {model_metadata['backend']} ({device})", flush=True)
     print(
         f"SAME: {selected['same_correct']}/{selected['same_total']} "
         f"= {100.0 * float(selected['same_recall']):.2f}%",
@@ -606,6 +730,11 @@ def _parser() -> argparse.ArgumentParser:
     parser.add_argument("--video", default=str(DEFAULT_VIDEO))
     parser.add_argument("--output", default=None)
     parser.add_argument("--device", default="auto", choices=["auto", "cpu", "mps", "cuda"])
+    parser.add_argument(
+        "--backend",
+        default="osnet_x0_25_msmt17",
+        choices=["osnet_x0_25_msmt17", "resnet50_imagenet"],
+    )
     parser.add_argument("--window-frames", type=int, default=DEFAULT_WINDOW_FRAMES)
     parser.add_argument(
         "--samples-per-observation", type=int, default=DEFAULT_SAMPLES_PER_OBSERVATION
