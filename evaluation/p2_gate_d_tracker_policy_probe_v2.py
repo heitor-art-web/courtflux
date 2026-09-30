@@ -12,6 +12,9 @@ from evaluation import p2_gate_d_tracker_policy_probe as base
 
 
 VERSION = "courtflux_gate_d_v6_tracker_policy_probe_v2"
+# Keep an immutable reference before run() monkeypatches the base diagnostic module.
+# Calling base._score_policy from the wrapper after monkeypatching would recurse forever.
+_BASE_SCORE_POLICY = base._score_policy
 
 
 def _relation_windows(
@@ -121,7 +124,7 @@ def _score_policy_scoped(
             for row in rows
             if str(row.get("left")) in active and str(row.get("right")) in active
         ]
-    result = base._score_policy(policy_name, anchors, scoped, mapped)
+    result = _BASE_SCORE_POLICY(policy_name, anchors, scoped, mapped)
     result["scope_integrity"] = {
         "only_relations_inside_replayed_windows": True,
         "source_pair_counts": {key: len(rows) for key, rows in pairs.items()},
@@ -148,6 +151,7 @@ def run(args: Any) -> dict[str, Any]:
         "tracker_reset_never_occurs_between_endpoints_of_a_scored_handoff_or_control": True,
         "ultralytics_frame_rate_passed_explicitly": True,
         "scoring_restricted_to_relations_inside_replayed_windows": True,
+        "scorer_calls_frozen_pre_monkeypatch_reference": True,
         "runtime_code_modified": False,
     }
     output_path = Path(args.output).expanduser().resolve()
