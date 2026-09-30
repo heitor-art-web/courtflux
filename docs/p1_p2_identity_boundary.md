@@ -75,6 +75,34 @@ game_player_03
 
 without knowing that `game_player_03` is João Silva or that the player wears #7.
 
+### Gate D validation guardrail
+
+Gate D is the P2 check for **anonymous game-level continuity**: “is this the same player inside this game?” It must not silently become a Jersey/P5 identity system in order to pass its thresholds.
+
+Gate D may use evidence such as:
+
+- temporal and spatial continuity;
+- geometry and motion;
+- co-visibility / simultaneity as hard constraints;
+- one-to-one or global multi-player association;
+- team evidence as an auxiliary signal rather than unquestioned identity truth;
+- non-semantic appearance / ReID evidence that is not trained or decoded specifically as jersey-number identity.
+
+Gate D must **not** use the following as resolver inputs, merge keys or identity fingerprints:
+
+- jersey number or `shirt_num`;
+- Jersey OCR output;
+- roster identity or `player_name`;
+- decoded digit predictions or digit posteriors from a jersey-number recognizer;
+- embeddings/features taken from a model trained specifically to predict jersey numbers and then repurposed as a hidden jersey fingerprint;
+- the human jersey label used by validation ground truth.
+
+Human jersey labels are allowed only to define/score frozen SAME/DIFFERENT ground truth. They must not influence the candidate identity selected by Gate D.
+
+Jersey-derived identity evidence belongs to **P5**. If Gate D cannot meet its continuity/false-merge thresholds without Jersey/P5 evidence, Gate D remains open; P5 evidence must not be moved backwards merely to make the Gate D score pass.
+
+Historical V6 soft-jersey experiments may remain as engineering records, but they are not an acceptable final Gate D dependency under this boundary.
+
 ---
 
 ## Jersey and real-world identity
