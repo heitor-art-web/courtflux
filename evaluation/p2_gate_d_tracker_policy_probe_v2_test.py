@@ -8,7 +8,11 @@ if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
 from evaluation import p2_gate_d_tracker_policy_probe as base
-from evaluation.p2_gate_d_tracker_policy_probe_v2 import _relation_windows
+from evaluation.p2_gate_d_tracker_policy_probe_v2 import (
+    _BASE_SCORE_POLICY,
+    _relation_windows,
+    _score_policy_scoped,
+)
 
 
 def main() -> None:
@@ -40,6 +44,19 @@ def main() -> None:
                 if start <= left_ts <= end and start <= right_ts <= end
             ]
             assert len(covering) == 1, (key, pair, windows)
+
+    # Regression for the recursion bug: after monkeypatching base._score_policy to the
+    # scoped wrapper, the wrapper must still call the frozen original scorer.
+    assert _BASE_SCORE_POLICY is base._score_policy
+    original = base._score_policy
+    try:
+        base._score_policy = _score_policy_scoped
+        mapped = {anchor_id: None for anchor_id in anchors}
+        result = _score_policy_scoped("synthetic", anchors, pairs, mapped)
+        assert result["policy"] == "synthetic"
+        assert result["scope_integrity"]["only_relations_inside_replayed_windows"] is True
+    finally:
+        base._score_policy = original
 
     print("p2_gate_d_tracker_policy_probe_v2_test: PASS")
 
