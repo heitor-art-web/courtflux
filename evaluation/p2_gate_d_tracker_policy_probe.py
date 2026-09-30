@@ -3,7 +3,6 @@ from __future__ import annotations
 import argparse
 import json
 import math
-import os
 import sys
 from dataclasses import dataclass
 from pathlib import Path
@@ -114,6 +113,44 @@ def _anchors_by_id(geometry: dict[str, Any]) -> dict[str, dict[str, Any]]:
             continue
         result[anchor_id] = dict(row)
     return result
+
+
+def _validate_geometry_against_gt(
+    gt: dict[str, Any],
+    anchors: dict[str, dict[str, Any]],
+) -> None:
+    mapped = {
+        str(row.get("id") or ""): row
+        for row in (gt.get("mapped_observations") or [])
+        if isinstance(row, dict) and row.get("id")
+    }
+    missing = sorted(set(anchors) - set(mapped))
+    if missing:
+        raise ValueError("Tracker anchor geometry contains IDs absent from frozen human GT: " + ", ".join(missing))
+
+    mismatches: list[str] = []
+    for anchor_id, anchor in anchors.items():
+        gt_row = mapped[anchor_id]
+        endpoint = dict(gt_row.get("endpoint") or {})
+        checks = {
+            "human_player": (str(anchor.get("human_player")), str(gt_row.get("human_player"))),
+            "team_id": (str(anchor.get("team_id")), str(gt_row.get("team_id"))),
+            "frame_id": (int(anchor.get("frame_id", -1)), int(endpoint.get("frame_id", -2))),
+            "baseline_track_id": (
+                int(anchor.get("baseline_track_id", -1)),
+                int(endpoint.get("track_id", -2)),
+            ),
+        }
+        for field, (geometry_value, gt_value) in checks.items():
+            if geometry_value != gt_value:
+                mismatches.append(
+                    f"{anchor_id}.{field}: geometry={geometry_value!r} gt={gt_value!r}"
+                )
+    if mismatches:
+        raise ValueError(
+            "Tracker anchor geometry no longer matches frozen human GT: "
+            + "; ".join(mismatches)
+        )
 
 
 def _derive_probe_pairs(
@@ -346,14 +383,9 @@ def _score_policy(
     diff_resolved, diff_correct, diff_false_same = relation_rows(pairs["nearby_different"], False)
     same_resolved, same_correct, _ = relation_rows(pairs["nearby_same"], True)
 
-    required_anchor_ids = sorted(
-        {
-            str(pair[side])
-            for key in ("handoffs", "stable_controls")
-            for pair in pairs[key]
-            for side in ("left", "right")
-        }
-    )
+    # Every anchor inside the short probe windows participates in the nearby-pair audit,
+    # so coverage is measured over the entire mapped set, not just handoff/control endpoints.
+    required_anchor_ids = sorted(mapped)
     anchor_resolved = sum(1 for key in required_anchor_ids if mapped.get(key) is not None)
 
     return {
@@ -408,6 +440,7 @@ def run(args: argparse.Namespace) -> dict[str, Any]:
     geometry = _load_json(Path(args.geometry).expanduser().resolve())
     v6 = _load_json(DEFAULT_V6)
     anchors = _anchors_by_id(geometry)
+    _validate_geometry_against_gt(gt, anchors)
     pairs = _derive_probe_pairs(anchors, max_gap_sec=float(args.max_gap_sec))
     windows = _merge_windows(anchors, pairs, pad_sec=float(args.pad_sec))
 
@@ -476,6 +509,9 @@ def run(args: argparse.Namespace) -> dict[str, Any]:
                 if not ok or frame is None:
                     break
                 source_sec = float(cap.get(cv2.CAP_PROP_POS_MSEC) or 0.0) / 1000.0
+                if source_sec <= 0.0:
+                    source_frame = max(0.0, float(cap.get(cv2.CAP_PROP_POS_FRAMES) or 1.0) - 1.0)
+                    source_sec = source_frame / max(1.0, actual_fps)
                 if source_sec + 1e-6 < float(window_start):
                     continue
                 if source_sec > float(window_end) + 1.0 / max(1.0, actual_fps):
@@ -589,7 +625,8 @@ def run(args: argparse.Namespace) -> dict[str, Any]:
             f"anchors={cov['resolved']}/{cov['total']} "
             f"handoff_split={hand['correct']}/{hand['total']} "
             f"control_same={ctrl['correct']}/{ctrl['total']} "
-            f"nearby_false_merges={fm['false_merges']}/{fm['total']} "
+            f"nearby_false_merges={fm['false_merges']}/{fm['resolved']} "
+            f"(resolved; total={fm['total']}) "
             f"promising={'YES' if row['promising_for_development_followup'] else 'NO'}",
             flush=True,
         )
