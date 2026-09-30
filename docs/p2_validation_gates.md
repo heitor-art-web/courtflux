@@ -175,6 +175,24 @@ Required contract on reviewed same-player GT pairs/episodes:
 
 Track IDs may change. The evaluated identity is the stable game-player entity, not a raw tracker ID.
 
+### Gate D identity boundary
+
+Gate D is deliberately **anonymous and game-local**. It answers whether two observations belong to the same player inside the game; it does not answer who that real player is.
+
+The following are prohibited as Gate-D resolver/association inputs and may not be reintroduced as an indirect "fingerprint":
+
+- jersey number / `shirt_num`;
+- Jersey OCR output or digit posteriors;
+- roster or `player_name` context;
+- embeddings/features from a model trained specifically to recognize jersey numbers;
+- human jersey labels as runtime identity evidence.
+
+Human jersey labels may be used only to construct and score reviewed SAME/DIFFERENT ground truth after the anonymous association has already been produced. Jersey/roster/real-world identity belongs to **P5 — Persistent Player Identity / Jersey Evidence**.
+
+If Gate D cannot meet its thresholds without P5 evidence, Gate D remains open. P5 evidence must not be moved backward into P2 merely to make Gate D pass.
+
+The detailed phase boundary is defined in `docs/p1_p2_identity_boundary.md`.
+
 ---
 
 ## Final P2 Exit Gate
