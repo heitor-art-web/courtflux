@@ -1,0 +1,43 @@
+{
+  "version": "courtflux_gate_d_v6_tracker_anchor_geometry_v1",
+  "video": {
+    "youtube_id": "VLZugJeVOSU",
+    "source_window_sec": [720.0, 908.0],
+    "fps": 60.0
+  },
+  "provenance": {
+    "human_gt": "evaluation/ground_truth/gate_d_v6_human_ball_carrier_gt_v1.json",
+    "source_states_file": "p2_states(20260929-141407).jsonl",
+    "freeze_policy": "bbox copied from team_predictions for the already human-mapped raw track at the frozen endpoint frame; game_player_id not used"
+  },
+  "anti_leakage": {
+    "purpose": "tracker-policy evaluation geometry only",
+    "human_identity_may_score_candidate_tracker_at_frozen_anchors": true,
+    "do_not_use_human_identity_to_choose_candidate_box": true,
+    "candidate_box_mapping": "best spatial overlap with frozen anchor bbox at the same source time/frame"
+  },
+  "anchors": [
+    {"id":"V6-O01","human_player":"A4","team_id":"team_a","frame_id":153,"timestamp_sec":722.55,"baseline_track_id":18,"box":[264.0,407.0,487.0,938.0],"detector_confidence":0.922946},
+    {"id":"V6-O02","human_player":"A7","team_id":"team_a","frame_id":270,"timestamp_sec":724.5,"baseline_track_id":29,"box":[895.0,237.0,1659.0,943.0],"detector_confidence":0.794607},
+    {"id":"V6-O03","human_player":"A23","team_id":"team_a","frame_id":840,"timestamp_sec":734.0,"baseline_track_id":34,"box":[823.0,378.0,906.0,504.0],"detector_confidence":0.90704},
+    {"id":"V6-O04","human_player":"A23","team_id":"team_a","frame_id":1140,"timestamp_sec":739.0,"baseline_track_id":61,"box":[1087.0,397.0,1202.0,558.0],"detector_confidence":0.898606},
+    {"id":"V6-O05","human_player":"B9","team_id":"team_b","frame_id":1329,"timestamp_sec":742.15,"baseline_track_id":45,"box":[1451.0,448.0,1545.0,701.0],"detector_confidence":0.92028},
+    {"id":"V6-O06","human_player":"B27","team_id":"team_b","frame_id":1560,"timestamp_sec":746.0,"baseline_track_id":61,"box":[1344.0,515.0,1487.0,861.0],"detector_confidence":0.927938},
+    {"id":"V6-O07","human_player":"B9","team_id":"team_b","frame_id":1740,"timestamp_sec":749.0,"baseline_track_id":45,"box":[1785.0,482.0,1865.0,761.0],"detector_confidence":0.911055},
+    {"id":"V6-O08","human_player":"B8","team_id":"team_b","frame_id":1921,"timestamp_sec":752.0166666666667,"baseline_track_id":114,"box":[1312.0,709.0,1465.0,931.0],"detector_confidence":0.932184},
+    {"id":"V6-O09","human_player":"B8","team_id":"team_b","frame_id":2142,"timestamp_sec":755.7,"baseline_track_id":75,"box":[640.0,299.0,740.0,579.0],"detector_confidence":0.677953},
+    {"id":"V6-O10","human_player":"B8","team_id":"team_b","frame_id":3796,"timestamp_sec":783.2666666666667,"baseline_track_id":174,"box":[1342.0,566.0,1504.0,932.0],"detector_confidence":0.918615},
+    {"id":"V6-O11","human_player":"A7","team_id":"team_a","frame_id":4440,"timestamp_sec":794.0,"baseline_track_id":199,"box":[745.0,256.0,857.0,442.0],"detector_confidence":0.913389},
+    {"id":"V6-O12","human_player":"A23","team_id":"team_a","frame_id":4740,"timestamp_sec":799.0,"baseline_track_id":225,"box":[257.0,346.0,379.0,550.0],"detector_confidence":0.93308},
+    {"id":"V6-O13","human_player":"B9","team_id":"team_b","frame_id":6360,"timestamp_sec":826.0,"baseline_track_id":306,"box":[1590.0,309.0,1670.0,490.0],"detector_confidence":0.90441},
+    {"id":"V6-O14","human_player":"B27","team_id":"team_b","frame_id":6600,"timestamp_sec":830.0,"baseline_track_id":307,"box":[1525.0,578.0,1784.0,878.0],"detector_confidence":0.890287},
+    {"id":"V6-O15","human_player":"B8","team_id":"team_b","frame_id":6983,"timestamp_sec":836.3833333333333,"baseline_track_id":332,"box":[720.0,314.0,819.0,601.0],"detector_confidence":0.777111},
+    {"id":"V6-O16","human_player":"A23","team_id":"team_a","frame_id":7878,"timestamp_sec":851.3,"baseline_track_id":360,"box":[476.0,356.0,559.0,542.0],"detector_confidence":0.913339},
+    {"id":"V6-O17","human_player":"A7","team_id":"team_a","frame_id":8220,"timestamp_sec":857.0,"baseline_track_id":360,"box":[586.0,641.0,756.0,920.0],"detector_confidence":0.94244},
+    {"id":"V6-O18","human_player":"A23","team_id":"team_a","frame_id":8387,"timestamp_sec":859.7833333333333,"baseline_track_id":360,"box":[122.0,513.0,222.0,752.0],"detector_confidence":0.933627},
+    {"id":"V6-O19","human_player":"B9","team_id":"team_b","frame_id":8826,"timestamp_sec":867.1,"baseline_track_id":411,"box":[1282.0,585.0,1485.0,912.0],"detector_confidence":0.927108},
+    {"id":"V6-O20","human_player":"B27","team_id":"team_b","frame_id":10500,"timestamp_sec":895.0,"baseline_track_id":469,"box":[1243.0,453.0,1341.0,685.0],"detector_confidence":0.926133},
+    {"id":"V6-O21","human_player":"B27","team_id":"team_b","frame_id":10840,"timestamp_sec":900.6666666666666,"baseline_track_id":463,"box":[982.0,366.0,1043.0,568.0],"detector_confidence":0.880857},
+    {"id":"V6-O22","human_player":"A4","team_id":"team_a","frame_id":11191,"timestamp_sec":906.5166666666667,"baseline_track_id":532,"box":[1329.0,319.0,1409.0,576.0],"detector_confidence":0.827877}
+  ]
+}
