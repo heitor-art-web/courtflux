@@ -4,6 +4,8 @@ import argparse
 import json
 import math
 import re
+import subprocess
+import sys
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -285,9 +287,11 @@ def _write_contact_sheet(candidate: dict[str, Any], video_path: Path, output: Pa
     if left is None or right is None:
         return False
     target_h = 260
+
     def resize(img):
         scale = target_h / max(1, img.shape[0])
         return cv2.resize(img, (max(1, int(round(img.shape[1] * scale))), target_h))
+
     left = resize(left)
     right = resize(right)
     gap = np.zeros((target_h, 24, 3), dtype=np.uint8)
@@ -296,7 +300,66 @@ def _write_contact_sheet(candidate: dict[str, Any], video_path: Path, output: Pa
     return bool(cv2.imwrite(str(output), sheet))
 
 
-def run(output_dir: Path) -> dict[str, Any]:
+def _generate_missing_states(clip: str, gt: dict[str, Any], *, device: str) -> Path:
+    video = gt.get("video") or {}
+    source = str(video.get("source") or "")
+    start = float(video.get("start_time_sec", 0.0) or 0.0)
+    end = float(video.get("end_time_sec", 0.0) or 0.0)
+    if not source or end <= start:
+        raise RuntimeError(f"{clip.upper()}: invalid video source/window in GT")
+
+    vid = _video_id(source)
+    local_video = PROJECT_ROOT / "data" / f"{vid}.mp4" if vid else None
+    video_arg = str(local_video) if local_video is not None and local_video.exists() else source
+    match_config = str(
+        (gt.get("baseline") or {}).get("match_config")
+        or "evaluation/match_configs/unknown.json"
+    )
+    command = [
+        sys.executable,
+        str(PROJECT_ROOT / "evaluation" / "p2_real_video_probe.py"),
+        "--video",
+        video_arg,
+        "--start",
+        str(start),
+        "--end",
+        str(end),
+        "--match-config",
+        match_config,
+        "--device",
+        device,
+        "--no-jersey",
+    ]
+    print(
+        f"[Gate D dev review] {clip.upper()}: baseline states missing; generating Jersey-OFF development states",
+        flush=True,
+    )
+    process = subprocess.Popen(
+        command,
+        cwd=str(PROJECT_ROOT),
+        stdout=subprocess.PIPE,
+        stderr=subprocess.STDOUT,
+        text=True,
+        bufsize=1,
+    )
+    states_path: Path | None = None
+    assert process.stdout is not None
+    for line in process.stdout:
+        print(f"[{clip.upper()} probe] {line}", end="", flush=True)
+        marker = "[P2_STATES_FILE]"
+        if marker in line:
+            value = line.split(marker, 1)[1].strip()
+            if value:
+                states_path = Path(value).expanduser().resolve()
+    return_code = process.wait()
+    if return_code != 0:
+        raise RuntimeError(f"{clip.upper()}: p2_real_video_probe failed with exit code {return_code}")
+    if states_path is None or not states_path.exists():
+        raise RuntimeError(f"{clip.upper()}: probe completed but no P2_STATES_FILE was produced")
+    return states_path
+
+
+def run(output_dir: Path, *, generate_missing: bool = False, device: str = "mps") -> dict[str, Any]:
     output_dir.mkdir(parents=True, exist_ok=True)
     all_candidates: list[dict[str, Any]] = []
     clip_rows: list[dict[str, Any]] = []
@@ -305,11 +368,25 @@ def run(output_dir: Path) -> dict[str, Any]:
         gt_path = PROJECT_ROOT / "evaluation" / "ground_truth" / f"{clip}.json"
         gt = _load_json(gt_path)
         baseline = gt.get("baseline") or {}
-        run_id = str(baseline.get("run_id") or "")
-        states = PROJECT_ROOT / "evaluation" / "runs" / run_id / "p2_states.jsonl"
-        if not run_id or not states.exists():
-            clip_rows.append({"clip": clip, "status": "missing_states", "states": str(states)})
-            continue
+        baseline_run_id = str(baseline.get("run_id") or "")
+        states = PROJECT_ROOT / "evaluation" / "runs" / baseline_run_id / "p2_states.jsonl"
+        states_source = "historical_baseline"
+        if not baseline_run_id or not states.exists():
+            if not generate_missing:
+                clip_rows.append({"clip": clip, "status": "missing_states", "states": str(states)})
+                continue
+            try:
+                states = _generate_missing_states(clip, gt, device=device)
+            except Exception as exc:
+                clip_rows.append({
+                    "clip": clip,
+                    "status": "generation_failed",
+                    "error": str(exc),
+                    "states": str(states),
+                })
+                continue
+            states_source = "generated_missing_baseline"
+
         video = gt.get("video") or {}
         fps = float(video.get("fps", 30.0) or 30.0)
         source = str(video.get("source") or "")
@@ -331,8 +408,10 @@ def run(output_dir: Path) -> dict[str, Any]:
         clip_rows.append({
             "clip": clip,
             "status": "ok",
-            "run_id": run_id,
+            "baseline_run_id": baseline_run_id,
+            "states_source": states_source,
             "states": str(states),
+            "generated_run_id": states.parent.name if states_source == "generated_missing_baseline" else None,
             "video": None if video_path is None else str(video_path),
             "video_found": bool(video_path is not None and video_path.exists()),
             "candidate_count": len(candidates),
@@ -340,13 +419,14 @@ def run(output_dir: Path) -> dict[str, Any]:
         })
 
     pack = {
-        "version": "courtflux_gate_d_development_review_pack_v1",
+        "version": "courtflux_gate_d_development_review_pack_v2",
         "purpose": "Human SAME/DIFFERENT review candidates for Gate D development on V1/V3/V4/V5 only.",
         "boundary": {
             "v6_used": False,
             "v7_used": False,
             "jersey_number_used": False,
             "jersey_ocr_used": False,
+            "generated_runs_force_jersey_off": True,
             "game_player_id_used_for_candidate_selection": False,
             "human_label_is_required_before_scoring": True,
         },
@@ -398,8 +478,23 @@ def main() -> None:
         type=Path,
         default=PROJECT_ROOT / "evaluation" / "runs" / "gate_d_development_review_pack",
     )
+    parser.add_argument(
+        "--generate-missing",
+        action="store_true",
+        help="Run Jersey-OFF V1/V3/V4/V5 probes when historical p2_states are not present locally.",
+    )
+    parser.add_argument(
+        "--device",
+        choices=("mps", "cpu", "cuda"),
+        default="mps",
+        help="Device used only by --generate-missing probes.",
+    )
     args = parser.parse_args()
-    run(args.output.expanduser().resolve())
+    run(
+        args.output.expanduser().resolve(),
+        generate_missing=bool(args.generate_missing),
+        device=str(args.device),
+    )
 
 
 if __name__ == "__main__":
