@@ -12,7 +12,13 @@ from typing import Any
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 DEVELOPMENT_CLIPS = ("v1", "v3", "v4", "v5")
-MAX_PER_TYPE_PER_CLIP = 4
+MAX_TOTAL_PER_CLIP = 15
+TYPE_LIMITS = {
+    "raw_track_continuity": 2,
+    "raw_track_switch": 3,
+    "fragment_reappearance": 6,
+    "covisible_negative": 4,
+}
 
 
 @dataclass(frozen=True, slots=True)
@@ -63,9 +69,22 @@ def _norm_distance(a: Obs, b: Obs) -> float:
     return _distance(a, b) / max(1.0, (a.height + b.height) * 0.5)
 
 
-def _read_states(path: Path) -> tuple[dict[int, list[Obs]], dict[int, list[Obs]]]:
+def _read_states(
+    path: Path,
+) -> tuple[dict[int, list[Obs]], dict[int, list[Obs]], dict[str, int]]:
     by_track: dict[int, list[Obs]] = {}
     by_frame: dict[int, list[Obs]] = {}
+    stats = {
+        "state_rows": 0,
+        "frames_with_team_predictions": 0,
+        "prediction_rows": 0,
+        "filtered_identity_ineligible": 0,
+        "filtered_off_court": 0,
+        "filtered_invalid_track": 0,
+        "filtered_invalid_box": 0,
+        "accepted_observations": 0,
+        "team_labeled_observations": 0,
+    }
     with path.open("r", encoding="utf-8") as handle:
         for raw in handle:
             text = raw.strip()
@@ -74,25 +93,36 @@ def _read_states(path: Path) -> tuple[dict[int, list[Obs]], dict[int, list[Obs]]
             row = json.loads(text)
             if not isinstance(row, dict):
                 continue
+            stats["state_rows"] += 1
             try:
                 frame_id = int(row.get("frame_id", -1))
                 timestamp_sec = float(row.get("timestamp_sec", 0.0) or 0.0)
             except (TypeError, ValueError):
                 continue
             predictions = row.get("team_predictions") or []
+            if predictions:
+                stats["frames_with_team_predictions"] += 1
             for pred in predictions:
                 if not isinstance(pred, dict):
                     continue
-                if pred.get("identity_eligible") is False or pred.get("active_on_court") is False:
+                stats["prediction_rows"] += 1
+                if pred.get("identity_eligible") is False:
+                    stats["filtered_identity_ineligible"] += 1
+                    continue
+                if pred.get("active_on_court") is False:
+                    stats["filtered_off_court"] += 1
                     continue
                 try:
                     track_id = int(pred.get("track_id", -1))
                 except (TypeError, ValueError):
+                    stats["filtered_invalid_track"] += 1
                     continue
                 if track_id < 0:
+                    stats["filtered_invalid_track"] += 1
                     continue
                 box = _valid_box(pred.get("box"))
                 if box is None:
+                    stats["filtered_invalid_box"] += 1
                     continue
                 team = pred.get("team")
                 try:
@@ -109,12 +139,24 @@ def _read_states(path: Path) -> tuple[dict[int, list[Obs]], dict[int, list[Obs]]
                 )
                 by_track.setdefault(track_id, []).append(obs)
                 by_frame.setdefault(frame_id, []).append(obs)
+                stats["accepted_observations"] += 1
+                if obs.team:
+                    stats["team_labeled_observations"] += 1
     for rows in by_track.values():
         rows.sort(key=lambda x: x.frame_id)
-    return by_track, by_frame
+    stats["unique_tracks"] = len(by_track)
+    stats["frames_with_observations"] = len(by_frame)
+    return by_track, by_frame, stats
 
 
-def _candidate_row(kind: str, clip: str, left: Obs, right: Obs, score: float, note: str) -> dict[str, Any]:
+def _candidate_row(
+    kind: str,
+    clip: str,
+    left: Obs,
+    right: Obs,
+    score: float,
+    note: str,
+) -> dict[str, Any]:
     return {
         "id": f"{clip.upper()}-{kind}-{left.track_id}-{right.track_id}-{left.frame_id}-{right.frame_id}",
         "clip": clip,
@@ -143,39 +185,67 @@ def _candidate_row(kind: str, clip: str, left: Obs, right: Obs, score: float, no
     }
 
 
-def _select_candidates(clip: str, by_track: dict[int, list[Obs]], by_frame: dict[int, list[Obs]], fps: float) -> list[dict[str, Any]]:
+def _select_candidates(
+    clip: str,
+    by_track: dict[int, list[Obs]],
+    by_frame: dict[int, list[Obs]],
+    fps: float,
+) -> tuple[list[dict[str, Any]], dict[str, int]]:
+    continuity_rows: list[dict[str, Any]] = []
     switch_rows: list[dict[str, Any]] = []
     fragment_rows: list[dict[str, Any]] = []
     covisible_rows: list[dict[str, Any]] = []
 
-    # 1) Same raw track showing a strong team flip or a large short-horizon jump.
-    for track_id, rows in by_track.items():
-        for a, b in zip(rows, rows[1:]):
-            gap = b.frame_id - a.frame_id
-            if gap <= 0 or gap > max(6, int(round(fps * 0.35))):
-                continue
-            nd = _norm_distance(a, b)
-            strong_team_flip = bool(
-                a.team and b.team and a.team != b.team
-                and a.team_confidence >= 0.85 and b.team_confidence >= 0.85
-            )
-            if strong_team_flip or nd >= 0.75:
-                score = (2.0 if strong_team_flip else 0.0) + nd
-                switch_rows.append(_candidate_row(
-                    "raw_track_switch",
-                    clip,
-                    a,
-                    b,
-                    score,
-                    "Same raw track changed strongly over a short interval; review for hidden identity handoff.",
-                ))
-
-    # Track endpoints for fragmentation/reappearance proposals.
-    endpoints = []
-    for track_id, rows in by_track.items():
+    # Long same-raw-track spans are useful contamination probes: a raw ID may hide a
+    # handoff even if no team evidence exists. Human review decides SAME / DIFFERENT.
+    min_span = max(1, int(round(fps * 1.5)))
+    for rows in by_track.values():
         if len(rows) < 2:
             continue
-        endpoints.append((track_id, rows[0], rows[-1]))
+        left = rows[0]
+        right = rows[-1]
+        span = right.frame_id - left.frame_id
+        if span < min_span:
+            continue
+        nd = _norm_distance(left, right)
+        score = min(6.0, span / max(fps, 1.0)) + min(2.0, nd) * 0.15
+        continuity_rows.append(
+            _candidate_row(
+                "raw_track_continuity",
+                clip,
+                left,
+                right,
+                score,
+                "Same raw track persists over time. Review whether it stayed on one human or contains an identity handoff.",
+            )
+        )
+
+    # Suspicious short-horizon geometric jumps within one raw track. Team-independent.
+    for rows in by_track.values():
+        for left, right in zip(rows, rows[1:]):
+            gap = right.frame_id - left.frame_id
+            if gap <= 0 or gap > max(6, int(round(fps * 0.40))):
+                continue
+            nd = _norm_distance(left, right)
+            if nd < 0.60:
+                continue
+            switch_rows.append(
+                _candidate_row(
+                    "raw_track_switch",
+                    clip,
+                    left,
+                    right,
+                    nd,
+                    "Same raw track makes a large short-horizon geometric jump. Review for a hidden identity handoff.",
+                )
+            )
+
+    # Different raw-track endpoints that could be the same person after fragmentation.
+    # Deliberately team-agnostic because neutral development clips commonly have team=None.
+    endpoints: list[tuple[int, Obs, Obs]] = []
+    for track_id, rows in by_track.items():
+        if len(rows) >= 2:
+            endpoints.append((track_id, rows[0], rows[-1]))
 
     max_gap = int(round(fps * 8.0))
     for left_id, _left_first, left_last in endpoints:
@@ -185,69 +255,79 @@ def _select_candidates(clip: str, by_track: dict[int, list[Obs]], by_frame: dict
             gap = right_first.frame_id - left_last.frame_id
             if gap <= 0 or gap > max_gap:
                 continue
-            same_team = bool(
-                left_last.team and right_first.team
-                and left_last.team == right_first.team
-                and left_last.team_confidence >= 0.60
-                and right_first.team_confidence >= 0.60
-            )
-            if not same_team:
-                continue
             nd = _norm_distance(left_last, right_first)
-            if nd > 2.5:
+            if nd > 2.75:
                 continue
-            score = (1.0 / max(0.15, gap / max(fps, 1.0))) + (1.0 / max(0.25, nd + 0.15))
-            fragment_rows.append(_candidate_row(
-                "fragment_reappearance",
-                clip,
-                left_last,
-                right_first,
-                score,
-                "Different raw tracks from the same team with a plausible temporal/spatial handoff; review whether this is the same human after fragmentation.",
-            ))
+            seconds = gap / max(fps, 1.0)
+            score = (1.0 / max(0.15, seconds)) + (1.0 / max(0.25, nd + 0.15))
+            fragment_rows.append(
+                _candidate_row(
+                    "fragment_reappearance",
+                    clip,
+                    left_last,
+                    right_first,
+                    score,
+                    "Different raw tracks have a plausible temporal/spatial handoff. Review whether this is the same human after fragmentation.",
+                )
+            )
 
-    # 3) Co-visible same-team negatives: definitely DIFFERENT if both boxes are real players.
-    stride = max(1, int(round(fps * 1.0)))
+    # Co-visible distinct raw tracks provide strong DIFFERENT candidates without team.
+    # Sample about once per second to keep the pack compact and visually diverse.
+    stride = max(1, int(round(fps)))
     for frame_id in sorted(by_frame)[::stride]:
         rows = by_frame[frame_id]
-        for i, a in enumerate(rows):
-            for b in rows[i + 1 :]:
-                if not a.team or a.team != b.team:
+        for index, left in enumerate(rows):
+            for right in rows[index + 1 :]:
+                if left.track_id == right.track_id:
                     continue
-                if a.team_confidence < 0.65 or b.team_confidence < 0.65:
+                nd = _norm_distance(left, right)
+                if nd < 0.40 or nd > 5.0:
                     continue
-                nd = _norm_distance(a, b)
-                if nd < 0.45 or nd > 4.0:
-                    continue
-                score = min(4.0, nd)
-                covisible_rows.append(_candidate_row(
-                    "covisible_negative",
-                    clip,
-                    a,
-                    b,
-                    score,
-                    "Two same-team tracks are visible in the same frame; useful DIFFERENT cannot-link ground truth.",
-                ))
+                covisible_rows.append(
+                    _candidate_row(
+                        "covisible_negative",
+                        clip,
+                        left,
+                        right,
+                        min(5.0, nd),
+                        "Two distinct raw tracks are visible in the same frame. Review as a candidate DIFFERENT cannot-link example.",
+                    )
+                )
+
+    pools = {
+        "raw_track_continuity": len(continuity_rows),
+        "raw_track_switch": len(switch_rows),
+        "fragment_reappearance": len(fragment_rows),
+        "covisible_negative": len(covisible_rows),
+    }
 
     def top_unique(rows: list[dict[str, Any]], n: int) -> list[dict[str, Any]]:
-        rows = sorted(rows, key=lambda r: (-float(r["priority_score"]), str(r["id"])))
+        ordered = sorted(rows, key=lambda row: (-float(row["priority_score"]), str(row["id"])))
         out: list[dict[str, Any]] = []
-        used_tracks: set[tuple[int, int]] = set()
-        for row in rows:
-            pair = tuple(sorted((int(row["left"]["track_id"]), int(row["right"]["track_id"]))))
-            if pair in used_tracks:
+        used: set[tuple[Any, ...]] = set()
+        for row in ordered:
+            kind = str(row["kind"])
+            left = row["left"]
+            right = row["right"]
+            if kind == "raw_track_continuity":
+                key = (kind, int(left["track_id"]))
+            else:
+                key = (kind,) + tuple(sorted((int(left["track_id"]), int(right["track_id"]))))
+            if key in used:
                 continue
-            used_tracks.add(pair)
+            used.add(key)
             out.append(row)
             if len(out) >= n:
                 break
         return out
 
-    return (
-        top_unique(switch_rows, MAX_PER_TYPE_PER_CLIP)
-        + top_unique(fragment_rows, MAX_PER_TYPE_PER_CLIP)
-        + top_unique(covisible_rows, MAX_PER_TYPE_PER_CLIP)
+    selected = (
+        top_unique(fragment_rows, TYPE_LIMITS["fragment_reappearance"])
+        + top_unique(covisible_rows, TYPE_LIMITS["covisible_negative"])
+        + top_unique(switch_rows, TYPE_LIMITS["raw_track_switch"])
+        + top_unique(continuity_rows, TYPE_LIMITS["raw_track_continuity"])
     )
+    return selected[:MAX_TOTAL_PER_CLIP], pools
 
 
 def _crop_from_video(video_path: Path, timestamp_sec: float, box: list[float]):
@@ -359,8 +439,31 @@ def _generate_missing_states(clip: str, gt: dict[str, Any], *, device: str) -> P
     return states_path
 
 
+def _previous_states(output_dir: Path) -> dict[str, Path]:
+    pack_path = output_dir / "review_pack.json"
+    if not pack_path.exists():
+        return {}
+    try:
+        pack = _load_json(pack_path)
+    except Exception:
+        return {}
+    result: dict[str, Path] = {}
+    for row in pack.get("clips", []) or []:
+        if not isinstance(row, dict):
+            continue
+        clip = str(row.get("clip") or "").lower()
+        raw_path = row.get("states")
+        if clip not in DEVELOPMENT_CLIPS or not raw_path:
+            continue
+        path = Path(str(raw_path)).expanduser()
+        if path.exists():
+            result[clip] = path.resolve()
+    return result
+
+
 def run(output_dir: Path, *, generate_missing: bool = False, device: str = "mps") -> dict[str, Any]:
     output_dir.mkdir(parents=True, exist_ok=True)
+    reusable_states = _previous_states(output_dir)
     all_candidates: list[dict[str, Any]] = []
     clip_rows: list[dict[str, Any]] = []
 
@@ -372,20 +475,25 @@ def run(output_dir: Path, *, generate_missing: bool = False, device: str = "mps"
         states = PROJECT_ROOT / "evaluation" / "runs" / baseline_run_id / "p2_states.jsonl"
         states_source = "historical_baseline"
         if not baseline_run_id or not states.exists():
-            if not generate_missing:
+            reused = reusable_states.get(clip)
+            if reused is not None and reused.exists():
+                states = reused
+                states_source = "reused_previous_review_pack"
+            elif not generate_missing:
                 clip_rows.append({"clip": clip, "status": "missing_states", "states": str(states)})
                 continue
-            try:
-                states = _generate_missing_states(clip, gt, device=device)
-            except Exception as exc:
-                clip_rows.append({
-                    "clip": clip,
-                    "status": "generation_failed",
-                    "error": str(exc),
-                    "states": str(states),
-                })
-                continue
-            states_source = "generated_missing_baseline"
+            else:
+                try:
+                    states = _generate_missing_states(clip, gt, device=device)
+                except Exception as exc:
+                    clip_rows.append({
+                        "clip": clip,
+                        "status": "generation_failed",
+                        "error": str(exc),
+                        "states": str(states),
+                    })
+                    continue
+                states_source = "generated_missing_baseline"
 
         video = gt.get("video") or {}
         fps = float(video.get("fps", 30.0) or 30.0)
@@ -394,8 +502,8 @@ def run(output_dir: Path, *, generate_missing: bool = False, device: str = "mps"
         video_path = PROJECT_ROOT / "data" / f"{vid}.mp4" if vid else None
 
         print(f"[Gate D dev review] {clip.upper()}: reading {states}", flush=True)
-        by_track, by_frame = _read_states(states)
-        candidates = _select_candidates(clip, by_track, by_frame, fps)
+        by_track, by_frame, read_stats = _read_states(states)
+        candidates, candidate_pools = _select_candidates(clip, by_track, by_frame, fps)
         clip_dir = output_dir / clip
         images = 0
         if video_path is not None and video_path.exists():
@@ -416,10 +524,12 @@ def run(output_dir: Path, *, generate_missing: bool = False, device: str = "mps"
             "video_found": bool(video_path is not None and video_path.exists()),
             "candidate_count": len(candidates),
             "contact_sheets": images,
+            "state_diagnostics": read_stats,
+            "candidate_pools_before_dedup": candidate_pools,
         })
 
     pack = {
-        "version": "courtflux_gate_d_development_review_pack_v2",
+        "version": "courtflux_gate_d_development_review_pack_v3",
         "purpose": "Human SAME/DIFFERENT review candidates for Gate D development on V1/V3/V4/V5 only.",
         "boundary": {
             "v6_used": False,
@@ -428,6 +538,7 @@ def run(output_dir: Path, *, generate_missing: bool = False, device: str = "mps"
             "jersey_ocr_used": False,
             "generated_runs_force_jersey_off": True,
             "game_player_id_used_for_candidate_selection": False,
+            "team_required_for_candidate_selection": False,
             "human_label_is_required_before_scoring": True,
         },
         "clips": clip_rows,
@@ -441,6 +552,7 @@ def run(output_dir: Path, *, generate_missing: bool = False, device: str = "mps"
         "",
         "Review only V1/V3/V4/V5. For each candidate write `SAME`, `DIFFERENT`, or `UNKNOWN`.",
         "Do not use jersey number as the reason for the identity decision.",
+        "Team labels are not required for candidate selection.",
         "",
     ]
     for candidate in all_candidates:
@@ -461,9 +573,15 @@ def run(output_dir: Path, *, generate_missing: bool = False, device: str = "mps"
 
     print("\nGate D development review pack", flush=True)
     for row in clip_rows:
+        diagnostics = row.get("state_diagnostics") or {}
+        pools = row.get("candidate_pools_before_dedup") or {}
         print(
             f"{str(row['clip']).upper()}: status={row['status']} "
-            f"candidates={row.get('candidate_count', 0)} images={row.get('contact_sheets', 0)}",
+            f"candidates={row.get('candidate_count', 0)} images={row.get('contact_sheets', 0)} "
+            f"obs={diagnostics.get('accepted_observations', 0)} "
+            f"tracks={diagnostics.get('unique_tracks', 0)} "
+            f"team_labeled={diagnostics.get('team_labeled_observations', 0)} "
+            f"pools={pools}",
             flush=True,
         )
     print(f"review json: {json_path}", flush=True)
@@ -481,7 +599,10 @@ def main() -> None:
     parser.add_argument(
         "--generate-missing",
         action="store_true",
-        help="Run Jersey-OFF V1/V3/V4/V5 probes when historical p2_states are not present locally.",
+        help=(
+            "Run Jersey-OFF V1/V3/V4/V5 probes only when neither historical states nor "
+            "states recorded by the previous review_pack.json are available locally."
+        ),
     )
     parser.add_argument(
         "--device",
